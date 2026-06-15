@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<presets>
+  <preset buttonNumber="1">
+    <containerArt></containerArt>
+    <contentItemType>stationurl</contentItemType>
+    <createdOn>2026-06-14T10:19:03.000+00:00</createdOn>
+    <location>/v1/playback/station/s17523</location>
+    <name>NPO Radio 1</name>
+    <source id="10004" type="Audio">
+      <createdOn>2017-07-20T16:43:48.000+00:00</createdOn>
+      <credential type="token">eyJzZXJpYWwiOiJ0dW5laW4ifQ==</credential>
+      <name></name>
+      <sourceproviderid>25</sourceproviderid>
+      <sourcename></sourcename>
+      <sourceSettings></sourceSettings>
+      <updatedOn>2017-07-20T16:43:48.000+00:00</updatedOn>
+      <username></username>
+    </source>
+    <updatedOn>2026-06-14T10:19:03.000+00:00</updatedOn>
+    <username>NPO Radio 1</username>
+  </preset>
+  <preset buttonNumber="2">
+    <containerArt></containerArt>
+    <contentItemType>stationurl</contentItemType>
+    <createdOn>2026-06-14T10:19:02.000+00:00</createdOn>
+    <location>/v1/playback/station/s9483</location>
+    <name>NPO Radio 2</name>
+    <source id="10004" type="Audio">
+      <createdOn>2017-07-20T16:43:48.000+00:00</createdOn>
+      <credential type="token">eyJzZXJpYWwiOiJ0dW5laW4ifQ==</credential>
+      <name></name>
+      <sourceproviderid>25</sourceproviderid>
+      <sourcename></sourcename>
+      <sourceSettings></sourceSettings>
+      <updatedOn>2017-07-20T16:43:48.000+00:00</updatedOn>
+      <username></username>
+    </source>
+    <updatedOn>2026-06-14T10:19:02.000+00:00</updatedOn>
+    <username>NPO Radio 2</username>
+  </preset>
+  <preset buttonNumber="3">
+    <containerArt></containerArt>
+    <contentItemType>stationurl</contentItemType>
+    <createdOn>2026-06-14T10:19:03.000+00:00</createdOn>
+    <location>/v1/playback/station/s6712</location>
+    <name>Radio 538</name>
+    <source id="10004" type="Audio">
+      <createdOn>2017-07-20T16:43:48.000+00:00</createdOn>
+      <credential type="token">eyJzZXJpYWwiOiJ0dW5laW4ifQ==</credential>
+      <name></name>
+      <sourceproviderid>25</sourceproviderid>
+      <sourcename></sourcename>
+      <sourceSettings></sourceSettings>
+      <updatedOn>2017-07-20T16:43:48.000+00:00</updatedOn>
+      <username></username>
+    </source>
+    <updatedOn>2026-06-14T10:19:03.000+00:00</updatedOn>
+    <username>Radio 538</username>
+  </preset>
+  <preset buttonNumber="4">
+    <containerArt></containerArt>
+    <contentItemType>stationurl</contentItemType>
+    <createdOn>2026-06-14T10:19:04.000+00:00</createdOn>
+    <location>/v1/playback/station/s87683</location>
+    <name>Qmusic</name>
+    <source id="10004" type="Audio">
+      <createdOn>2017-07-20T16:43:48.000+00:00</createdOn>
+      <credential type="token">eyJzZXJpYWwiOiJ0dW5laW4ifQ==</credential>
+      <name></name>
+      <sourceproviderid>25</sourceproviderid>
+      <sourcename></sourcename>
+      <sourceSettings></sourceSettings>
+      <updatedOn>2017-07-20T16:43:48.000+00:00</updatedOn>
+      <username></username>
+    </source>
+    <updatedOn>2026-06-14T10:19:04.000+00:00</updatedOn>
+    <username>Qmusic</username>
+  </preset>
+  <preset buttonNumber="5">
+    <containerArt></containerArt>
+    <contentItemType>stationurl</contentItemType>
+    <createdOn>2026-06-14T10:19:03.000+00:00</createdOn>
+    <location>/v1/playback/station/s47309</location>
+    <name>Sterren.nl</name>
+    <source id="10004" type="Audio">
+      <createdOn>2017-07-20T16:43:48.000+00:00</createdOn>
+      <credential type="token">eyJzZXJpYWwiOiJ0dW5laW4ifQ==</credential>
+      <name></name>
+      <sourceproviderid>25</sourceproviderid>
+      <sourcename></sourcename>
+      <sourceSettings></sourceSettings>
+      <updatedOn>2017-07-20T16:43:48.000+00:00</updatedOn>
+      <username></username>
+    </source>
+    <updatedOn>2026-06-14T10:19:03.000+00:00</updatedOn>
+    <username>Sterren.nl</username>
+  </preset>
+  <preset buttonNumber="6">
+    <containerArt></containerArt>
+    <contentItemType>stationurl</contentItemType>
+    <createdOn>2026-06-14T10:19:04.000+00:00</createdOn>
+    <location>/v1/playback/station/s182221</location>
+    <name>Radio Starfighter</name>
+    <source id="10004" type="Audio">
+      <createdOn>2017-07-20T16:43:48.000+00:00</createdOn>
+      <credential type="token">eyJzZXJpYWwiOiJ0dW5laW4ifQ==</credential>
+      <name></name>
+      <sourceproviderid>25</sourceproviderid>
+      <sourcename></sourcename>
+      <sourceSettings></sourceSettings>
+      <updatedOn>2017-07-20T16:43:48.000+00:00</updatedOn>
+      <username></username>
+    </source>
+    <updatedOn>2026-06-14T10:19:04.000+00:00</updatedOn>
+    <username>Radio Starfighter</username>
+  </preset>
+</presets>

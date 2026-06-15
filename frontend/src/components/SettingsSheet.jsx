@@ -1,0 +1,172 @@
+import { useState, useEffect, useRef } from 'react';
+import { Icon } from './Icons';
+import { useI18n, LANGS } from '../lib/i18n';
+import { getSettings, saveSettings } from '../lib/api';
+
+const cx = (...a) => a.filter(Boolean).join(' ');
+const fmtBass = (v) => (v > 0 ? '+' + v : String(v));
+
+// Centre-origin bass slider over the speaker's real capability range (e.g. -9..0).
+// The "origin" tick + fill anchor at the default (or 0 if in range).
+function BassSlider({ value, min, max, origin, onChange }) {
+  const ref = useRef(null);
+  const [dragging, setDragging] = useState(false);
+  const span = max - min || 1;
+
+  const update = (clientX) => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    onChange(Math.round(min + ratio * span));
+  };
+
+  useEffect(() => {
+    if (!dragging) return;
+    const move = (e) => update(e.touches ? e.touches[0].clientX : e.clientX);
+    const up = () => setDragging(false);
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    window.addEventListener('touchmove', move, { passive: false });
+    window.addEventListener('touchend', up);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      window.removeEventListener('touchmove', move);
+      window.removeEventListener('touchend', up);
+    };
+  }, [dragging]);
+
+  const pct = ((value - min) / span) * 100;
+  const originPct = Math.max(0, Math.min(100, ((origin - min) / span) * 100));
+  const fillLeft = Math.min(originPct, pct);
+  const fillWidth = Math.abs(pct - originPct);
+
+  return (
+    <div
+      ref={ref}
+      className="slider bass-slider"
+      role="slider"
+      aria-valuemin={min}
+      aria-valuemax={max}
+      aria-valuenow={value}
+      tabIndex={0}
+      onMouseDown={(e) => { setDragging(true); update(e.clientX); }}
+      onTouchStart={(e) => { setDragging(true); update(e.touches[0].clientX); }}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { e.preventDefault(); onChange(Math.max(min, value - 1)); }
+        if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { e.preventDefault(); onChange(Math.min(max, value + 1)); }
+      }}
+    >
+      <div className="slider-track" />
+      <div className="bass-center" style={{ left: `${originPct}%` }} />
+      <div className="slider-fill" style={{ left: `${fillLeft}%`, width: `${fillWidth}%` }} />
+      <div className="slider-thumb" style={{ left: `${pct}%` }} />
+    </div>
+  );
+}
+
+// Settings sheet: speaker name + bass (native, via the box) and UI language
+// (persisted in STLocal). Live-applies each field. Wifi is intentionally omitted.
+export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) {
+  const { t } = useI18n();
+  const [name, setName] = useState('');
+  const [bass, setBass] = useState(0);
+  const [caps, setCaps] = useState({ min: -9, max: 0, default: 0 });
+  const nameTimer = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    getSettings().then((s) => {
+      if (!s) return;
+      if (typeof s.name === 'string') setName(s.name);
+      if (s.bass) {
+        setBass(s.bass.actual ?? 0);
+        setCaps({ min: s.bass.min ?? -9, max: s.bass.max ?? 0, default: s.bass.default ?? 0 });
+      }
+    });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const f = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', f);
+    return () => window.removeEventListener('keydown', f);
+  }, [open, onClose]);
+
+  const onNameInput = (v) => {
+    setName(v);
+    clearTimeout(nameTimer.current);
+    nameTimer.current = setTimeout(() => {
+      const nm = v.trim();
+      if (nm) { saveSettings({ name: nm }); onNameChange && onNameChange(nm); }
+    }, 600);
+  };
+
+  const onBass = (v) => { setBass(v); saveSettings({ bass: v }); };
+
+  return (
+    <>
+      <div className={cx('sheet-scrim', open && 'is-open')} onClick={onClose} />
+      <div className={cx('sheet', open && 'is-open')} role="dialog" aria-modal="true">
+        <div className="sheet-handle" />
+        <header className="sheet-hdr">
+          <button className="sheet-back" onClick={onClose} aria-label={t('close')}>
+            <Icon.back width="22" height="22" />
+          </button>
+          <div className="sheet-title">
+            <div className="set-eyebrow">{t('thisRadio')}</div>
+            <div className="sheet-headline">{t('settings')}</div>
+          </div>
+        </header>
+        <div className="sheet-body">
+          <div className="form">
+            <div className="form-section">{t('name')}</div>
+            <div className="field-card">
+              <div className="field-row">
+                <label className="field-row-label" htmlFor="set-name">{t('name')}</label>
+                <input
+                  id="set-name"
+                  className="field-row-input"
+                  type="text"
+                  value={name}
+                  onChange={(e) => onNameInput(e.target.value)}
+                  placeholder={t('namePlaceholder')}
+                  maxLength={28}
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+
+            <div className="form-section" style={{ marginTop: 22 }}>{t('sound')}</div>
+            <div className="bass-card">
+              <div className="bass-head">
+                <span className="bass-name">{t('bass')}</span>
+                <span className={cx('bass-val', bass !== caps.default && 'is-set')}>{fmtBass(bass)}</span>
+              </div>
+              <BassSlider value={bass} min={caps.min} max={caps.max} origin={caps.default} onChange={onBass} />
+              <div className="bass-scale">
+                <span>{fmtBass(caps.min)}</span>
+                <span>{fmtBass(caps.max)}</span>
+              </div>
+            </div>
+            <div className="field-hint">{t('bassHint')}</div>
+
+            <div className="form-section" style={{ marginTop: 22 }}>{t('language')}</div>
+            <div className="select-wrap">
+              <select
+                className="field select"
+                value={lang}
+                onChange={(e) => onSetLang(e.target.value)}
+                aria-label={t('language')}
+              >
+                {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+              </select>
+              <span className="select-chev" aria-hidden="true"><Icon.chevron width="18" height="18" /></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}

@@ -1,0 +1,149 @@
+#!/bin/sh
+# ReTouch on-speaker network installer. Fetched + run by the :17000 boot command (see
+# install.sh). It runs ON the speaker as root, so it can both install the agent and
+# point the speaker's cloud URLs at it — no SSH, no USB stick.
+#
+# Install AND update: it records the installed release tag in .version and compares
+# it to the latest GitHub release each run. Re-running install.sh therefore upgrades
+# the speaker to the newest release in place (and restarts the agent); if it is
+# already on the latest tag it just re-asserts the config and makes sure the agent
+# is running.
+#
+# NOTE: scaffold — verify on hardware before relying on it. Assumes the speaker's
+# busybox curl can reach GitHub over TLS (true on the SoundTouch 10 / fw27).
+set -u
+
+REPO=stein155/retouch
+PIN_TAG=""                      # set e.g. "v0.1.0" to pin; empty = latest
+HOME_DIR=/mnt/nv/retouch
+BIN=$HOME_DIR/retouch
+VERSION=$HOME_DIR/.version      # installed release tag
+GAVEUP=$HOME_DIR/.gaveup
+ATTEMPTS=$HOME_DIR/.attempts
+LOCK=/tmp/retouch-install.lock
+LOG=/tmp/retouch-install.log
+MAX_ATTEMPTS=5
+
+# Where the speaker reaches the on-speaker pairing stub (marge :9080, web UI :8000).
+MARGE_BASE=http://127.0.0.1:9080
+WEB_LISTEN=:8000
+MARGE_LISTEN=:9080
+CFG=/opt/Bose/etc/SoundTouchSdkPrivateCfg.xml
+
+log() { echo "[retouch] $*" >>"$LOG" 2>&1; }
+giveup() { : >"$GAVEUP"; log "$*; giving up"; exit 0; }
+
+LAUNCH="$BIN -speaker-host 127.0.0.1 -listen $WEB_LISTEN -listen-marge $MARGE_LISTEN -marge-base $MARGE_BASE -presets $HOME_DIR/presets.json"
+
+start_agent() {
+	pidof retouch >/dev/null 2>&1 && return 0
+	$LAUNCH >/tmp/retouch.log 2>&1 &
+}
+
+# restart_agent stops a running agent (e.g. the old version started at boot) and
+# launches the freshly installed binary. Used after an install/update.
+restart_agent() {
+	pid=$(pidof retouch 2>/dev/null) && [ -n "$pid" ] && { kill $pid 2>/dev/null; sleep 1; }
+	$LAUNCH >/tmp/retouch.log 2>&1 &
+}
+
+# write_rc_local installs the NAND autostart line (idempotent; the launch command
+# does not change between versions).
+write_rc_local() {
+	cat > /mnt/nv/rc.local <<RC
+#!/bin/sh
+$LAUNCH >/tmp/retouch.log 2>&1 &
+RC
+	chmod 0755 /mnt/nv/rc.local 2>/dev/null
+}
+
+# redirect_cloud rewrites the four service URLs in SoundTouchSdkPrivateCfg.xml to
+# MARGE_BASE, keeping a one-time .original backup. Idempotent: re-running only
+# rewrites if the file does not already point at us. Requires a read-write rootfs.
+redirect_cloud() {
+	[ -f "$CFG" ] || { log "no $CFG (firmware layout differs) — skipping URL redirect"; return 1; }
+	mount / -o rw,remount 2>>"$LOG" || mount -o remount,rw / 2>>"$LOG" || { log "could not remount / rw"; return 1; }
+	[ -f "$CFG.original" ] || cp "$CFG" "$CFG.original"
+	if grep -q "$MARGE_BASE" "$CFG" 2>/dev/null; then log "cloud already redirected"; mount / -o ro,remount 2>/dev/null; return 0; fi
+	sed \
+		-e "s#<margeServerUrl>[^<]*</margeServerUrl>#<margeServerUrl>$MARGE_BASE</margeServerUrl>#" \
+		-e "s#<statsServerUrl>[^<]*</statsServerUrl>#<statsServerUrl>$MARGE_BASE</statsServerUrl>#" \
+		-e "s#<swUpdateUrl>[^<]*</swUpdateUrl>#<swUpdateUrl>$MARGE_BASE/updates/soundtouch</swUpdateUrl>#" \
+		-e "s#<bmxRegistryUrl>[^<]*</bmxRegistryUrl>#<bmxRegistryUrl>$MARGE_BASE/bmx/registry/v1/services</bmxRegistryUrl>#" \
+		"$CFG.original" > "$CFG.new" && mv "$CFG.new" "$CFG"
+	log "redirected cloud URLs -> $MARGE_BASE (backup at $CFG.original)"
+	mount / -o ro,remount 2>/dev/null
+}
+
+# clean_urls resets the URL layers to the on-speaker stub via the speaker's own :17000 CLI:
+#   - boseurls: install.sh set this to a bootstrap string ("http://x.invalid;curl
+#     …;sh …") to chain this script on boot. We replace it with clean localhost URLs
+#     so margeServerUrl/swUpdateUrl are tidy AND the bootstrap doesn't re-run every
+#     boot.
+#   - runtime config (sys configuration …): point this boot's live URLs at the stub
+#     too, so the speaker doesn't keep the bootstrap string as its margeServerUrl.
+# Best-effort: skipped if nc / the CLI are unavailable.
+clean_urls() {
+	command -v nc >/dev/null 2>&1 || { log "no nc; skipping URL cleanup"; return 0; }
+	cli() { printf '%s\n' "$1" | nc -w 2 127.0.0.1 17000 >/dev/null 2>&1; }
+	cli "envswitch boseurls set $MARGE_BASE $MARGE_BASE/updates/soundtouch"
+	cli "sys configuration bmxRegistryUrl $MARGE_BASE/bmx/registry/v1/services"
+	cli "sys configuration statsServerUrl $MARGE_BASE"
+	cli "sys configuration margeServerUrl $MARGE_BASE"
+	cli "sys configuration swUpdateUrl $MARGE_BASE/updates/soundtouch"
+	log "reset boseurls + runtime URLs -> $MARGE_BASE"
+}
+
+[ -f "$GAVEUP" ] && { log "gave up earlier (remove $GAVEUP to retry)"; exit 0; }
+
+mkdir "$LOCK" 2>/dev/null || { log "locked"; exit 0; }
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+
+mkdir -p "$HOME_DIR" 2>/dev/null
+
+# Resolve the target release tag (pinned, else the latest GitHub release).
+TAG="$PIN_TAG"
+if [ -z "$TAG" ]; then
+	TAG=$(curl -fsSL https://api.github.com/repos/$REPO/releases/latest \
+		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+fi
+INSTALLED=$(cat "$VERSION" 2>/dev/null || echo "")
+
+# Already current (or GitHub unreachable but a binary exists): just re-assert the
+# config + autostart, no download. Clear the attempt counter so a later update run
+# starts fresh.
+if [ -x "$BIN" ] && { [ -z "$TAG" ] || [ "$TAG" = "$INSTALLED" ]; }; then
+	[ -z "$TAG" ] && log "could not reach GitHub; keeping installed ${INSTALLED:-?}" || log "already up to date ($INSTALLED)"
+	rm -f "$ATTEMPTS"
+	write_rc_local
+	redirect_cloud
+	clean_urls
+	start_agent
+	exit 0
+fi
+
+[ -n "$TAG" ] || { log "no tag and no binary installed; retry next boot"; exit 0; }
+
+n=$(cat "$ATTEMPTS" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" >"$ATTEMPTS"
+log "installing $TAG (have ${INSTALLED:-none}); attempt $n/$MAX_ATTEMPTS"
+[ "$n" -gt "$MAX_ATTEMPTS" ] && giveup "exceeded $MAX_ATTEMPTS attempts"
+
+DL=https://github.com/$REPO/releases/download/$TAG
+
+# Download binary + checksums and verify before swapping it in.
+curl -fsSL -o "$BIN.new" "$DL/retouch-armv7l" || { log "download failed"; exit 0; }
+curl -fsSL -o "$HOME_DIR/SHA256SUMS" "$DL/SHA256SUMS" || { log "sums download failed"; exit 0; }
+want=$(sed -n 's/ .*retouch-armv7l$//p' "$HOME_DIR/SHA256SUMS" | head -1)
+got=$(openssl dgst -sha256 "$BIN.new" | sed 's/.*= //')
+[ -n "$want" ] || giveup "no checksum in SHA256SUMS"
+[ "$want" = "$got" ] || giveup "checksum mismatch ($got != $want)"
+chmod 0755 "$BIN.new" && mv "$BIN.new" "$BIN"
+echo "$TAG" > "$VERSION"
+rm -f "$ATTEMPTS"
+log "installed $TAG"
+
+write_rc_local
+redirect_cloud
+clean_urls
+restart_agent
+log "done ($TAG); web UI on $WEB_LISTEN, marge on $MARGE_LISTEN. Cloud URLs point at the on-speaker stub."

@@ -1,0 +1,9 @@
+/build/
+/retouch
+/retouch-armv7l
+/stl-host
+/.bstl
+*.tmp
+presets.json
+frontend/node_modules/
+frontend/dist/

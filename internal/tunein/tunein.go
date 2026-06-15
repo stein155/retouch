@@ -1,0 +1,164 @@
+// Package tunein is a tiny client for TuneIn's public OPML API
+// (opml.radiotime.com): search for stations and resolve a station id to its
+// playable stream URLs. No key, no account. This is the only external service
+// ReTouch talks to.
+package tunein
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+const base = "https://opml.radiotime.com"
+
+// formats is the codec list we ask TuneIn for. The SoundTouch renderer cannot
+// parse HLS (.m3u8) playlists, so HLS is intentionally excluded.
+const formats = "mp3,aac"
+
+// Station is a search result.
+type Station struct {
+	ID         string `json:"id"`         // TuneIn guide id, e.g. s6712
+	Name       string `json:"name"`       // display name
+	Logo       string `json:"logo"`       // station logo URL
+	Bitrate    string `json:"bitrate"`    // kbit/s as reported, may be ""
+	NowPlaying string `json:"nowPlaying"` // current track, may be ""
+}
+
+// Client talks to the TuneIn OPML API.
+type Client struct{ http *http.Client }
+
+// New returns a Client with a sane timeout.
+func New() *Client { return &Client{http: &http.Client{Timeout: 10 * time.Second}} }
+
+// searchResp mirrors the Search.ashx render=json shape (all fields are strings).
+type searchResp struct {
+	Body []struct {
+		Element string `json:"element"`
+		Type    string `json:"type"`
+		Item    string `json:"item"`
+		Text    string `json:"text"`
+		GuideID string `json:"guide_id"`
+		Image   string `json:"image"`
+		Bitrate string `json:"bitrate"`
+		Subtext string `json:"subtext"`
+	} `json:"body"`
+}
+
+// Search returns matching radio stations for a free-text query.
+func (c *Client) Search(ctx context.Context, query string) ([]Station, error) {
+	u := fmt.Sprintf("%s/Search.ashx?query=%s&types=station&formats=%s&render=json",
+		base, urlQueryEscape(query), formats)
+	body, err := c.get(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	var sr searchResp
+	if err := json.Unmarshal(body, &sr); err != nil {
+		return nil, fmt.Errorf("tunein search decode: %w", err)
+	}
+	out := make([]Station, 0, len(sr.Body))
+	for _, o := range sr.Body {
+		// Keep only playable stations (skip "link" browse categories).
+		if o.Item != "station" || !strings.HasPrefix(o.GuideID, "s") {
+			continue
+		}
+		out = append(out, Station{
+			ID:         o.GuideID,
+			Name:       o.Text,
+			Logo:       o.Image,
+			Bitrate:    o.Bitrate,
+			NowPlaying: o.Subtext,
+		})
+	}
+	return out, nil
+}
+
+// Describe returns a station's display name and logo URL for a guide id, via
+// Describe.ashx. Best-effort: returns empty strings (no error) when unavailable.
+func (c *Client) Describe(ctx context.Context, stationID string) (name, logo string) {
+	u := fmt.Sprintf("%s/Describe.ashx?id=%s&render=json", base, urlQueryEscape(stationID))
+	body, err := c.get(ctx, u)
+	if err != nil {
+		return "", ""
+	}
+	var dr struct {
+		Body []struct {
+			Name string `json:"name"`
+			Logo string `json:"logo"`
+		} `json:"body"`
+	}
+	if err := json.Unmarshal(body, &dr); err != nil || len(dr.Body) == 0 {
+		return "", ""
+	}
+	return dr.Body[0].Name, dr.Body[0].Logo
+}
+
+// Resolve returns the stream URLs for a station id, in TuneIn's order.
+func (c *Client) Resolve(ctx context.Context, stationID string) ([]string, error) {
+	u := fmt.Sprintf("%s/Tune.ashx?id=%s&formats=%s", base, stationID, formats)
+	body, err := c.get(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	var urls []string
+	sc := bufio.NewScanner(bytes.NewReader(body))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if strings.HasPrefix(line, "http://") || strings.HasPrefix(line, "https://") {
+			urls = append(urls, line)
+		}
+	}
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("tunein: no streams for %s", stationID)
+	}
+	return urls, nil
+}
+
+// PlayableURL picks the best stream URL for the SoundTouch renderer: a plain
+// http:// stream is preferred because the speaker's renderer is unreliable with
+// modern HTTPS. Falls back to the first URL.
+func PlayableURL(urls []string) string {
+	for _, u := range urls {
+		if strings.HasPrefix(u, "http://") {
+			return u
+		}
+	}
+	if len(urls) > 0 {
+		return urls[0]
+	}
+	return ""
+}
+
+func (c *Client) get(ctx context.Context, u string) ([]byte, error) {
+	if !strings.HasPrefix(u, base+"/") {
+		return nil, fmt.Errorf("refusing non-TuneIn host: %s", u)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "ReTouch/1.0")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("tunein status %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+}
+
+// urlQueryEscape is a minimal query escaper (avoids importing net/url just for
+// one call and keeps spaces/'&' safe).
+func urlQueryEscape(s string) string {
+	r := strings.NewReplacer(" ", "%20", "&", "%26", "?", "%3F", "#", "%23", "+", "%2B")
+	return r.Replace(s)
+}
