@@ -35,7 +35,7 @@ ReTouch **emulates that cloud API locally, on the speaker**, so the firmware see
 a healthy "cloud" again and re-enables its native radio. It does not stream or
 re-route audio — the speaker plays radio itself, exactly as before; ReTouch only
 takes the place of the API that used to live at Bose. A small web app on the
-speaker (port `:8000`) adds the search, presets, and controls.
+speaker adds the search, presets, and controls.
 
 ## Install (and update)
 
@@ -56,7 +56,7 @@ open. The speaker restarts once and is back in a minute or two.
 It needs two common tools, `curl` and `nc` (netcat), which ship with macOS and most
 Linux systems.
 
-When it finishes you'll get a link like `http://192.168.1.42:8000`. Open it on your
+When it finishes you'll get a link like `http://192.168.1.42`. Open it on your
 phone and use **Add to Home Screen** to keep ReTouch around like a normal app.
 
 **To update**, just run the same line again: if a newer release is available the
