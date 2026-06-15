@@ -52,9 +52,9 @@ restart_agent() {
 
 # write_start_script writes the boot launcher. It binds the web UI on $WEB_LISTEN
 # (which is always reachable) and then makes a BEST-EFFORT attempt to also reach it
-# on :80 via an iptables redirect — WITHOUT touching Bose's own :80 setup server.
-# If the redirect can't be installed, the UI is still served on $WEB_LISTEN, so it
-# is never lost. iptables is volatile, so this re-applies the redirect every boot.
+# on :8080 (the UNIFORM port) and :80 via iptables redirects — WITHOUT touching Bose's
+# own setup servers. If the redirects can't be installed, the UI is still served on
+# $WEB_LISTEN, so it is never lost. iptables is volatile, so this re-applies on boot.
 write_start_script() {
 	cat > "$START" <<STARTSCRIPT
 #!/bin/sh
@@ -64,20 +64,25 @@ APP_PORT=${WEB_LISTEN#:}
 
 log() { echo "[retouch-start] \$*" >>"\$LOG" 2>&1; }
 
-# expose_80 routes inbound :80 traffic to the app port so the UI is reachable at
-# http://<speaker-ip>/ . It does NOT stop Bose's setup server; it just intercepts
-# :80 packets before local delivery. Idempotent and reversible (flush on reboot).
-expose_80() {
+# expose_ports routes inbound :8080 and :80 to the app port so the UI is reachable at
+# http://<speaker-ip>:8080/ and http://<speaker-ip>/ . It intercepts these ports before
+# local delivery (does NOT stop Bose's setup servers). Idempotent + reversible (flushes
+# on reboot). :8080 is the UNIFORM port that works on every speaker — including the
+# dual-processor SoundTouch 20/30, where LAN :80 is owned by a second processor and
+# cannot be redirected; there :8080 is forwarded to this processor and works.
+expose_ports() {
 	command -v iptables >/dev/null 2>&1 || { log "no iptables; UI on :\$APP_PORT only"; return 0; }
-	iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports "\$APP_PORT" 2>/dev/null
-	if iptables -t nat -I PREROUTING 1 -p tcp --dport 80 -j REDIRECT --to-ports "\$APP_PORT" 2>>"\$LOG"; then
-		log "redirected :80 -> :\$APP_PORT (UI on http://<speaker-ip>/)"
-	else
-		log "could not redirect :80; UI on :\$APP_PORT only"
-	fi
+	for P in 8080 80; do
+		iptables -t nat -D PREROUTING -p tcp --dport \$P -j REDIRECT --to-ports "\$APP_PORT" 2>/dev/null
+		if iptables -t nat -I PREROUTING 1 -p tcp --dport \$P -j REDIRECT --to-ports "\$APP_PORT" 2>>"\$LOG"; then
+			log "redirected :\$P -> :\$APP_PORT"
+		else
+			log "could not redirect :\$P (UI still on :\$APP_PORT)"
+		fi
+	done
 }
 
-expose_80
+expose_ports
 $LAUNCH >>"\$LOG" 2>&1 &
 STARTSCRIPT
 	chmod 0755 "$START" 2>/dev/null

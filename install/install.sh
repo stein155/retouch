@@ -171,14 +171,22 @@ ok "asked the speaker to restart"
 # ---- wait for ReTouch to come up ------------------------------------------
 say ""
 printf 'Waiting for ReTouch to come online %s(this takes a minute or two)%s' "$DIM" "$R"
-# Probe the app itself (its API), not bare :80 — Bose's own :80 setup page would
-# otherwise look like a false "ready". /api/settings only answers from ReTouch.
-PROBE="http://$IP:$APP_PORT/api/settings"
-URL="http://$IP"                 # what the user opens; :80 is redirected to the app
+# Probe the app's own API (/api/settings only answers from ReTouch, so Bose's setup
+# page can't look like a false "ready"). Try candidates in order of preference:
+# :8080 is the UNIFORM port that works on every speaker (incl. dual-processor ST20/30,
+# where :80 and :8000 are NOT LAN-reachable); :80 works on single-processor speakers;
+# :8000 is the direct fallback. We advertise whichever answers first.
+C8080="http://$IP:8080"; C80="http://$IP"; CAPP="http://$IP:$APP_PORT"
+URL=""
 up=0
 n=0
 while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
-	if curl -fsS --connect-timeout 2 --max-time 3 "$PROBE" >/dev/null 2>&1; then up=1; break; fi
+	for u in "$C8080" "$C80" "$CAPP"; do
+		if curl -fsS --connect-timeout 2 --max-time 3 "$u/api/settings" >/dev/null 2>&1; then
+			URL="$u"; up=1; break
+		fi
+	done
+	[ "$up" -eq 1 ] && break
 	printf '.'
 	sleep 4
 	n=$((n + 1))
@@ -186,11 +194,6 @@ done
 printf '\n\n'
 
 if [ "$up" -eq 1 ]; then
-	# Prefer the clean :80 URL, but only advertise it if the redirect really lands
-	# on ReTouch (some speakers may not allow the redirect — then use :8000).
-	if ! curl -fsS --connect-timeout 2 --max-time 3 "http://$IP/api/settings" >/dev/null 2>&1; then
-		URL="http://$IP:$APP_PORT"
-	fi
 	ok "${B}ReTouch is ready!${R}"
 	say ""
 	say "  Open it here:"

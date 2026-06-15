@@ -60,10 +60,11 @@ is self-contained. Rebuild the frontend whenever you change anything under
 
 ## How it runs on the speaker
 
-- The web app listens on `:8000`; a boot-time `iptables` redirect makes it reachable
-  on `:80` too (without disturbing Bose's own `:80` setup server, and falling back to
-  `:8000` if the redirect can't be installed). The cloud-API emulation listens on a
-  loopback port.
+- The web app listens on `:8000`; boot-time `iptables` redirects make it reachable on
+  `:8080` (the uniform port — works on every speaker, incl. dual-processor ST20/30 where
+  LAN `:80` is owned by a second processor and can't be redirected) and on `:80` too,
+  without disturbing Bose's own setup servers, and falling back to `:8000` if a redirect
+  can't be installed. The cloud-API emulation listens on a loopback port.
 - The speaker's service URLs are pointed at the on-speaker emulation; the factory
   configuration is backed up first so it can be fully restored.
 - An autostart entry relaunches ReTouch on every boot; on boot it re-checks in so the
