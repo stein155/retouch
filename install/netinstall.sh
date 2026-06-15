@@ -50,11 +50,11 @@ restart_agent() {
 	[ -x "$START" ] && "$START" >/tmp/retouch-start.log 2>&1 &
 }
 
-# write_start_script writes the boot launcher. It binds the web UI on $WEB_LISTEN
-# (which is always reachable) and then makes a BEST-EFFORT attempt to also reach it
-# on :8080 (the UNIFORM port) and :80 via iptables redirects — WITHOUT touching Bose's
-# own setup servers. If the redirects can't be installed, the UI is still served on
-# $WEB_LISTEN, so it is never lost. iptables is volatile, so this re-applies on boot.
+# write_start_script writes the boot launcher. It binds the web UI on $WEB_LISTEN and
+# then makes a BEST-EFFORT attempt to expose it on exactly one uniform port, :8080,
+# while hiding the raw $WEB_LISTEN port from the LAN — WITHOUT touching Bose's own setup
+# servers. If the rules can't be installed, the UI is still served on $WEB_LISTEN, so it
+# is never lost. iptables is volatile, so this re-applies on every boot.
 write_start_script() {
 	cat > "$START" <<STARTSCRIPT
 #!/bin/sh
@@ -64,25 +64,33 @@ APP_PORT=${WEB_LISTEN#:}
 
 log() { echo "[retouch-start] \$*" >>"\$LOG" 2>&1; }
 
-# expose_ports routes inbound :8080 and :80 to the app port so the UI is reachable at
-# http://<speaker-ip>:8080/ and http://<speaker-ip>/ . It intercepts these ports before
-# local delivery (does NOT stop Bose's setup servers). Idempotent + reversible (flushes
-# on reboot). :8080 is the UNIFORM port that works on every speaker — including the
-# dual-processor SoundTouch 20/30, where LAN :80 is owned by a second processor and
-# cannot be redirected; there :8080 is forwarded to this processor and works.
-expose_ports() {
+# expose_8080 makes ReTouch reachable on EXACTLY ONE port: :8080 (the uniform port that
+# works on every speaker — including the dual-processor SoundTouch 20/30, where LAN :80
+# is owned by a second processor and can't be redirected, and :8000 is firewalled). It
+# redirects inbound :8080 to the app port, and then DROPS direct LAN access to the app
+# port itself so the UI is NOT also exposed on :8000. Loopback access to the app port is
+# preserved (the speaker/agent use it locally). The raw table runs before nat, so the
+# drop only hits direct :8000 traffic, never the :8080-redirected flow. Best-effort and
+# reversible (flushes on reboot; if the rules can't be set, the UI stays on :APP_PORT).
+expose_8080() {
 	command -v iptables >/dev/null 2>&1 || { log "no iptables; UI on :\$APP_PORT only"; return 0; }
-	for P in 8080 80; do
-		iptables -t nat -D PREROUTING -p tcp --dport \$P -j REDIRECT --to-ports "\$APP_PORT" 2>/dev/null
-		if iptables -t nat -I PREROUTING 1 -p tcp --dport \$P -j REDIRECT --to-ports "\$APP_PORT" 2>>"\$LOG"; then
-			log "redirected :\$P -> :\$APP_PORT"
-		else
-			log "could not redirect :\$P (UI still on :\$APP_PORT)"
-		fi
-	done
+	# clear any :80 redirect left by an older version (we expose ONLY :8080 now)
+	while iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports "\$APP_PORT" 2>/dev/null; do :; done
+	iptables -t nat -D PREROUTING -p tcp --dport 8080 -j REDIRECT --to-ports "\$APP_PORT" 2>/dev/null
+	if iptables -t nat -I PREROUTING 1 -p tcp --dport 8080 -j REDIRECT --to-ports "\$APP_PORT" 2>>"\$LOG"; then
+		log "redirected :8080 -> :\$APP_PORT"
+	else
+		log "could not redirect :8080 (UI still on :\$APP_PORT)"
+	fi
+	iptables -t raw -D PREROUTING ! -i lo -p tcp --dport "\$APP_PORT" -j DROP 2>/dev/null
+	if iptables -t raw -I PREROUTING 1 ! -i lo -p tcp --dport "\$APP_PORT" -j DROP 2>>"\$LOG"; then
+		log "hid direct LAN access to :\$APP_PORT (loopback kept)"
+	else
+		log "could not hide :\$APP_PORT; it may stay reachable directly"
+	fi
 }
 
-expose_ports
+expose_8080
 $LAUNCH >>"\$LOG" 2>&1 &
 STARTSCRIPT
 	chmod 0755 "$START" 2>/dev/null

@@ -56,7 +56,7 @@ open. The speaker restarts once and is back in a minute or two.
 It needs two common tools, `curl` and `nc` (netcat), which ship with macOS and most
 Linux systems.
 
-When it finishes you'll get a link like `http://192.168.1.42`. Open it on your
+When it finishes you'll get a link like `http://192.168.1.42:8080`. Open it on your
 phone and use **Add to Home Screen** to keep ReTouch around like a normal app.
 
 **To update**, just run the same line again: if a newer release is available the

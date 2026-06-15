@@ -16,14 +16,15 @@ log() { echo "[retouch-uninstall] $*" >>"$LOG" 2>&1; echo "[retouch-uninstall] $
 
 pidof retouch >/dev/null 2>&1 && { kill "$(pidof retouch)" 2>/dev/null; log "stopped agent"; }
 
-# Remove the :8080/:80 -> :8000 redirects the boot launcher installs. They are volatile
-# (also clear on reboot) but drop them now so the ports return to Bose's setup servers
-# even without a reboot. The loop clears any duplicates.
+# Remove the :8080 redirect and the :8000-hide rule the boot launcher installs. They are
+# volatile (also clear on reboot) but drop them now so :8080 returns to Bose's setup
+# server and :8000 is reachable again even without a reboot. Loops clear any duplicates.
 if command -v iptables >/dev/null 2>&1; then
-	for P in 8080 80; do
-		while iptables -t nat -D PREROUTING -p tcp --dport $P -j REDIRECT --to-ports 8000 2>/dev/null; do :; done
-	done
-	log "removed :8080/:80 redirects (if present)"
+	while iptables -t nat -D PREROUTING -p tcp --dport 8080 -j REDIRECT --to-ports 8000 2>/dev/null; do :; done
+	while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 8000 -j DROP 2>/dev/null; do :; done
+	# also clear the older :80 redirect from earlier versions, if present
+	while iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports 8000 2>/dev/null; do :; done
+	log "removed :8080 redirect + :8000-hide (if present)"
 fi
 
 if [ -f "$CFG.original" ]; then

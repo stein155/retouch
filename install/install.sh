@@ -172,21 +172,15 @@ ok "asked the speaker to restart"
 say ""
 printf 'Waiting for ReTouch to come online %s(this takes a minute or two)%s' "$DIM" "$R"
 # Probe the app's own API (/api/settings only answers from ReTouch, so Bose's setup
-# page can't look like a false "ready"). Try candidates in order of preference:
-# :8080 is the UNIFORM port that works on every speaker (incl. dual-processor ST20/30,
-# where :80 and :8000 are NOT LAN-reachable); :80 works on single-processor speakers;
-# :8000 is the direct fallback. We advertise whichever answers first.
-C8080="http://$IP:8080"; C80="http://$IP"; CAPP="http://$IP:$APP_PORT"
-URL=""
+# page can't look like a false "ready"). ReTouch is exposed on exactly one uniform
+# port — :8080 — on every speaker, so that is the only URL we wait for and advertise.
+URL="http://$IP:8080"
 up=0
 n=0
 while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
-	for u in "$C8080" "$C80" "$CAPP"; do
-		if curl -fsS --connect-timeout 2 --max-time 3 "$u/api/settings" >/dev/null 2>&1; then
-			URL="$u"; up=1; break
-		fi
-	done
-	[ "$up" -eq 1 ] && break
+	if curl -fsS --connect-timeout 2 --max-time 3 "$URL/api/settings" >/dev/null 2>&1; then
+		up=1; break
+	fi
 	printf '.'
 	sleep 4
 	n=$((n + 1))
