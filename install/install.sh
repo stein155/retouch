@@ -176,10 +176,11 @@ if [ "$APP_PORT" = 80 ]; then
 else
 	URL="http://$IP:$APP_PORT"
 fi
+CHECK_URL="$URL/api/settings"
 up=0
 n=0
 while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
-	if curl -fsS --connect-timeout 2 --max-time 3 "$URL/" >/dev/null 2>&1; then up=1; break; fi
+	if curl -fsS --connect-timeout 2 --max-time 3 "$CHECK_URL" >/dev/null 2>&1; then up=1; break; fi
 	printf '.'
 	sleep 4
 	n=$((n + 1))
