@@ -24,11 +24,12 @@ LOCK=/tmp/retouch-install.lock
 LOG=/tmp/retouch-install.log
 MAX_ATTEMPTS=5
 
-# Where the speaker reaches the on-speaker pairing stub (marge :9080, web UI :8000).
+# Where the speaker reaches the on-speaker pairing stub and web UI.
 MARGE_BASE=http://127.0.0.1:9080
-WEB_LISTEN=:8000
+WEB_LISTEN=:80
 MARGE_LISTEN=:9080
 CFG=/opt/Bose/etc/SoundTouchSdkPrivateCfg.xml
+START=$HOME_DIR/start.sh
 
 log() { echo "[retouch] $*" >>"$LOG" 2>&1; }
 giveup() { : >"$GAVEUP"; log "$*; giving up"; exit 0; }
@@ -36,23 +37,80 @@ giveup() { : >"$GAVEUP"; log "$*; giving up"; exit 0; }
 LAUNCH="$BIN -speaker-host 127.0.0.1 -listen $WEB_LISTEN -listen-marge $MARGE_LISTEN -marge-base $MARGE_BASE -presets $HOME_DIR/presets.json"
 
 start_agent() {
-	pidof retouch >/dev/null 2>&1 && return 0
-	$LAUNCH >/tmp/retouch.log 2>&1 &
+	if pidof retouch >/dev/null 2>&1; then
+		return 0
+	fi
+	[ -x "$START" ] && "$START" >/tmp/retouch-start.log 2>&1 &
 }
 
 # restart_agent stops a running agent (e.g. the old version started at boot) and
 # launches the freshly installed binary. Used after an install/update.
 restart_agent() {
 	pid=$(pidof retouch 2>/dev/null) && [ -n "$pid" ] && { kill $pid 2>/dev/null; sleep 1; }
-	$LAUNCH >/tmp/retouch.log 2>&1 &
+	[ -x "$START" ] && "$START" >/tmp/retouch-start.log 2>&1 &
 }
 
-# write_rc_local installs the NAND autostart line (idempotent; the launch command
-# does not change between versions).
+write_start_script() {
+	cat > "$START" <<STARTSCRIPT
+#!/bin/sh
+
+LOG=/tmp/retouch.log
+CORE=/var/run/shepherd/Shepherd-core.xml
+CORE_ORIG=/opt/Bose/etc/Shepherd-core.xml
+CORE_TMP=/tmp/retouch-Shepherd-core-no-pts.xml
+
+log() { echo "[retouch-start] \$*" >>"\$LOG" 2>&1; }
+
+network_ready() {
+	route -n 2>/dev/null | grep -q '^0\.0\.0\.0[[:space:]]' || return 1
+	ifconfig 2>/dev/null | grep -q 'inet addr:[1-9][0-9]*\.' || return 1
+	return 0
+}
+
+wait_network() {
+	while :; do
+		network_ready && return 0
+		sleep 2
+	done
+}
+
+disable_ptsserver() {
+	if [ -f "\$CORE_ORIG" ] && [ -d /var/run/shepherd ]; then
+		sed '/<daemon name="PtsServer">/,/<\/daemon>/d' "\$CORE_ORIG" > "\$CORE_TMP" || return 1
+		rm -f "\$CORE"
+		ln -s "\$CORE_TMP" "\$CORE" || return 1
+		pid=\$(pidof shepherdd 2>/dev/null) && [ -n "\$pid" ] && kill -HUP "\$pid" 2>/dev/null
+	else
+		pid=\$(pidof PtsServer 2>/dev/null) && [ -n "\$pid" ] && kill "\$pid" 2>/dev/null
+	fi
+	n=0
+	while [ "\$n" -lt 20 ]; do
+		pidof PtsServer >/dev/null 2>&1 || return 0
+		sleep 1
+		n=\$((n + 1))
+	done
+	return 1
+}
+
+wait_network
+if disable_ptsserver; then
+	log "released port 80 from Bose setup server"
+else
+	log "could not release port 80; ReTouch may fail to bind"
+fi
+
+$LAUNCH >>"\$LOG" 2>&1 &
+STARTSCRIPT
+	chmod 0755 "$START" 2>/dev/null
+}
+
+# write_rc_local installs the NAND autostart line. The start script waits for
+# normal network connectivity before taking over port 80 from Bose's setup page.
 write_rc_local() {
+	write_start_script
 	cat > /mnt/nv/rc.local <<RC
 #!/bin/sh
-$LAUNCH >/tmp/retouch.log 2>&1 &
+$START >/tmp/retouch-start.log 2>&1 &
 RC
 	chmod 0755 /mnt/nv/rc.local 2>/dev/null
 }
@@ -118,7 +176,7 @@ if [ -x "$BIN" ] && { [ -z "$TAG" ] || [ "$TAG" = "$INSTALLED" ]; }; then
 	write_rc_local
 	redirect_cloud
 	clean_urls
-	start_agent
+	restart_agent
 	exit 0
 fi
 

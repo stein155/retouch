@@ -1,4 +1,4 @@
-// Package web serves the STLocal control UI and JSON API on :8000. Playback is
+// Package web serves the ReTouch control UI and JSON API. Playback is
 // NATIVE: presets are real TUNEIN ContentItems the speaker plays itself (resolving
 // via the live TuneIn service) — STLocal never proxies audio.
 package web

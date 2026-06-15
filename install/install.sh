@@ -20,7 +20,7 @@ NETINSTALL="https://raw.githubusercontent.com/$REPO/$BRANCH/install/netinstall.s
 PLACE="http://x.invalid"        # harmless placeholder the speaker overwrites itself
 
 API_PORT=8090                   # speakers answer here; used only to find them
-APP_PORT=8000                   # ReTouch's web app, once it's up
+APP_PORT=80                     # ReTouch's web app, once it's up
 SETUP_PORT=17000                # where we hand the speaker its setup instructions
 
 # ---- pretty output ---------------------------------------------------------
@@ -171,7 +171,11 @@ ok "asked the speaker to restart"
 # ---- wait for ReTouch to come up ------------------------------------------
 say ""
 printf 'Waiting for ReTouch to come online %s(this takes a minute or two)%s' "$DIM" "$R"
-URL="http://$IP:$APP_PORT"
+if [ "$APP_PORT" = 80 ]; then
+	URL="http://$IP"
+else
+	URL="http://$IP:$APP_PORT"
+fi
 up=0
 n=0
 while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
