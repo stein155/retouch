@@ -16,6 +16,14 @@ log() { echo "[retouch-uninstall] $*" >>"$LOG" 2>&1; echo "[retouch-uninstall] $
 
 pidof retouch >/dev/null 2>&1 && { kill "$(pidof retouch)" 2>/dev/null; log "stopped agent"; }
 
+# Remove the :80 -> :8000 redirect the boot launcher installs. It is volatile (also
+# clears on reboot) but drop it now so :80 returns to Bose's setup server even
+# without a reboot. The loop clears any duplicates.
+if command -v iptables >/dev/null 2>&1; then
+	while iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports 8000 2>/dev/null; do :; done
+	log "removed :80 redirect (if present)"
+fi
+
 if [ -f "$CFG.original" ]; then
 	mount / -o rw,remount 2>>"$LOG" || mount -o remount,rw / 2>>"$LOG"
 	cp "$CFG.original" "$CFG" && log "restored $CFG from .original"

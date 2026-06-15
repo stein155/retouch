@@ -20,7 +20,7 @@ NETINSTALL="https://raw.githubusercontent.com/$REPO/$BRANCH/install/netinstall.s
 PLACE="http://x.invalid"        # harmless placeholder the speaker overwrites itself
 
 API_PORT=8090                   # speakers answer here; used only to find them
-APP_PORT=80                     # ReTouch's web app, once it's up
+APP_PORT=8000                   # ReTouch's web app; also reachable on :80 via redirect
 SETUP_PORT=17000                # where we hand the speaker its setup instructions
 
 # ---- pretty output ---------------------------------------------------------
@@ -171,15 +171,14 @@ ok "asked the speaker to restart"
 # ---- wait for ReTouch to come up ------------------------------------------
 say ""
 printf 'Waiting for ReTouch to come online %s(this takes a minute or two)%s' "$DIM" "$R"
-if [ "$APP_PORT" = 80 ]; then
-	URL="http://$IP"
-else
-	URL="http://$IP:$APP_PORT"
-fi
+# Probe the app itself (its API), not bare :80 — Bose's own :80 setup page would
+# otherwise look like a false "ready". /api/settings only answers from ReTouch.
+PROBE="http://$IP:$APP_PORT/api/settings"
+URL="http://$IP"                 # what the user opens; :80 is redirected to the app
 up=0
 n=0
 while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
-	if curl -fsS --connect-timeout 2 --max-time 3 "$URL/" >/dev/null 2>&1; then up=1; break; fi
+	if curl -fsS --connect-timeout 2 --max-time 3 "$PROBE" >/dev/null 2>&1; then up=1; break; fi
 	printf '.'
 	sleep 4
 	n=$((n + 1))
@@ -187,6 +186,11 @@ done
 printf '\n\n'
 
 if [ "$up" -eq 1 ]; then
+	# Prefer the clean :80 URL, but only advertise it if the redirect really lands
+	# on ReTouch (some speakers may not allow the redirect — then use :8000).
+	if ! curl -fsS --connect-timeout 2 --max-time 3 "http://$IP/api/settings" >/dev/null 2>&1; then
+		URL="http://$IP:$APP_PORT"
+	fi
 	ok "${B}ReTouch is ready!${R}"
 	say ""
 	say "  Open it here:"

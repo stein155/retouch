@@ -26,7 +26,7 @@ MAX_ATTEMPTS=5
 
 # Where the speaker reaches the on-speaker pairing stub and web UI.
 MARGE_BASE=http://127.0.0.1:9080
-WEB_LISTEN=:80
+WEB_LISTEN=:8000
 MARGE_LISTEN=:9080
 CFG=/opt/Bose/etc/SoundTouchSdkPrivateCfg.xml
 START=$HOME_DIR/start.sh
@@ -50,62 +50,40 @@ restart_agent() {
 	[ -x "$START" ] && "$START" >/tmp/retouch-start.log 2>&1 &
 }
 
+# write_start_script writes the boot launcher. It binds the web UI on $WEB_LISTEN
+# (which is always reachable) and then makes a BEST-EFFORT attempt to also reach it
+# on :80 via an iptables redirect — WITHOUT touching Bose's own :80 setup server.
+# If the redirect can't be installed, the UI is still served on $WEB_LISTEN, so it
+# is never lost. iptables is volatile, so this re-applies the redirect every boot.
 write_start_script() {
 	cat > "$START" <<STARTSCRIPT
 #!/bin/sh
 
 LOG=/tmp/retouch.log
-CORE=/var/run/shepherd/Shepherd-core.xml
-CORE_ORIG=/opt/Bose/etc/Shepherd-core.xml
-CORE_TMP=/tmp/retouch-Shepherd-core-no-pts.xml
+APP_PORT=${WEB_LISTEN#:}
 
 log() { echo "[retouch-start] \$*" >>"\$LOG" 2>&1; }
 
-network_ready() {
-	route -n 2>/dev/null | grep -q '^0\.0\.0\.0[[:space:]]' || return 1
-	ifconfig 2>/dev/null | grep -q 'inet addr:[1-9][0-9]*\.' || return 1
-	return 0
-}
-
-wait_network() {
-	while :; do
-		network_ready && return 0
-		sleep 2
-	done
-}
-
-disable_ptsserver() {
-	if [ -f "\$CORE_ORIG" ] && [ -d /var/run/shepherd ]; then
-		sed '/<daemon name="PtsServer">/,/<\/daemon>/d' "\$CORE_ORIG" > "\$CORE_TMP" || return 1
-		rm -f "\$CORE"
-		ln -s "\$CORE_TMP" "\$CORE" || return 1
-		pid=\$(pidof shepherdd 2>/dev/null) && [ -n "\$pid" ] && kill -HUP "\$pid" 2>/dev/null
+# expose_80 routes inbound :80 traffic to the app port so the UI is reachable at
+# http://<speaker-ip>/ . It does NOT stop Bose's setup server; it just intercepts
+# :80 packets before local delivery. Idempotent and reversible (flush on reboot).
+expose_80() {
+	command -v iptables >/dev/null 2>&1 || { log "no iptables; UI on :\$APP_PORT only"; return 0; }
+	iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports "\$APP_PORT" 2>/dev/null
+	if iptables -t nat -I PREROUTING 1 -p tcp --dport 80 -j REDIRECT --to-ports "\$APP_PORT" 2>>"\$LOG"; then
+		log "redirected :80 -> :\$APP_PORT (UI on http://<speaker-ip>/)"
 	else
-		pid=\$(pidof PtsServer 2>/dev/null) && [ -n "\$pid" ] && kill "\$pid" 2>/dev/null
+		log "could not redirect :80; UI on :\$APP_PORT only"
 	fi
-	n=0
-	while [ "\$n" -lt 20 ]; do
-		pidof PtsServer >/dev/null 2>&1 || return 0
-		sleep 1
-		n=\$((n + 1))
-	done
-	return 1
 }
 
-wait_network
-if disable_ptsserver; then
-	log "released port 80 from Bose setup server"
-else
-	log "could not release port 80; ReTouch may fail to bind"
-fi
-
+expose_80
 $LAUNCH >>"\$LOG" 2>&1 &
 STARTSCRIPT
 	chmod 0755 "$START" 2>/dev/null
 }
 
-# write_rc_local installs the NAND autostart line. The start script waits for
-# normal network connectivity before taking over port 80 from Bose's setup page.
+# write_rc_local installs the NAND autostart line, which runs the boot launcher.
 write_rc_local() {
 	write_start_script
 	cat > /mnt/nv/rc.local <<RC
