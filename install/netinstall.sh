@@ -26,7 +26,7 @@ MAX_ATTEMPTS=5
 
 # Where the speaker reaches the on-speaker pairing stub and web UI.
 MARGE_BASE=http://127.0.0.1:9080
-WEB_LISTEN=:80
+WEB_LISTEN=:8000
 MARGE_LISTEN=:9080
 CFG=/opt/Bose/etc/SoundTouchSdkPrivateCfg.xml
 START=$HOME_DIR/start.sh
@@ -50,62 +50,53 @@ restart_agent() {
 	[ -x "$START" ] && "$START" >/tmp/retouch-start.log 2>&1 &
 }
 
+# write_start_script writes the boot launcher. It binds the web UI on $WEB_LISTEN and
+# then makes a BEST-EFFORT attempt to expose it on exactly one uniform port, :8080,
+# while hiding the raw $WEB_LISTEN port from the LAN — WITHOUT touching Bose's own setup
+# servers. If the rules can't be installed, the UI is still served on $WEB_LISTEN, so it
+# is never lost. iptables is volatile, so this re-applies on every boot.
 write_start_script() {
 	cat > "$START" <<STARTSCRIPT
 #!/bin/sh
 
 LOG=/tmp/retouch.log
-CORE=/var/run/shepherd/Shepherd-core.xml
-CORE_ORIG=/opt/Bose/etc/Shepherd-core.xml
-CORE_TMP=/tmp/retouch-Shepherd-core-no-pts.xml
+APP_PORT=${WEB_LISTEN#:}
 
 log() { echo "[retouch-start] \$*" >>"\$LOG" 2>&1; }
 
-network_ready() {
-	route -n 2>/dev/null | grep -q '^0\.0\.0\.0[[:space:]]' || return 1
-	ifconfig 2>/dev/null | grep -q 'inet addr:[1-9][0-9]*\.' || return 1
-	return 0
-}
-
-wait_network() {
-	while :; do
-		network_ready && return 0
-		sleep 2
-	done
-}
-
-disable_ptsserver() {
-	if [ -f "\$CORE_ORIG" ] && [ -d /var/run/shepherd ]; then
-		sed '/<daemon name="PtsServer">/,/<\/daemon>/d' "\$CORE_ORIG" > "\$CORE_TMP" || return 1
-		rm -f "\$CORE"
-		ln -s "\$CORE_TMP" "\$CORE" || return 1
-		pid=\$(pidof shepherdd 2>/dev/null) && [ -n "\$pid" ] && kill -HUP "\$pid" 2>/dev/null
+# expose_8080 makes ReTouch reachable on EXACTLY ONE port: :8080 (the uniform port that
+# works on every speaker — including the dual-processor SoundTouch 20/30, where LAN :80
+# is owned by a second processor and can't be redirected, and :8000 is firewalled). It
+# redirects inbound :8080 to the app port, and then DROPS direct LAN access to the app
+# port itself so the UI is NOT also exposed on :8000. Loopback access to the app port is
+# preserved (the speaker/agent use it locally). The raw table runs before nat, so the
+# drop only hits direct :8000 traffic, never the :8080-redirected flow. Best-effort and
+# reversible (flushes on reboot; if the rules can't be set, the UI stays on :APP_PORT).
+expose_8080() {
+	command -v iptables >/dev/null 2>&1 || { log "no iptables; UI on :\$APP_PORT only"; return 0; }
+	# clear any :80 redirect left by an older version (we expose ONLY :8080 now)
+	while iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports "\$APP_PORT" 2>/dev/null; do :; done
+	iptables -t nat -D PREROUTING -p tcp --dport 8080 -j REDIRECT --to-ports "\$APP_PORT" 2>/dev/null
+	if iptables -t nat -I PREROUTING 1 -p tcp --dport 8080 -j REDIRECT --to-ports "\$APP_PORT" 2>>"\$LOG"; then
+		log "redirected :8080 -> :\$APP_PORT"
 	else
-		pid=\$(pidof PtsServer 2>/dev/null) && [ -n "\$pid" ] && kill "\$pid" 2>/dev/null
+		log "could not redirect :8080 (UI still on :\$APP_PORT)"
 	fi
-	n=0
-	while [ "\$n" -lt 20 ]; do
-		pidof PtsServer >/dev/null 2>&1 || return 0
-		sleep 1
-		n=\$((n + 1))
-	done
-	return 1
+	iptables -t raw -D PREROUTING ! -i lo -p tcp --dport "\$APP_PORT" -j DROP 2>/dev/null
+	if iptables -t raw -I PREROUTING 1 ! -i lo -p tcp --dport "\$APP_PORT" -j DROP 2>>"\$LOG"; then
+		log "hid direct LAN access to :\$APP_PORT (loopback kept)"
+	else
+		log "could not hide :\$APP_PORT; it may stay reachable directly"
+	fi
 }
 
-wait_network
-if disable_ptsserver; then
-	log "released port 80 from Bose setup server"
-else
-	log "could not release port 80; ReTouch may fail to bind"
-fi
-
+expose_8080
 $LAUNCH >>"\$LOG" 2>&1 &
 STARTSCRIPT
 	chmod 0755 "$START" 2>/dev/null
 }
 
-# write_rc_local installs the NAND autostart line. The start script waits for
-# normal network connectivity before taking over port 80 from Bose's setup page.
+# write_rc_local installs the NAND autostart line, which runs the boot launcher.
 write_rc_local() {
 	write_start_script
 	cat > /mnt/nv/rc.local <<RC

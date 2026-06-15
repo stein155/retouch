@@ -20,7 +20,7 @@ NETINSTALL="https://raw.githubusercontent.com/$REPO/$BRANCH/install/netinstall.s
 PLACE="http://x.invalid"        # harmless placeholder the speaker overwrites itself
 
 API_PORT=8090                   # speakers answer here; used only to find them
-APP_PORT=80                     # ReTouch's web app, once it's up
+APP_PORT=8000                   # ReTouch's web app; also reachable on :80 via redirect
 SETUP_PORT=17000                # where we hand the speaker its setup instructions
 
 # ---- pretty output ---------------------------------------------------------
@@ -171,15 +171,16 @@ ok "asked the speaker to restart"
 # ---- wait for ReTouch to come up ------------------------------------------
 say ""
 printf 'Waiting for ReTouch to come online %s(this takes a minute or two)%s' "$DIM" "$R"
-if [ "$APP_PORT" = 80 ]; then
-	URL="http://$IP"
-else
-	URL="http://$IP:$APP_PORT"
-fi
+# Probe the app's own API (/api/settings only answers from ReTouch, so Bose's setup
+# page can't look like a false "ready"). ReTouch is exposed on exactly one uniform
+# port — :8080 — on every speaker, so that is the only URL we wait for and advertise.
+URL="http://$IP:8080"
 up=0
 n=0
 while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
-	if curl -fsS --connect-timeout 2 --max-time 3 "$URL/" >/dev/null 2>&1; then up=1; break; fi
+	if curl -fsS --connect-timeout 2 --max-time 3 "$URL/api/settings" >/dev/null 2>&1; then
+		up=1; break
+	fi
 	printf '.'
 	sleep 4
 	n=$((n + 1))

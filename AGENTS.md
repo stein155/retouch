@@ -10,7 +10,8 @@ its cloud servers. It is a single Go program that runs **on the speaker itself**
 
 1. Emulates the small part of the Bose cloud API the firmware checks in with, so the
    speaker re-enables its own native internet-radio sources.
-2. Serves a web app (port `:80`) for searching stations, managing the six presets,
+2. Serves a web app (port `:8000`, reached on `:80` via a boot-time redirect) for
+   searching stations, managing the six presets,
    and controlling playback.
 
 It does **not** stream or re-route audio — the speaker plays radio itself, exactly
@@ -59,7 +60,13 @@ is self-contained. Rebuild the frontend whenever you change anything under
 
 ## How it runs on the speaker
 
-- The web app listens on `:80`; the cloud-API emulation listens on a loopback port.
+- The web app listens on `:8000`, but is exposed on exactly one uniform port — `:8080` —
+  via a boot-time `iptables` redirect, while a `raw`-table rule hides direct LAN access to
+  `:8000` (loopback stays open for the agent). `:8080` is the only port that works on every
+  speaker: on the dual-processor SoundTouch 20/30 the LAN `:80` is owned by a second
+  processor (can't be redirected) and `:8000` is firewalled, but `:8080` is forwarded to the
+  main processor. Bose's own setup servers are left untouched. The cloud-API emulation
+  listens on a loopback port.
 - The speaker's service URLs are pointed at the on-speaker emulation; the factory
   configuration is backed up first so it can be fully restored.
 - An autostart entry relaunches ReTouch on every boot; on boot it re-checks in so the

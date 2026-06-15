@@ -2,7 +2,8 @@
 // the Bose cloud shutdown. It keeps the speaker's NATIVE music sources alive with
 // a minimal local pairing stub (so TUNEIN / INTERNET_RADIO keep working — the speaker
 // resolves + streams them itself against the live TuneIn service), and serves a
-// web UI on :80 to search TuneIn, manage the 6 presets, play, and set volume.
+// web UI on :8000 (reachable on :80 via an iptables redirect installed at boot) to
+// search TuneIn, manage the 6 presets, play, and set volume.
 // No cloud, no desktop app, no UPnP. Can also run on a PC pointed at a speaker IP
 // for testing (-speaker-host <ip>).
 package main
@@ -29,7 +30,7 @@ import (
 )
 
 func main() {
-	listen := flag.String("listen", ":80", "web UI / API listen address")
+	listen := flag.String("listen", ":8000", "web UI / API listen address")
 	margeAddr := flag.String("listen-marge", ":9080", "pairing-stub HTTP listen address; point the speaker's margeServerUrl / bmxRegistryUrl here")
 	margeBase := flag.String("marge-base", "", "base URL the speaker reaches the pairing stub at (default http://127.0.0.1<listen-marge>); rewritten into the BMX registry")
 	host := flag.String("speaker-host", "127.0.0.1", "speaker host (127.0.0.1 on-speaker; the speaker IP for off-speaker testing)")
