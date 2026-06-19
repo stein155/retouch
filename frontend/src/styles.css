@@ -506,10 +506,7 @@ input  { font: inherit; color: inherit; user-select: text; -webkit-user-select: 
   display: inline-flex; align-items: center; gap: 3px;
   white-space: nowrap;
 }
-.mp-live-pill-loading { color: var(--ink-2); }
-
-/* Loading spinner shown while a station is starting / buffering (mini-player
-   pill and preset tiles). */
+/* Loading spinner shown while a station is starting / buffering (preset tiles). */
 .mp-spinner {
   width: 9px; height: 9px;
   border-radius: 50%;

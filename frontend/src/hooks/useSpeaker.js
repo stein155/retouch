@@ -12,7 +12,6 @@ import { sameStation } from '../lib/station';
 // (or the pending window expires). Components consume a derived { status, station }
 // instead of the raw playStatus, so "starten / bufferen / live" render cleanly.
 
-const PENDING_SETTLE_MS = 5000; // after this, any PLAY_STATE is accepted as ours
 const PENDING_MAX_MS = 15000; // hard cap: give up holding, show reality (likely an error)
 const POLL_ACTIVE_MS = 2500; // poll faster while starting / buffering
 const POLL_IDLE_MS = 8000; // settle back to a calm poll when playing / idle
@@ -26,6 +25,9 @@ export function useSpeaker() {
 
   const pendingRef = useRef(null);
   pendingRef.current = pending;
+  // What's on screen right now (real or pending), so a tap can remember which
+  // station we're switching *away* from.
+  const shownNameRef = useRef('');
 
   const refresh = useCallback(async () => {
     const [np, vol] = await Promise.all([getNowPlaying(), getVolume()]);
@@ -35,9 +37,13 @@ export function useSpeaker() {
       if (p) {
         const elapsed = Date.now() - p.since;
         const playing = !np.standby && np.playStatus === 'PLAY_STATE';
-        // Clear the hold once the box plays our station (matched by name) or has
-        // been playing anything for long enough that the switch must be done.
-        const settled = playing && (sameStation(np.stationName, p.name) || elapsed > PENDING_SETTLE_MS);
+        // Clear the hold only once the box actually plays our station, OR has
+        // moved off the previous one onto something new — never while it still
+        // reports the station we switched away from (that brief PLAY_STATE of the
+        // old station during a switch is exactly what used to flicker through).
+        const onOurs = sameStation(np.stationName, p.name);
+        const stillPrev = sameStation(np.stationName, p.prevName);
+        const settled = playing && (onOurs || !stillPrev);
         if (settled || elapsed > PENDING_MAX_MS) setPending(null);
       }
     }
@@ -58,6 +64,7 @@ export function useSpeaker() {
       tuneInId: station.tuneInId || null,
       logo: station.logo || '',
       since: Date.now(),
+      prevName: shownNameRef.current, // station we're switching away from
     });
   }, []);
 
@@ -108,6 +115,7 @@ export function useSpeaker() {
 
   const statusRef = useRef('idle');
   statusRef.current = player.status;
+  shownNameRef.current = player.station?.name || '';
 
   // Initial load.
   useEffect(() => {

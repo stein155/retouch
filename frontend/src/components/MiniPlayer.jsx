@@ -27,10 +27,11 @@ export function MiniPlayer({ player, volume, speakerName, onStop, onVolume }) {
               <div className="mp-art-inner">
                 <StationLogo name={displayName} tuneInId={station?.tuneInId} logo={station?.art} />
               </div>
-              <span className={cx('mp-live-pill', !playing && 'mp-live-pill-loading')}>
-                {playing ? <span className="live-dot" /> : <span className="mp-spinner" />}
-                {statusLabel}
-              </span>
+              {playing && (
+                <span className="mp-live-pill">
+                  <span className="live-dot" />{statusLabel}
+                </span>
+              )}
             </div>
             <div className="mp-meta">
               <div className="mp-name" key={displayName}>{displayName}</div>
