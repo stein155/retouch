@@ -65,6 +65,18 @@ speaker fetches it and restarts; if it is already up to date, nothing changes.
 **To undo everything** (restore the factory configuration and remove ReTouch), run
 `install/uninstall.sh` on the speaker and reboot.
 
+## Tested on
+
+ReTouch has been verified on the following speakers and firmware versions:
+
+| Speaker | Firmware |
+|---|---|
+| Bose SoundTouch 10 | `27.0.6.46330.5043500 epdbuild.trunk.hepdswbld04.2022-08-04T11:20:29` |
+| Bose SoundTouch 10 | `27.0.3.46298.4608935 epdbuild.trunk.hepdswbld04.2021-10-06T16:35:02` |
+| Bose SoundTouch 20 | `27.0.6.46330.5043500 epdbuild.trunk.hepdswbld04.2022-08-04T11:20:29` |
+
+Other SoundTouch models and firmware versions may work too — if you try one, let us know.
+
 ## Repo layout
 
 ```
