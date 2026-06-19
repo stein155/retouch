@@ -8,8 +8,9 @@
 // the bootstrap string as the live margeServerUrl: native sources resolve against a
 // bogus URL and the curl|sh re-runs every boot.
 //
-// This guard fixes it from the speaker side. Whenever it sees EXACTLY the install
-// bootstrap string as the speaker's cloud URL, it repoints the cloud URLs at the stub.
+// This guard fixes it from the speaker side. It reads the speaker's reported cloud URL
+// (the <margeURL> in /info) and, whenever it sees EXACTLY the install bootstrap string,
+// it repoints the cloud URLs at the stub.
 // It matches only that one literal, so a recovery command deliberately pushed through
 // the same channel (e.g. one that enables SSH) is left untouched and keeps working —
 // and if ReTouch is not running at all, nothing repoints it, so the channel stays open
@@ -60,12 +61,12 @@ func (g *Guard) Run(ctx context.Context) {
 func (g *Guard) check(ctx context.Context) {
 	c, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	cfg, err := g.speaker.CloudConfig(c)
+	info, err := g.speaker.Info(c)
 	if err != nil {
-		g.log.Debug("read cloud config", "err", err)
+		g.log.Debug("read speaker /info", "err", err)
 		return
 	}
-	if !isBootstrapLeftover(cfg) {
+	if !isBootstrapLeftover(info.MargeURL) {
 		return // already clean, or a deliberate command we must not touch
 	}
 	g.log.Info("cloud URL stuck on install bootstrap; repointing at stub", "base", g.base)
@@ -76,9 +77,9 @@ func (g *Guard) check(ctx context.Context) {
 	g.log.Info("repointed cloud URLs at stub")
 }
 
-// isBootstrapLeftover reports whether cfg still contains the exact one-shot install
-// bootstrap URL. Only that literal qualifies: a deliberately pushed recovery command
-// does not contain it and so is preserved.
-func isBootstrapLeftover(cfg string) bool {
-	return strings.Contains(cfg, speaker.BootstrapURL)
+// isBootstrapLeftover reports whether the speaker's reported cloud URL still contains
+// the exact one-shot install bootstrap URL. Only that literal qualifies: a deliberately
+// pushed recovery command does not contain it and so is preserved.
+func isBootstrapLeftover(margeURL string) bool {
+	return strings.Contains(margeURL, speaker.BootstrapURL)
 }

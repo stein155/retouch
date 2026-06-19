@@ -8,40 +8,40 @@ import (
 
 func TestIsBootstrapLeftover(t *testing.T) {
 	cases := []struct {
-		name string
-		cfg  string
-		want bool
+		name     string
+		margeURL string
+		want     bool
 	}{
 		{
-			name: "exact bootstrap leftover",
-			cfg:  "margeServerUrl=" + speaker.BootstrapURL + "\n",
-			want: true,
+			name:     "exact bootstrap leftover",
+			margeURL: speaker.BootstrapURL,
+			want:     true,
 		},
 		{
-			name: "clean stub url",
-			cfg:  "margeServerUrl=http://127.0.0.1:9080\n",
-			want: false,
+			name:     "clean stub url",
+			margeURL: "http://127.0.0.1:9080",
+			want:     false,
 		},
 		{
-			name: "deliberate ssh recovery command preserved",
-			cfg:  "margeServerUrl=http://x.invalid;dropbear -p 22 &\n",
-			want: false,
+			name:     "deliberate ssh recovery command preserved",
+			margeURL: "http://x.invalid;dropbear -p 22 &",
+			want:     false,
 		},
 		{
-			name: "placeholder host but not the bootstrap command",
-			cfg:  "margeServerUrl=http://x.invalid/update\n",
-			want: false,
+			name:     "placeholder host but not the bootstrap command",
+			margeURL: "http://x.invalid/update",
+			want:     false,
 		},
 		{
-			name: "empty",
-			cfg:  "",
-			want: false,
+			name:     "empty",
+			margeURL: "",
+			want:     false,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isBootstrapLeftover(tc.cfg); got != tc.want {
-				t.Fatalf("isBootstrapLeftover(%q) = %v, want %v", tc.cfg, got, tc.want)
+			if got := isBootstrapLeftover(tc.margeURL); got != tc.want {
+				t.Fatalf("isBootstrapLeftover(%q) = %v, want %v", tc.margeURL, got, tc.want)
 			}
 		})
 	}
