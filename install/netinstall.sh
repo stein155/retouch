@@ -53,10 +53,19 @@ restart_agent() {
 # reboot_after_cleanup applies the cleaned boseurls on firmware that only makes
 # envswitch changes live after boot. The boot launcher is already installed, so the
 # speaker comes back with ReTouch and without the one-shot bootstrap URL.
+#
+# This runs EARLY in boot, when the :17000 CLI may not be up yet, and nc's exit status
+# reflects only the TCP connect — NOT whether the speaker acted on `sys reboot`. So we
+# must not gate on nc success (the old `&& exit 0` could exit without ever rebooting,
+# leaving boseurls — and thus /info margeURL — stuck on the bootstrap string). Ask the
+# CLI to reboot as a courtesy, then ALWAYS force a real reboot ourselves.
 reboot_after_cleanup() {
 	log "rebooting to apply cleaned cloud URLs"
-	command -v nc >/dev/null 2>&1 && printf '%s\n' 'sys reboot' | nc -w 2 127.0.0.1 17000 >/dev/null 2>&1 && exit 0
-	/sbin/reboot 2>>"$LOG" || reboot 2>>"$LOG" || log "could not reboot automatically"
+	command -v nc >/dev/null 2>&1 && printf '%s\n' 'sys reboot' | nc -w 2 127.0.0.1 17000 >/dev/null 2>&1
+	# Give a CLI-initiated reboot a moment to take the box down; if it didn't, force it.
+	sleep 5
+	sync 2>/dev/null
+	/sbin/reboot 2>>"$LOG" || reboot 2>>"$LOG" || busybox reboot 2>>"$LOG" || log "could not reboot automatically"
 }
 
 # write_start_script writes the boot launcher. It binds the web UI on $WEB_LISTEN and
