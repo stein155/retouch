@@ -27,6 +27,7 @@ PLACE="http://x.invalid"        # harmless placeholder the speaker overwrites it
 API_PORT=8090                   # speakers answer here; used only to find them
 APP_PORT=8000                   # ReTouch's web app; also reachable on :80 via redirect
 SETUP_PORT=17000                # where we hand the speaker its setup instructions
+APP_URL_PORT=8080               # where ReTouch is exposed after install
 
 # ---- pretty output ---------------------------------------------------------
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -79,6 +80,11 @@ msg() {
 		en:sent_setup) printf 'sent the setup instructions' ;;
 		en:couldnt_reach) printf "could not reach %s at %s. Check it is switched on and on the same network, then try again." ;;
 		en:asked_restart) printf 'asked the speaker to restart' ;;
+		en:waiting_restart) printf 'Waiting for the speaker to restart ' ;;
+		en:waiting_restart_hint) printf '(first it goes offline)' ;;
+		en:not_offline) printf 'the speaker did not go offline after the restart request.' ;;
+		en:still_answering) printf 'ReTouch is still answering at %s, so the restart may not have started yet.' ;;
+		en:retry_update) printf "Give it another minute, then run this installer again if it still has not updated." ;;
 		en:waiting_online) printf 'Waiting for ReTouch to come online ' ;;
 		en:waiting_online_hint) printf '(this takes a minute or two)' ;;
 		en:ready) printf 'ReTouch is ready!' ;;
@@ -111,6 +117,11 @@ msg() {
 		nl:sent_setup) printf 'installatie-instructies verzonden' ;;
 		nl:couldnt_reach) printf 'kon %s niet bereiken op %s. Controleer of hij aan staat en op hetzelfde netwerk zit, en probeer opnieuw.' ;;
 		nl:asked_restart) printf 'speaker gevraagd om te herstarten' ;;
+		nl:waiting_restart) printf 'Wachten tot de speaker herstart ' ;;
+		nl:waiting_restart_hint) printf '(eerst gaat hij offline)' ;;
+		nl:not_offline) printf 'de speaker ging niet offline na het herstartverzoek.' ;;
+		nl:still_answering) printf 'ReTouch antwoordt nog steeds op %s, dus de herstart is misschien nog niet begonnen.' ;;
+		nl:retry_update) printf 'Wacht nog een minuut en start deze installer opnieuw als hij nog niet is bijgewerkt.' ;;
 		nl:waiting_online) printf 'Wachten tot ReTouch online komt ' ;;
 		nl:waiting_online_hint) printf '(dit duurt een minuut of twee)' ;;
 		nl:ready) printf 'ReTouch is klaar!' ;;
@@ -142,6 +153,11 @@ msg() {
 		de:sent_setup) printf 'Installationsanweisungen gesendet' ;;
 		de:couldnt_reach) printf 'konnte %s unter %s nicht erreichen. Pruefe, ob er eingeschaltet und im selben Netzwerk ist, und versuche es erneut.' ;;
 		de:asked_restart) printf 'Lautsprecher zum Neustart aufgefordert' ;;
+		de:waiting_restart) printf 'Warte auf den Neustart des Lautsprechers ' ;;
+		de:waiting_restart_hint) printf '(zuerst geht er offline)' ;;
+		de:not_offline) printf 'der Lautsprecher ging nach der Neustartanforderung nicht offline.' ;;
+		de:still_answering) printf 'ReTouch antwortet noch unter %s, der Neustart hat also moeglicherweise noch nicht begonnen.' ;;
+		de:retry_update) printf 'Warte noch eine Minute und starte diesen Installer erneut, falls er noch nicht aktualisiert wurde.' ;;
 		de:waiting_online) printf 'Warte, bis ReTouch online ist ' ;;
 		de:waiting_online_hint) printf '(das dauert ein bis zwei Minuten)' ;;
 		de:ready) printf 'ReTouch ist bereit!' ;;
@@ -173,6 +189,11 @@ msg() {
 		fr:sent_setup) printf 'instructions de configuration envoyees' ;;
 		fr:couldnt_reach) printf "impossible de joindre %s a %s. Verifiez qu'elle est allumee et sur le meme reseau, puis reessayez." ;;
 		fr:asked_restart) printf "redemarrage de l'enceinte demande" ;;
+		fr:waiting_restart) printf "Attente du redemarrage de l'enceinte " ;;
+		fr:waiting_restart_hint) printf "(elle passe d'abord hors ligne)" ;;
+		fr:not_offline) printf "l'enceinte n'est pas passee hors ligne apres la demande de redemarrage." ;;
+		fr:still_answering) printf "ReTouch repond encore a %s, le redemarrage n'a donc peut-etre pas encore commence." ;;
+		fr:retry_update) printf "Attendez encore une minute, puis relancez cet installateur si la mise a jour n'est toujours pas faite." ;;
 		fr:waiting_online) printf 'Attente de ReTouch en ligne ' ;;
 		fr:waiting_online_hint) printf '(cela prend une minute ou deux)' ;;
 		fr:ready) printf 'ReTouch est pret !' ;;
@@ -204,6 +225,11 @@ msg() {
 		es:sent_setup) printf 'instrucciones de configuracion enviadas' ;;
 		es:couldnt_reach) printf 'no se pudo contactar con %s en %s. Comprueba que este encendido y en la misma red, e intentalo de nuevo.' ;;
 		es:asked_restart) printf 'se pidio al altavoz que se reiniciara' ;;
+		es:waiting_restart) printf 'Esperando a que el altavoz se reinicie ' ;;
+		es:waiting_restart_hint) printf '(primero se desconecta)' ;;
+		es:not_offline) printf 'el altavoz no se desconecto despues de pedir el reinicio.' ;;
+		es:still_answering) printf 'ReTouch sigue respondiendo en %s, asi que puede que el reinicio aun no haya empezado.' ;;
+		es:retry_update) printf 'Espera otro minuto y ejecuta este instalador de nuevo si aun no se ha actualizado.' ;;
 		es:waiting_online) printf 'Esperando a que ReTouch este en linea ' ;;
 		es:waiting_online_hint) printf '(esto tarda uno o dos minutos)' ;;
 		es:ready) printf 'ReTouch esta listo!' ;;
@@ -235,6 +261,11 @@ msg() {
 		af:sent_setup) printf 'opstelinstruksies gestuur' ;;
 		af:couldnt_reach) printf 'kon %s by %s nie bereik nie. Kyk dat dit aangeskakel is en op dieselfde netwerk is, en probeer weer.' ;;
 		af:asked_restart) printf 'luidspreker gevra om te herbegin' ;;
+		af:waiting_restart) printf 'Wag dat die luidspreker herbegin ' ;;
+		af:waiting_restart_hint) printf '(eers gaan dit vanlyn)' ;;
+		af:not_offline) printf 'die luidspreker het nie vanlyn gegaan na die herbeginversoek nie.' ;;
+		af:still_answering) printf 'ReTouch antwoord nog by %s, so die herbegin het dalk nog nie begin nie.' ;;
+		af:retry_update) printf 'Wag nog n minuut en voer hierdie installeerder weer uit as dit nog nie opgedateer het nie.' ;;
 		af:waiting_online) printf 'Wag dat ReTouch aanlyn kom ' ;;
 		af:waiting_online_hint) printf '(dit neem n minuut of twee)' ;;
 		af:ready) printf 'ReTouch is gereed!' ;;
@@ -365,6 +396,9 @@ say "$(msg restart_once)"
 say ""
 
 send() { printf '%s\n' "$1" | nc -w 3 "$IP" "$SETUP_PORT" >/dev/null 2>&1; }
+URL="http://$IP:$APP_URL_PORT"
+was_up=0
+curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1 && was_up=1
 
 # Hand the speaker a one-time instruction to fetch and run the on-speaker setup,
 # then tell it to restart so the instruction takes effect.
@@ -378,11 +412,36 @@ ok "$(msg asked_restart)"
 
 # ---- wait for ReTouch to come up ------------------------------------------
 say ""
+# When updating an already running install, the old ReTouch can still answer for a
+# short while after the reboot request. Wait for that instance to disappear first,
+# otherwise we can report success before the speaker has actually restarted.
+if [ "$was_up" -eq 1 ]; then
+	printf '%s%s%s%s' "$(msg waiting_restart)" "$DIM" "$(msg waiting_restart_hint)" "$R"
+	down=0
+	n=0
+	while [ "$n" -lt 60 ]; do            # ~2 minutes for the old service to stop
+		if ! curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
+			down=1; break
+		fi
+		printf '.'
+		sleep 2
+		n=$((n + 1))
+	done
+	printf '\n\n'
+	if [ "$down" -ne 1 ]; then
+		warn "$(msg not_offline)"
+		say ""
+		say "  $(fmt still_answering "${B}$URL${R}")"
+		say "  $(msg retry_update)"
+		say ""
+		exit 0
+	fi
+fi
+
 printf '%s%s%s%s' "$(msg waiting_online)" "$DIM" "$(msg waiting_online_hint)" "$R"
 # Probe the app's own API (/api/settings only answers from ReTouch, so Bose's setup
 # page can't look like a false "ready"). ReTouch is exposed on exactly one uniform
 # port — :8080 — on every speaker, so that is the only URL we wait for and advertise.
-URL="http://$IP:8080"
 up=0
 n=0
 while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
