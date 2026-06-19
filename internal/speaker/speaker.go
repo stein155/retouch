@@ -357,6 +357,12 @@ func (c *Client) cli(ctx context.Context, cmd string) error {
 	return err
 }
 
+// Reboot asks the speaker to restart via the :17000 CLI. Used after repointing the
+// cloud URLs so the firmware re-derives margeServerUrl from the cleaned boseurls.
+func (c *Client) Reboot(ctx context.Context) error {
+	return c.cli(ctx, "sys reboot")
+}
+
 // PointCloudAtStub repoints the speaker's cloud URLs at base (the on-speaker stub),
 // both for this boot (`sys configuration`) and persistently (`envswitch boseurls`), so
 // native sources resolve locally and the boot-time bootstrap does not re-run. This

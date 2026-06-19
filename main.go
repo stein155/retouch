@@ -114,7 +114,7 @@ func main() {
 	// still the one-shot install bootstrap string, repoint it at our stub. Only that
 	// exact string is touched, so a deliberate recovery command pushed through the same
 	// channel keeps working.
-	go urlguard.New(bc, base, *pairEvery, logger.With("comp", "urlguard")).Run(ctx)
+	go urlguard.New(bc, base, *presets+".urlguard", *pairEvery, logger.With("comp", "urlguard")).Run(ctx)
 
 	var wg sync.WaitGroup
 	serve := func(name, addr string, h http.Handler) {

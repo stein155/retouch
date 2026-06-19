@@ -1,6 +1,7 @@
 package urlguard
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stein155/retouch/internal/speaker"
@@ -44,5 +45,21 @@ func TestIsBootstrapLeftover(t *testing.T) {
 				t.Fatalf("isBootstrapLeftover(%q) = %v, want %v", tc.margeURL, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRebootAttempts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "presets.json.urlguard")
+
+	if got := readRebootAttempts(path); got != 0 {
+		t.Fatalf("missing file: got %d, want 0", got)
+	}
+	writeRebootAttempts(path, 2)
+	if got := readRebootAttempts(path); got != 2 {
+		t.Fatalf("after write: got %d, want 2", got)
+	}
+	clearRebootAttempts(path)
+	if got := readRebootAttempts(path); got != 0 {
+		t.Fatalf("after clear: got %d, want 0", got)
 	}
 }
