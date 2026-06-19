@@ -87,6 +87,9 @@ msg() {
 		en:retry_update) printf "Give it another minute, then run this installer again if it still has not updated." ;;
 		en:waiting_online) printf 'Waiting for ReTouch to come online ' ;;
 		en:waiting_online_hint) printf '(this takes a minute or two)' ;;
+		en:installed_ok) printf 'Installation succeeded' ;;
+		en:final_restart) printf 'One final restart of the speaker ' ;;
+		en:final_restart_hint) printf '(this takes about 20 seconds)' ;;
 		en:ready) printf 'ReTouch is ready!' ;;
 		en:open_here) printf 'Open it here:' ;;
 		en:tip_open) printf 'Tip: open that link on your phone, then use Add to Home Screen.' ;;
@@ -124,6 +127,9 @@ msg() {
 		nl:retry_update) printf 'Wacht nog een minuut en start deze installer opnieuw als hij nog niet is bijgewerkt.' ;;
 		nl:waiting_online) printf 'Wachten tot ReTouch online komt ' ;;
 		nl:waiting_online_hint) printf '(dit duurt een minuut of twee)' ;;
+		nl:installed_ok) printf 'Installatie geslaagd' ;;
+		nl:final_restart) printf 'Nog een laatste herstart van de speaker ' ;;
+		nl:final_restart_hint) printf '(dit duurt ongeveer 20 seconden)' ;;
 		nl:ready) printf 'ReTouch is klaar!' ;;
 		nl:open_here) printf 'Open hem hier:' ;;
 		nl:tip_open) printf 'Tip: open die link op je telefoon en gebruik daarna Zet op beginscherm.' ;;
@@ -160,6 +166,9 @@ msg() {
 		de:retry_update) printf 'Warte noch eine Minute und starte diesen Installer erneut, falls er noch nicht aktualisiert wurde.' ;;
 		de:waiting_online) printf 'Warte, bis ReTouch online ist ' ;;
 		de:waiting_online_hint) printf '(das dauert ein bis zwei Minuten)' ;;
+		de:installed_ok) printf 'Installation erfolgreich' ;;
+		de:final_restart) printf 'Noch ein letzter Neustart des Lautsprechers ' ;;
+		de:final_restart_hint) printf '(das dauert etwa 20 Sekunden)' ;;
 		de:ready) printf 'ReTouch ist bereit!' ;;
 		de:open_here) printf 'Hier oeffnen:' ;;
 		de:tip_open) printf 'Tipp: Oeffne den Link auf deinem Telefon und nutze Zum Home-Bildschirm.' ;;
@@ -196,6 +205,9 @@ msg() {
 		fr:retry_update) printf "Attendez encore une minute, puis relancez cet installateur si la mise a jour n'est toujours pas faite." ;;
 		fr:waiting_online) printf 'Attente de ReTouch en ligne ' ;;
 		fr:waiting_online_hint) printf '(cela prend une minute ou deux)' ;;
+		fr:installed_ok) printf 'Installation reussie' ;;
+		fr:final_restart) printf "Un dernier redemarrage de l'enceinte " ;;
+		fr:final_restart_hint) printf '(cela prend environ 20 secondes)' ;;
 		fr:ready) printf 'ReTouch est pret !' ;;
 		fr:open_here) printf 'Ouvrez-le ici :' ;;
 		fr:tip_open) printf "Astuce : ouvrez ce lien sur votre telephone, puis utilisez Ajouter a l'ecran d'accueil." ;;
@@ -232,6 +244,9 @@ msg() {
 		es:retry_update) printf 'Espera otro minuto y ejecuta este instalador de nuevo si aun no se ha actualizado.' ;;
 		es:waiting_online) printf 'Esperando a que ReTouch este en linea ' ;;
 		es:waiting_online_hint) printf '(esto tarda uno o dos minutos)' ;;
+		es:installed_ok) printf 'Instalacion completada' ;;
+		es:final_restart) printf 'Un ultimo reinicio del altavoz ' ;;
+		es:final_restart_hint) printf '(esto tarda unos 20 segundos)' ;;
 		es:ready) printf 'ReTouch esta listo!' ;;
 		es:open_here) printf 'Abrelo aqui:' ;;
 		es:tip_open) printf 'Consejo: abre ese enlace en tu telefono y usa Anadir a pantalla de inicio.' ;;
@@ -268,6 +283,9 @@ msg() {
 		af:retry_update) printf 'Wag nog n minuut en voer hierdie installeerder weer uit as dit nog nie opgedateer het nie.' ;;
 		af:waiting_online) printf 'Wag dat ReTouch aanlyn kom ' ;;
 		af:waiting_online_hint) printf '(dit neem n minuut of twee)' ;;
+		af:installed_ok) printf 'Installasie geslaag' ;;
+		af:final_restart) printf 'Nog n laaste herbegin van die luidspreker ' ;;
+		af:final_restart_hint) printf '(dit neem omtrent 20 sekondes)' ;;
 		af:ready) printf 'ReTouch is gereed!' ;;
 		af:open_here) printf 'Maak dit hier oop:' ;;
 		af:tip_open) printf 'Wenk: maak daardie skakel op jou foon oop en gebruik Voeg by tuisskerm.' ;;
@@ -452,6 +470,40 @@ while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
 	sleep 4
 	n=$((n + 1))
 done
+
+# Once ReTouch first answers, the speaker still restarts one more time to apply the
+# cleaned-up cloud URLs — its marge URL only goes live after a boot. ReTouch is
+# briefly reachable in between, so don't report success yet: confirm the install
+# succeeded, wait for the speaker to drop offline for that final restart, then for
+# ReTouch to come back for good. If it never drops, the restart is already behind us.
+if [ "$up" -eq 1 ]; then
+	printf '\n\n'
+	ok "$(msg installed_ok)"
+	say ""
+	printf '%s%s%s%s' "$(msg final_restart)" "$DIM" "$(msg final_restart_hint)" "$R"
+	gone=0
+	n=0
+	while [ "$n" -lt 20 ]; do            # ~40s for the final restart to begin
+		if ! curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
+			gone=1; break
+		fi
+		printf '.'
+		sleep 2
+		n=$((n + 1))
+	done
+	if [ "$gone" -eq 1 ]; then
+		up=0
+		n=0
+		while [ "$n" -lt 90 ]; do            # ~6 minutes for the final restart to finish
+			if curl -fsS --connect-timeout 2 --max-time 3 "$URL/api/settings" >/dev/null 2>&1; then
+				up=1; break
+			fi
+			printf '.'
+			sleep 4
+			n=$((n + 1))
+		done
+	fi
+fi
 printf '\n\n'
 
 if [ "$up" -eq 1 ]; then
