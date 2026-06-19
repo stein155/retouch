@@ -44,9 +44,17 @@ type Server struct {
 	speaker  *speaker.Client
 	store    *store.Store
 	settings *settings.Store
+	mirror   PresetMirror
 	log      *slog.Logger
 	ui       http.Handler // serves the embedded dist bundle
 	proxy    *http.Client // for the same-origin TuneIn / logo proxies
+}
+
+// PresetMirror receives successful direct speaker preset writes so the local cloud
+// emulation cannot later sync stale presets back to the speaker.
+type PresetMirror interface {
+	MirrorPreset(slot int, name, location, art string)
+	RemovePreset(slot int)
 }
 
 // New builds a Server.
@@ -65,6 +73,11 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		ui:       http.FileServer(http.FS(sub)),
 		proxy:    &http.Client{Timeout: 12 * time.Second},
 	}
+}
+
+// SetPresetMirror attaches the local cloud preset store after both servers exist.
+func (s *Server) SetPresetMirror(m PresetMirror) {
+	s.mirror = m
 }
 
 // Handler returns the HTTP mux.
@@ -198,6 +211,9 @@ func (s *Server) setPreset(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "save failed", err)
 		return
 	}
+	if s.mirror != nil {
+		s.mirror.MirrorPreset(slot, p.Name, loc, p.Logo)
+	}
 	s.log.Info("store preset", "slot", slot, "station", p.StationID, "name", p.Name)
 	writeJSON(w, 200, p)
 }
@@ -213,6 +229,9 @@ func (s *Server) delPreset(w http.ResponseWriter, r *http.Request) {
 	if err := s.speaker.RemovePreset(ctx, slot); err != nil {
 		s.fail(w, "delete failed", err)
 		return
+	}
+	if s.mirror != nil {
+		s.mirror.RemovePreset(slot)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

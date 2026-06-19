@@ -20,6 +20,14 @@ type presetSlot struct {
 	Art      string `json:"art,omitempty"`
 }
 
+// PresetSeed is one native preset read from the speaker at startup.
+type PresetSeed struct {
+	Slot     int
+	Name     string
+	Location string
+	Logo     string
+}
+
 // presets holds the six preset buttons. It is seeded from the embedded capture and
 // then becomes the source of truth: the speaker's long-press stores are written through
 // here and persisted, so presets/all reflects edits across restarts.
@@ -37,6 +45,28 @@ func newPresets(seed []byte, path string) *presets {
 	p.seedFrom(seed)
 	p.loadOverlay()
 	return p
+}
+
+func (p *presets) seedNative(ps []PresetSeed) {
+	if len(ps) == 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, sp := range ps {
+		if sp.Slot < 1 || sp.Slot > 6 || sp.Location == "" {
+			continue
+		}
+		p.slots[sp.Slot] = presetSlot{
+			Button:   sp.Slot,
+			Name:     sp.Name,
+			Location: sp.Location,
+			Type:     "stationurl",
+			Art:      sp.Logo,
+		}
+	}
+	p.seq++
+	p.persistLocked()
 }
 
 func (p *presets) seedFrom(body []byte) {
@@ -111,14 +141,38 @@ func (p *presets) set(button int, s presetSlot) {
 	p.mu.Unlock()
 }
 
+func (p *presets) remove(button int) {
+	if button < 1 || button > 6 {
+		return
+	}
+	p.mu.Lock()
+	delete(p.slots, button)
+	p.seq++
+	p.persistLocked()
+	p.mu.Unlock()
+}
+
 // render serialises the six buttons in the firmware's presets/all format. The
 // TUNEIN <source> block is constant (the speaker plays the location itself).
 func (p *presets) render() ([]byte, string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	out := []byte(p.renderLocked(true))
+	return out, fmt.Sprintf("p%d", p.seq)
+}
+
+func (p *presets) renderInner() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.renderLocked(false)
+}
+
+func (p *presets) renderLocked(root bool) string {
 	ts := time.Now().UTC().Format("2006-01-02T15:04:05.000+00:00")
 	var b strings.Builder
-	b.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` + "\n<presets>\n")
+	if root {
+		b.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` + "\n<presets>\n")
+	}
 	for btn := 1; btn <= 6; btn++ {
 		s, ok := p.slots[btn]
 		if !ok {
@@ -127,9 +181,10 @@ func (p *presets) render() ([]byte, string) {
 		fmt.Fprintf(&b, presetTmpl, btn, xmlText(s.Art), xmlText(orDefault(s.Type, "stationurl")),
 			ts, xmlText(s.Location), xmlText(s.Name), ts, xmlText(s.Name))
 	}
-	b.WriteString("</presets>")
-	out := []byte(b.String())
-	return out, fmt.Sprintf("p%d", p.seq)
+	if root {
+		b.WriteString("</presets>")
+	}
+	return b.String()
 }
 
 func orDefault(s, d string) string {

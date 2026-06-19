@@ -86,7 +86,7 @@ type Server struct {
 // "http://127.0.0.1:9080"); info carries the live speaker's identity (from /info)
 // used to personalise the replayed account documents. info may be nil for an
 // off-speaker dry run, in which case neutral placeholders are kept.
-func New(base string, info *speaker.Info, presetsPath string, tc TuneIn, log *slog.Logger) (*Server, error) {
+func New(base string, info *speaker.Info, presetsPath string, nativePresets []PresetSeed, tc TuneIn, log *slog.Logger) (*Server, error) {
 	base = strings.TrimRight(base, "/")
 	if info == nil {
 		info = &speaker.Info{}
@@ -127,13 +127,55 @@ func New(base string, info *speaker.Info, presetsPath string, tc TuneIn, log *sl
 			return nil, err
 		}
 	}
+	if info.Software != "" {
+		s.accountFull = rewriteFirmware(s.accountFull, info.Software)
+		s.accountDevices = rewriteFirmware(s.accountDevices, info.Software)
+	}
 	// Presets are dynamic (write-through + persisted), seeded from the capture.
 	seed, err := load("presets_all.xml", ctStreamV11)
 	if err != nil {
 		return nil, err
 	}
 	s.presets = newPresets(seed.body, presetsPath)
+	s.presets.seedNative(nativePresets)
 	return s, nil
+}
+
+func rewriteFirmware(d doc, software string) doc {
+	body := string(d.body)
+	body = rewriteElementText(body, "firmware-version", software)
+	body = rewriteElementText(body, "firmwareVersion", software)
+	d.body = []byte(body)
+	sum := sha256.Sum256(d.body)
+	d.etag = fmt.Sprintf("%x", sum[:8])
+	return d
+}
+
+func rewriteElementText(s, elem, text string) string {
+	open := "<" + elem + ">"
+	close := "</" + elem + ">"
+	var b strings.Builder
+	for {
+		start := strings.Index(s, open)
+		if start < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		valueStart := start + len(open)
+		end := strings.Index(s[valueStart:], close)
+		if end < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		end += valueStart
+		b.WriteString(s[:valueStart])
+		if strings.TrimSpace(s[valueStart:end]) == "" {
+			b.WriteString(s[valueStart:end])
+		} else {
+			b.WriteString(xmlText(text))
+		}
+		s = s[end:]
+	}
 }
 
 // Handler returns the HTTP mux for the Bose cloud endpoints.
@@ -178,7 +220,7 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(p, "/streaming/sourceproviders"):
 		s.serve(w, r, s.sourceProviders)
 	case strings.HasPrefix(p, "/streaming/account/") && strings.HasSuffix(p, "/full"):
-		s.serve(w, r, s.accountFull)
+		s.serveFull(w, r)
 	case strings.HasPrefix(p, "/streaming/account/") && strings.HasSuffix(p, "/sources"):
 		s.serve(w, r, s.accountSources)
 	case strings.HasPrefix(p, "/streaming/account/") && strings.HasSuffix(p, "/devices"):
@@ -199,6 +241,30 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.log.Debug("marge catchall", "method", r.Method, "path", p)
 		s.xml(w, `<?xml version="1.0" encoding="UTF-8"?><ack/>`)
 	}
+}
+
+func (s *Server) serveFull(w http.ResponseWriter, r *http.Request) {
+	body := splicePresets(s.accountFull.body, s.presets.renderInner())
+	sum := sha256.Sum256(body)
+	etag := fmt.Sprintf("%x", sum[:8])
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", s.accountFull.ct)
+	w.Header()["ETag"] = []string{etag}
+	_, _ = w.Write(body)
+}
+
+func splicePresets(body []byte, inner string) []byte {
+	s := string(body)
+	start := strings.Index(s, "<presets>")
+	end := strings.Index(s, "</presets>")
+	if start < 0 || end < start {
+		return body
+	}
+	start += len("<presets>")
+	return []byte(s[:start] + inner + s[end:])
 }
 
 // serve writes a captured document, honouring If-None-Match with a 304. The ETag
@@ -269,6 +335,17 @@ func (s *Server) updatePreset(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ctStreamV11)
 	w.Header()["ETag"] = []string{etag}
 	_, _ = w.Write(body)
+}
+
+// MirrorPreset keeps the cloud-facing preset list aligned with writes made through
+// the web UI's direct speaker API path.
+func (s *Server) MirrorPreset(slot int, name, location, art string) {
+	s.presets.set(slot, presetSlot{Name: name, Location: location, Type: "stationurl", Art: art})
+}
+
+// RemovePreset mirrors a direct speaker preset deletion into the cloud-facing list.
+func (s *Server) RemovePreset(slot int) {
+	s.presets.remove(slot)
 }
 
 // presetButton extracts the trailing button number from a store path; 0 if absent.
