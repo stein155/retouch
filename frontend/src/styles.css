@@ -315,6 +315,17 @@ input  { font: inherit; color: inherit; user-select: text; -webkit-user-select: 
 .tile.is-playing .tile-logo { background: #fff; color: var(--accent); }
 .tile.is-playing .tile-more { color: var(--accent); background: rgba(255,255,255,0.6); }
 
+/* Starting / buffering: a softer highlight + loader, distinct from the live state. */
+.tile.is-starting {
+  background: linear-gradient(180deg, var(--accent-soft), #fff);
+  box-shadow:
+    0 6px 18px -10px rgba(196, 122, 82, 0.3),
+    inset 0 0 0 1px rgba(196, 122, 82, 0.18);
+}
+.tile.is-starting .tile-logo { background: #fff; color: var(--accent); }
+.tile.is-starting .tile-more { opacity: 1; color: var(--accent); background: rgba(255,255,255,0.6); }
+.tile-spinner { width: 13px; height: 13px; border-width: 2px; }
+
 .tile-live {
   position: absolute;
   bottom: 12px;
@@ -495,6 +506,19 @@ input  { font: inherit; color: inherit; user-select: text; -webkit-user-select: 
   display: inline-flex; align-items: center; gap: 3px;
   white-space: nowrap;
 }
+.mp-live-pill-loading { color: var(--ink-2); }
+
+/* Loading spinner shown while a station is starting / buffering (mini-player
+   pill and preset tiles). */
+.mp-spinner {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(196,122,82,0.3);
+  border-top-color: var(--accent);
+  animation: spin 700ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 .mp-meta { flex: 1; min-width: 0; }
 .mp-name {
   font-size: 15.5px;
@@ -503,6 +527,12 @@ input  { font: inherit; color: inherit; user-select: text; -webkit-user-select: 
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  animation: mpfade 320ms cubic-bezier(.34,.78,.18,1);
+}
+/* Crossfade the station name when it changes (key remount in MiniPlayer). */
+@keyframes mpfade {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: none; }
 }
 .mp-sub {
   font-size: 12px;
@@ -1020,4 +1050,11 @@ input  { font: inherit; color: inherit; user-select: text; -webkit-user-select: 
 .bass-scale {
   display: flex; justify-content: space-between; margin-top: 9px;
   font-size: 11.5px; font-weight: 600; color: var(--ink-3); font-variant-numeric: tabular-nums;
+}
+
+/* ===== Reduced motion ===== */
+@media (prefers-reduced-motion: reduce) {
+  .mp-spinner, .tile-spinner, .bars i, .live-dot { animation: none; }
+  .mp-name { animation: none; }
+  .mp, .tile, .browse, .mp-stop { transition: none; }
 }

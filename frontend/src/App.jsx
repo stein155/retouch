@@ -54,8 +54,7 @@ export default function App() {
   }, []);
 
   const handlePlay = useCallback(async (preset, slot) => {
-    const np = data.nowPlaying;
-    const standby = !np || np.standby || np.playStatus !== 'PLAY_STATE';
+    const standby = data.player.status !== 'playing';
     data.playOptimistic(preset); // show it instantly
     data.nudge();
     await playPreset(slot, standby, preset);
@@ -63,6 +62,7 @@ export default function App() {
   }, [data]);
 
   const handleStop = useCallback(async () => {
+    data.stopOptimistic(); // collapse to idle right away
     await stopPlayback();
     setTimeout(data.refreshNowPlaying, 1000);
   }, [data]);
@@ -97,7 +97,7 @@ export default function App() {
       <div className="shell-scroll">
         <Presets
           presets={data.presets}
-          nowPlaying={data.nowPlaying}
+          player={data.player}
           onPlay={handlePlay}
           onAssign={handleAssign}
         />
@@ -120,7 +120,7 @@ export default function App() {
       </div>
 
       <MiniPlayer
-        nowPlaying={data.nowPlaying}
+        player={data.player}
         volume={data.volume}
         speakerName={speakerName}
         onStop={handleStop}

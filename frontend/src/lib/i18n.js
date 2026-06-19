@@ -31,6 +31,7 @@ export const I18N = {
     searchPrompt: 'Search thousands of stations via TuneIn',
     noStations: 'No stations found.', searching: 'Searching…', clear: 'Clear', close: 'Close',
     live: 'LIVE', stop: 'Stop', mute: 'Mute', on: 'on', vol: 'vol',
+    starting: 'Starting…', buffering: 'Buffering…',
     chooseStationFor: 'Pick a station for',
   },
   nl: {
@@ -47,6 +48,7 @@ export const I18N = {
     searchPrompt: 'Doorzoek duizenden zenders via TuneIn',
     noStations: 'Geen zenders gevonden.', searching: 'Zoeken…', clear: 'Wissen', close: 'Sluiten',
     live: 'LIVE', stop: 'Stop', mute: 'Dempen', on: 'op', vol: 'vol',
+    starting: 'Starten…', buffering: 'Bufferen…',
     chooseStationFor: 'Kies een zender voor',
   },
   de: {
@@ -63,6 +65,7 @@ export const I18N = {
     searchPrompt: 'Durchsuche Tausende Sender über TuneIn',
     noStations: 'Keine Sender gefunden.', searching: 'Suche…', clear: 'Löschen', close: 'Schließen',
     live: 'LIVE', stop: 'Stopp', mute: 'Stumm', on: 'auf', vol: 'Lautst.',
+    starting: 'Startet…', buffering: 'Puffern…',
     chooseStationFor: 'Sender wählen für',
   },
   fr: {
@@ -79,6 +82,7 @@ export const I18N = {
     searchPrompt: 'Cherchez des milliers de stations via TuneIn',
     noStations: 'Aucune station trouvée.', searching: 'Recherche…', clear: 'Effacer', close: 'Fermer',
     live: 'DIRECT', stop: 'Stop', mute: 'Muet', on: 'sur', vol: 'vol.',
+    starting: 'Démarrage…', buffering: 'Chargement…',
     chooseStationFor: 'Choisir une station pour',
   },
   es: {
@@ -95,6 +99,7 @@ export const I18N = {
     searchPrompt: 'Busca miles de emisoras vía TuneIn',
     noStations: 'No se encontraron emisoras.', searching: 'Buscando…', clear: 'Borrar', close: 'Cerrar',
     live: 'EN VIVO', stop: 'Detener', mute: 'Silenciar', on: 'en', vol: 'vol.',
+    starting: 'Iniciando…', buffering: 'Cargando…',
     chooseStationFor: 'Elige una emisora para',
   },
   af: {
@@ -111,6 +116,7 @@ export const I18N = {
     searchPrompt: 'Deursoek duisende stasies via TuneIn',
     noStations: 'Geen stasies gevind nie.', searching: 'Soek…', clear: 'Vee uit', close: 'Maak toe',
     live: 'LIVE', stop: 'Stop', mute: 'Doof', on: 'op', vol: 'vol',
+    starting: 'Begin…', buffering: 'Buffer…',
     chooseStationFor: "Kies 'n stasie vir",
   },
 };
