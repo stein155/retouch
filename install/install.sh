@@ -42,6 +42,40 @@ ok()   { printf '  %s✓%s %s\n' "$GRN" "$R" "$*"; }
 warn() { printf '  %s!%s %s\n' "$YEL" "$R" "$*"; }
 die()  { printf '\n%s%s:%s %s\n' "$RED" "$(msg could_not_continue)" "$R" "$*" >&2; exit 1; }
 
+# ---- progress UI (animated only when attached to a terminal) ---------------
+# A "step" is one line that shows a spinner while work happens, then resolves to a
+# green check (step_ok) or a yellow notice (step_warn). When output is not a terminal
+# (piped to a log), the spinner is skipped and only the resolved lines are printed.
+TTY=0; [ -t 1 ] && TTY=1
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in *[Uu][Tt][Ff]*) UNI=1 ;; *) UNI=0 ;; esac
+spin_i=0; SPIN=
+spin_advance() {
+	spin_i=$((spin_i + 1))
+	if [ "$UNI" = 1 ]; then
+		case $((spin_i % 10)) in
+			0) SPIN='⠋' ;; 1) SPIN='⠙' ;; 2) SPIN='⠹' ;; 3) SPIN='⠸' ;; 4) SPIN='⠼' ;;
+			5) SPIN='⠴' ;; 6) SPIN='⠦' ;; 7) SPIN='⠧' ;; 8) SPIN='⠇' ;; *) SPIN='⠏' ;;
+		esac
+	else
+		case $((spin_i % 4)) in 0) SPIN='|' ;; 1) SPIN='/' ;; 2) SPIN='-' ;; *) SPIN='\' ;; esac
+	fi
+}
+clear_screen() { [ "$TTY" = 1 ] && printf '\033[2J\033[3J\033[H'; }
+
+step_label=; step_hint=
+step_start() {  # $1=label, $2=hint
+	step_label="$1"; step_hint="${2:-}"
+	[ "$TTY" = 1 ] || return 0
+	spin_advance; printf '  %s%s%s %s %s%s%s' "$YEL" "$SPIN" "$R" "$step_label" "$DIM" "$step_hint" "$R"
+}
+step_tick() {   # redraw the active line with the next spinner frame
+	[ "$TTY" = 1 ] || return 0
+	spin_advance; printf '\r\033[K  %s%s%s %s %s%s%s' "$YEL" "$SPIN" "$R" "$step_label" "$DIM" "$step_hint" "$R"
+}
+step_ok()   { lbl="${1:-$step_label}"; if [ "$TTY" = 1 ]; then printf '\r\033[K  %s✓%s %s\n' "$GRN" "$R" "$lbl"; else printf '  ✓ %s\n' "$lbl"; fi; }
+step_warn() { lbl="${1:-$step_label}"; if [ "$TTY" = 1 ]; then printf '\r\033[K  %s!%s %s\n' "$YEL" "$R" "$lbl"; else printf '  ! %s\n' "$lbl"; fi; }
+step_clear(){ [ "$TTY" = 1 ] && printf '\r\033[K'; }
+
 # Read a line from the real keyboard even when this script is piped into `sh`.
 ask() {
 	if [ -r /dev/tty ]; then read -r REPLY < /dev/tty
@@ -88,7 +122,7 @@ msg() {
 		en:retry_update) printf "Give it another minute, then run this installer again if it still has not updated." ;;
 		en:waiting_online) printf 'Waiting for ReTouch to come online ' ;;
 		en:waiting_online_hint) printf '(this takes a minute or two)' ;;
-		en:installed_ok) printf 'Installation succeeded' ;;
+		en:installed_ok) printf 'ReTouch is online' ;;
 		en:final_restart) printf 'One final restart of the speaker ' ;;
 		en:final_restart_hint) printf '(this takes about 20 seconds)' ;;
 		en:ready) printf 'ReTouch is ready!' ;;
@@ -128,7 +162,7 @@ msg() {
 		nl:retry_update) printf 'Wacht nog een minuut en start deze installer opnieuw als hij nog niet is bijgewerkt.' ;;
 		nl:waiting_online) printf 'Wachten tot ReTouch online komt ' ;;
 		nl:waiting_online_hint) printf '(dit duurt een minuut of twee)' ;;
-		nl:installed_ok) printf 'Installatie geslaagd' ;;
+		nl:installed_ok) printf 'ReTouch is online' ;;
 		nl:final_restart) printf 'Nog een laatste herstart van de speaker ' ;;
 		nl:final_restart_hint) printf '(dit duurt ongeveer 20 seconden)' ;;
 		nl:ready) printf 'ReTouch is klaar!' ;;
@@ -167,7 +201,7 @@ msg() {
 		de:retry_update) printf 'Warte noch eine Minute und starte diesen Installer erneut, falls er noch nicht aktualisiert wurde.' ;;
 		de:waiting_online) printf 'Warte, bis ReTouch online ist ' ;;
 		de:waiting_online_hint) printf '(das dauert ein bis zwei Minuten)' ;;
-		de:installed_ok) printf 'Installation erfolgreich' ;;
+		de:installed_ok) printf 'ReTouch ist online' ;;
 		de:final_restart) printf 'Noch ein letzter Neustart des Lautsprechers ' ;;
 		de:final_restart_hint) printf '(das dauert etwa 20 Sekunden)' ;;
 		de:ready) printf 'ReTouch ist bereit!' ;;
@@ -206,7 +240,7 @@ msg() {
 		fr:retry_update) printf "Attendez encore une minute, puis relancez cet installateur si la mise a jour n'est toujours pas faite." ;;
 		fr:waiting_online) printf 'Attente de ReTouch en ligne ' ;;
 		fr:waiting_online_hint) printf '(cela prend une minute ou deux)' ;;
-		fr:installed_ok) printf 'Installation reussie' ;;
+		fr:installed_ok) printf 'ReTouch est en ligne' ;;
 		fr:final_restart) printf "Un dernier redemarrage de l'enceinte " ;;
 		fr:final_restart_hint) printf '(cela prend environ 20 secondes)' ;;
 		fr:ready) printf 'ReTouch est pret !' ;;
@@ -245,7 +279,7 @@ msg() {
 		es:retry_update) printf 'Espera otro minuto y ejecuta este instalador de nuevo si aun no se ha actualizado.' ;;
 		es:waiting_online) printf 'Esperando a que ReTouch este en linea ' ;;
 		es:waiting_online_hint) printf '(esto tarda uno o dos minutos)' ;;
-		es:installed_ok) printf 'Instalacion completada' ;;
+		es:installed_ok) printf 'ReTouch esta en linea' ;;
 		es:final_restart) printf 'Un ultimo reinicio del altavoz ' ;;
 		es:final_restart_hint) printf '(esto tarda unos 20 segundos)' ;;
 		es:ready) printf 'ReTouch esta listo!' ;;
@@ -284,7 +318,7 @@ msg() {
 		af:retry_update) printf 'Wag nog n minuut en voer hierdie installeerder weer uit as dit nog nie opgedateer het nie.' ;;
 		af:waiting_online) printf 'Wag dat ReTouch aanlyn kom ' ;;
 		af:waiting_online_hint) printf '(dit neem n minuut of twee)' ;;
-		af:installed_ok) printf 'Installasie geslaag' ;;
+		af:installed_ok) printf 'ReTouch is aanlyn' ;;
 		af:final_restart) printf 'Nog n laaste herbegin van die luidspreker ' ;;
 		af:final_restart_hint) printf '(dit neem omtrent 20 sekondes)' ;;
 		af:ready) printf 'ReTouch is gereed!' ;;
@@ -409,9 +443,13 @@ NAME=$(grep -E "^$IP	" "$FOUND" 2>/dev/null | cut -f2)
 [ -n "$NAME" ] || NAME="$(msg your_speaker)"
 
 # ---- set it up -------------------------------------------------------------
+clear_screen
 say ""
-say "$(fmt setting_up "${B}$NAME${R}" "${DIM}$IP${R}")"
-say "$(msg restart_once)"
+say "  ${B}$(msg title)${R}"
+say "  ${DIM}──────────────────────────────────────────────${R}"
+say ""
+say "  $(fmt setting_up "${B}$NAME${R}" "${DIM}$IP${R}")"
+say "  ${DIM}$(msg restart_once)${R}"
 say ""
 
 send() { printf '%s\n' "$1" | nc -w 3 "$IP" "$SETUP_PORT" >/dev/null 2>&1; }
@@ -424,52 +462,51 @@ curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1 &
 # NOTE: the agent self-heals a speaker that stays stuck on this string (see
 # speaker.BootstrapURL in internal/speaker). Keep the two literals in sync.
 if send "envswitch boseurls set \"$PLACE;curl -sSL $NETINSTALL -o /tmp/b;sh /tmp/b\" \"$PLACE/update\""; then
-	ok "$(msg sent_setup)"
+	step_ok "$(msg sent_setup)"
 else
 	die "$(fmt couldnt_reach "$NAME" "$IP")"
 fi
 send "sys reboot"
-ok "$(msg asked_restart)"
+step_ok "$(msg asked_restart)"
 
 # ---- wait for ReTouch to come up ------------------------------------------
-say ""
 # When updating an already running install, the old ReTouch can still answer for a
 # short while after the reboot request. Wait for that instance to disappear first,
 # otherwise we can report success before the speaker has actually restarted.
 if [ "$was_up" -eq 1 ]; then
-	printf '%s%s%s%s' "$(msg waiting_restart)" "$DIM" "$(msg waiting_restart_hint)" "$R"
+	step_start "$(msg waiting_restart)" "$(msg waiting_restart_hint)"
 	down=0
 	n=0
 	while [ "$n" -lt 60 ]; do            # ~2 minutes for the old service to stop
 		if ! curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
 			down=1; break
 		fi
-		printf '.'
+		step_tick
 		sleep 2
 		n=$((n + 1))
 	done
-	printf '\n\n'
 	if [ "$down" -ne 1 ]; then
-		warn "$(msg not_offline)"
+		step_warn "$(msg not_offline)"
 		say ""
 		say "  $(fmt still_answering "${B}$URL${R}")"
 		say "  $(msg retry_update)"
 		say ""
 		exit 0
 	fi
+	step_clear
 fi
 
-printf '%s%s%s%s' "$(msg waiting_online)" "$DIM" "$(msg waiting_online_hint)" "$R"
 # Probe the app's own API (/api/settings only answers from ReTouch, so Bose's setup
 # page can't look like a false "ready"). ReTouch is exposed on exactly one uniform
 # port — :8080 — on every speaker, so that is the only URL we wait for and advertise.
+step_start "$(msg waiting_online)" "$(msg waiting_online_hint)"
 up=0
 n=0
 while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
 	if curl -fsS --connect-timeout 2 --max-time 3 "$URL/api/settings" >/dev/null 2>&1; then
 		up=1; break
 	fi
-	printf '.'
+	step_tick
 	sleep 4
 	n=$((n + 1))
 done
@@ -479,26 +516,24 @@ done
 # its :17000 CLI is reliably reachable (unlike early in boot), so we repoint the cloud
 # URLs at the on-speaker stub from here and then restart. Doing the cleanup + reboot
 # from install.sh — rather than from netinstall.sh during boot — is what makes it stick.
-# Confirm the install succeeded, send the cleanup, restart, then wait for ReTouch to
-# come back for good.
+# This is why "ReTouch is online" is a milestone, not the finish line: the speaker
+# still restarts once more below before we report success.
 if [ "$up" -eq 1 ]; then
-	printf '\n\n'
-	ok "$(msg installed_ok)"
-	say ""
+	step_ok "$(msg installed_ok)"
 	send "envswitch boseurls set $MARGE_BASE $MARGE_BASE/updates/soundtouch"
 	send "sys configuration bmxRegistryUrl $MARGE_BASE/bmx/registry/v1/services"
 	send "sys configuration statsServerUrl $MARGE_BASE"
 	send "sys configuration margeServerUrl $MARGE_BASE"
 	send "sys configuration swUpdateUrl $MARGE_BASE/updates/soundtouch"
 	send "sys reboot"
-	printf '%s%s%s%s' "$(msg final_restart)" "$DIM" "$(msg final_restart_hint)" "$R"
+	step_start "$(msg final_restart)" "$(msg final_restart_hint)"
 	gone=0
 	n=0
 	while [ "$n" -lt 20 ]; do            # ~40s for the final restart to begin
 		if ! curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
 			gone=1; break
 		fi
-		printf '.'
+		step_tick
 		sleep 2
 		n=$((n + 1))
 	done
@@ -509,16 +544,17 @@ if [ "$up" -eq 1 ]; then
 			if curl -fsS --connect-timeout 2 --max-time 3 "$URL/api/settings" >/dev/null 2>&1; then
 				up=1; break
 			fi
-			printf '.'
+			step_tick
 			sleep 4
 			n=$((n + 1))
 		done
 	fi
+	step_clear
 fi
-printf '\n\n'
 
+say ""
 if [ "$up" -eq 1 ]; then
-	ok "${B}$(msg ready)${R}"
+	say "  ${GRN}${B}✓ $(msg ready)${R}"
 	say ""
 	say "  $(msg open_here)"
 	say ""
