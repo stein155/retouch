@@ -49,6 +49,7 @@ type Info struct {
 	IP        string // current LAN address
 	SerialSCM string // SCM component serial
 	SerialPkg string // PackagedProduct component serial
+	MargeURL  string // current cloud URL the speaker reports (the one we redirect)
 }
 
 // Info reads the speaker's identity from /info.
@@ -62,6 +63,7 @@ func (c *Client) Info(ctx context.Context) (*Info, error) {
 		Name       string `xml:"name"`
 		Type       string `xml:"type"`
 		Account    string `xml:"margeAccountUUID"`
+		MargeURL   string `xml:"margeURL"`
 		Components []struct {
 			Category string `xml:"componentCategory"`
 			Software string `xml:"softwareVersion"`
@@ -74,7 +76,7 @@ func (c *Client) Info(ctx context.Context) (*Info, error) {
 	if err := xml.Unmarshal(body, &x); err != nil {
 		return nil, err
 	}
-	info := &Info{DeviceID: x.DeviceID, Account: x.Account, Name: x.Name, Type: x.Type}
+	info := &Info{DeviceID: x.DeviceID, Account: x.Account, Name: x.Name, Type: x.Type, MargeURL: strings.TrimSpace(x.MargeURL)}
 	for _, comp := range x.Components {
 		switch comp.Category {
 		case "SCM":
@@ -353,32 +355,6 @@ func (c *Client) cli(ctx context.Context, cmd string) error {
 	_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 	_, err = conn.Write([]byte(cmd + "\n"))
 	return err
-}
-
-// cliQuery sends one command to the :17000 diagnostic CLI and returns its reply as raw
-// text. The CLI keeps the connection open, so we read up to a short deadline and return
-// whatever arrived (a read timeout is expected, not an error).
-func (c *Client) cliQuery(ctx context.Context, cmd string) (string, error) {
-	d := net.Dialer{Timeout: 3 * time.Second}
-	conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort(c.host, "17000"))
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = conn.Close() }()
-	_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
-	if _, err := conn.Write([]byte(cmd + "\n")); err != nil {
-		return "", err
-	}
-	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	b, _ := io.ReadAll(io.LimitReader(conn, 256*1024))
-	return string(b), nil
-}
-
-// CloudConfig returns the speaker's current cloud configuration (margeServerUrl etc.)
-// as reported by the :17000 CLI, as raw text to be scanned. Used to detect a leftover
-// install bootstrap URL.
-func (c *Client) CloudConfig(ctx context.Context) (string, error) {
-	return c.cliQuery(ctx, "sys configuration")
 }
 
 // PointCloudAtStub repoints the speaker's cloud URLs at base (the on-speaker stub),
