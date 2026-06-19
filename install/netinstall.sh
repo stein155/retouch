@@ -50,15 +50,6 @@ restart_agent() {
 	[ -x "$START" ] && "$START" >/tmp/retouch-start.log 2>&1 &
 }
 
-# reboot_after_cleanup applies the cleaned boseurls on firmware that only makes
-# envswitch changes live after boot. The boot launcher is already installed, so the
-# speaker comes back with ReTouch and without the one-shot bootstrap URL.
-reboot_after_cleanup() {
-	log "rebooting to apply cleaned cloud URLs"
-	command -v nc >/dev/null 2>&1 && printf '%s\n' 'sys reboot' | nc -w 2 127.0.0.1 17000 >/dev/null 2>&1 && exit 0
-	/sbin/reboot 2>>"$LOG" || reboot 2>>"$LOG" || log "could not reboot automatically"
-}
-
 # write_start_script writes the boot launcher. It binds the web UI on $WEB_LISTEN and
 # then makes a BEST-EFFORT attempt to expose it on exactly one uniform port, :8080,
 # while hiding the raw $WEB_LISTEN port from the LAN — WITHOUT touching Bose's own setup
@@ -133,25 +124,6 @@ redirect_cloud() {
 	mount / -o ro,remount 2>/dev/null
 }
 
-# clean_urls resets the URL layers to the on-speaker stub via the speaker's own :17000 CLI:
-#   - boseurls: install.sh set this to a bootstrap string ("http://x.invalid;curl
-#     …;sh …") to chain this script on boot. We replace it with clean localhost URLs
-#     so margeServerUrl/swUpdateUrl are tidy AND the bootstrap doesn't re-run every
-#     boot.
-#   - runtime config (sys configuration …): point this boot's live URLs at the stub
-#     too, so the speaker doesn't keep the bootstrap string as its margeServerUrl.
-# Best-effort: skipped if nc / the CLI are unavailable.
-clean_urls() {
-	command -v nc >/dev/null 2>&1 || { log "no nc; skipping URL cleanup"; return 0; }
-	cli() { printf '%s\n' "$1" | nc -w 2 127.0.0.1 17000 >/dev/null 2>&1; }
-	cli "envswitch boseurls set $MARGE_BASE $MARGE_BASE/updates/soundtouch"
-	cli "sys configuration bmxRegistryUrl $MARGE_BASE/bmx/registry/v1/services"
-	cli "sys configuration statsServerUrl $MARGE_BASE"
-	cli "sys configuration margeServerUrl $MARGE_BASE"
-	cli "sys configuration swUpdateUrl $MARGE_BASE/updates/soundtouch"
-	log "reset boseurls + runtime URLs -> $MARGE_BASE"
-}
-
 [ -f "$GAVEUP" ] && { log "gave up earlier (remove $GAVEUP to retry)"; exit 0; }
 
 mkdir "$LOCK" 2>/dev/null || { log "locked"; exit 0; }
@@ -175,9 +147,7 @@ if [ -x "$BIN" ] && { [ -z "$TAG" ] || [ "$TAG" = "$INSTALLED" ]; }; then
 	rm -f "$ATTEMPTS"
 	write_rc_local
 	redirect_cloud
-	clean_urls
 	restart_agent
-	reboot_after_cleanup
 	exit 0
 fi
 
@@ -203,7 +173,8 @@ log "installed $TAG"
 
 write_rc_local
 redirect_cloud
-clean_urls
 restart_agent
-reboot_after_cleanup
-log "done ($TAG); web UI on $WEB_LISTEN, marge on $MARGE_LISTEN. Cloud URLs point at the on-speaker stub."
+# The boseurls/runtime cloud-URL cleanup + the reboot that makes it live are driven from
+# install.sh once ReTouch is back online (the :17000 CLI is reliable there, not this
+# early in boot). On a stuck speaker the agent's urlguard also repoints as a fallback.
+log "done ($TAG); web UI on $WEB_LISTEN, marge on $MARGE_LISTEN. install.sh will finalise the cloud URLs."
