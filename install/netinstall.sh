@@ -140,39 +140,16 @@ redirect_cloud() {
 #     boot.
 #   - runtime config (sys configuration …): point this boot's live URLs at the stub
 #     too, so the speaker doesn't keep the bootstrap string as its margeServerUrl.
-#
-# The :17000 CLI is fire-and-forget over nc, so a dropped connection or timing hiccup
-# can silently leave boseurls holding the bootstrap string. That is the worst case: on
-# the next boot the bootstrap repopulates margeServerUrl, which both breaks presets
-# (the speaker can no longer reach the on-speaker stub) AND re-runs the remote curl|sh
-# every boot. So we read boseurls back and confirm the bootstrap is gone before we trust
-# the reset; the caller must NOT reboot unless this returns success.
-#
-# Returns 0 only when the bootstrap string is verified gone; 1 otherwise (incl. no nc).
+# Best-effort: skipped if nc / the CLI are unavailable.
 clean_urls() {
-	command -v nc >/dev/null 2>&1 || { log "no nc; cannot verify URL cleanup"; return 1; }
+	command -v nc >/dev/null 2>&1 || { log "no nc; skipping URL cleanup"; return 0; }
 	cli() { printf '%s\n' "$1" | nc -w 2 127.0.0.1 17000 >/dev/null 2>&1; }
-	cli_out() { printf '%s\n' "$1" | nc -w 2 127.0.0.1 17000 2>/dev/null; }
-	i=1
-	while [ "$i" -le 3 ]; do
-		cli "envswitch boseurls set $MARGE_BASE $MARGE_BASE/updates/soundtouch"
-		cli "sys configuration bmxRegistryUrl $MARGE_BASE/bmx/registry/v1/services"
-		cli "sys configuration statsServerUrl $MARGE_BASE"
-		cli "sys configuration margeServerUrl $MARGE_BASE"
-		cli "sys configuration swUpdateUrl $MARGE_BASE/updates/soundtouch"
-		# Verify on the thing that actually persists across reboots: boseurls. We check
-		# for the absence of the bootstrap marker rather than the presence of MARGE_BASE,
-		# so an unexpected read-back format can't wedge us into never rebooting.
-		if cli_out "envswitch boseurls" | grep -q "x.invalid"; then
-			log "boseurls still holds the bootstrap string (attempt $i/3); retrying"
-			i=$((i + 1))
-			continue
-		fi
-		log "reset boseurls + runtime URLs -> $MARGE_BASE (verified clear)"
-		return 0
-	done
-	log "WARNING: could not clear the boseurls bootstrap after 3 attempts; leaving this boot's live URLs pointed at $MARGE_BASE and NOT rebooting (a reboot would re-run the bootstrap)"
-	return 1
+	cli "envswitch boseurls set $MARGE_BASE $MARGE_BASE/updates/soundtouch"
+	cli "sys configuration bmxRegistryUrl $MARGE_BASE/bmx/registry/v1/services"
+	cli "sys configuration statsServerUrl $MARGE_BASE"
+	cli "sys configuration margeServerUrl $MARGE_BASE"
+	cli "sys configuration swUpdateUrl $MARGE_BASE/updates/soundtouch"
+	log "reset boseurls + runtime URLs -> $MARGE_BASE"
 }
 
 [ -f "$GAVEUP" ] && { log "gave up earlier (remove $GAVEUP to retry)"; exit 0; }
@@ -198,9 +175,9 @@ if [ -x "$BIN" ] && { [ -z "$TAG" ] || [ "$TAG" = "$INSTALLED" ]; }; then
 	rm -f "$ATTEMPTS"
 	write_rc_local
 	redirect_cloud
-	clean_urls; cleaned=$?
+	clean_urls
 	restart_agent
-	[ "$cleaned" -eq 0 ] && reboot_after_cleanup
+	reboot_after_cleanup
 	exit 0
 fi
 
@@ -226,7 +203,7 @@ log "installed $TAG"
 
 write_rc_local
 redirect_cloud
-clean_urls; cleaned=$?
+clean_urls
 restart_agent
-[ "$cleaned" -eq 0 ] && reboot_after_cleanup
+reboot_after_cleanup
 log "done ($TAG); web UI on $WEB_LISTEN, marge on $MARGE_LISTEN. Cloud URLs point at the on-speaker stub."
