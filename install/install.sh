@@ -23,6 +23,7 @@ REPO=stein155/retouch
 BRANCH=main
 NETINSTALL="https://raw.githubusercontent.com/$REPO/$BRANCH/install/netinstall.sh"
 PLACE="http://x.invalid"        # harmless placeholder the speaker overwrites itself
+MARGE_BASE="http://127.0.0.1:9080"  # on-speaker stub; where we repoint the cloud URLs
 
 API_PORT=8090                   # speakers answer here; used only to find them
 APP_PORT=8000                   # ReTouch's web app; also reachable on :80 via redirect
@@ -473,15 +474,23 @@ while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
 	n=$((n + 1))
 done
 
-# Once ReTouch first answers, the speaker still restarts one more time to apply the
-# cleaned-up cloud URLs — its marge URL only goes live after a boot. ReTouch is
-# briefly reachable in between, so don't report success yet: confirm the install
-# succeeded, wait for the speaker to drop offline for that final restart, then for
-# ReTouch to come back for good. If it never drops, the restart is already behind us.
+# ReTouch is online, but the speaker's cloud URLs still hold the one-time bootstrap
+# string — its marge URL only goes live after a boot. Now that the speaker is fully up,
+# its :17000 CLI is reliably reachable (unlike early in boot), so we repoint the cloud
+# URLs at the on-speaker stub from here and then restart. Doing the cleanup + reboot
+# from install.sh — rather than from netinstall.sh during boot — is what makes it stick.
+# Confirm the install succeeded, send the cleanup, restart, then wait for ReTouch to
+# come back for good.
 if [ "$up" -eq 1 ]; then
 	printf '\n\n'
 	ok "$(msg installed_ok)"
 	say ""
+	send "envswitch boseurls set $MARGE_BASE $MARGE_BASE/updates/soundtouch"
+	send "sys configuration bmxRegistryUrl $MARGE_BASE/bmx/registry/v1/services"
+	send "sys configuration statsServerUrl $MARGE_BASE"
+	send "sys configuration margeServerUrl $MARGE_BASE"
+	send "sys configuration swUpdateUrl $MARGE_BASE/updates/soundtouch"
+	send "sys reboot"
 	printf '%s%s%s%s' "$(msg final_restart)" "$DIM" "$(msg final_restart_hint)" "$R"
 	gone=0
 	n=0
