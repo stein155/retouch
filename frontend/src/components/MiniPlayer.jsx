@@ -5,32 +5,39 @@ import { useI18n } from '../lib/i18n';
 
 const cx = (...a) => a.filter(Boolean).join(' ');
 
-export function MiniPlayer({ nowPlaying, volume, speakerName, onStop, onVolume }) {
+export function MiniPlayer({ player, volume, speakerName, onStop, onVolume }) {
   const { t } = useI18n();
-  const playing = nowPlaying && !nowPlaying.standby && nowPlaying.playStatus === 'PLAY_STATE';
-  const displayName = nowPlaying?.stationName || '';
+  const { status, station } = player;
+  const active = status !== 'idle' && !!station;
+  const playing = status === 'playing';
+  const displayName = station?.name || '';
   const muted = volume === 0;
 
+  // Pill + sub-line label tracks the start-up phase so the user sees progress
+  // instead of the station blinking away.
+  const statusLabel =
+    status === 'buffering' ? t('buffering') : status === 'starting' ? t('starting') : t('live');
+
   return (
-    <div className={cx('mp', playing && 'mp-on')}>
-      {playing ? (
+    <div className={cx('mp', active && 'mp-on', `mp-${status}`)}>
+      {active ? (
         <>
           <div className="mp-top">
             <div className="mp-art">
               <div className="mp-art-inner">
-                <StationLogo name={displayName} tuneInId={nowPlaying?.tuneInId} logo={nowPlaying?.art} />
+                <StationLogo name={displayName} tuneInId={station?.tuneInId} logo={station?.art} />
               </div>
-              <span className="mp-live-pill">
-                <span className="live-dot" />{t('live')}
+              <span className={cx('mp-live-pill', !playing && 'mp-live-pill-loading')}>
+                {playing ? <span className="live-dot" /> : <span className="mp-spinner" />}
+                {statusLabel}
               </span>
             </div>
             <div className="mp-meta">
-              <div className="mp-name">{displayName}</div>
+              <div className="mp-name" key={displayName}>{displayName}</div>
               <div className="mp-sub">
-                {nowPlaying?.track && nowPlaying.track !== displayName
-                  ? `${nowPlaying.track} · `
-                  : ''}
-                {t('on')} {speakerName}
+                {playing
+                  ? `${station?.track && station.track !== displayName ? `${station.track} · ` : ''}${t('on')} ${speakerName}`
+                  : `${statusLabel} · ${speakerName}`}
               </div>
             </div>
             <button className="mp-stop" aria-label={t('stop')} onClick={onStop}>

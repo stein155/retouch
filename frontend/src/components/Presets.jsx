@@ -2,10 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { StationLogo } from './StationLogo';
 import { Icon } from './Icons';
 import { useI18n } from '../lib/i18n';
+import { sameStation } from '../lib/station';
 
 const cx = (...a) => a.filter(Boolean).join(' ');
 
-function PresetTile({ preset, nowPlaying, onPlay, onAssign }) {
+function PresetTile({ preset, player, onPlay, onAssign }) {
   const { t } = useI18n();
   const [menu, setMenu] = useState(false);
   const ref = useRef(null);
@@ -38,13 +39,19 @@ function PresetTile({ preset, nowPlaying, onPlay, onAssign }) {
 
   const name = preset.name || '?';
 
-  // Check if this preset is currently playing
-  const isPlaying = nowPlaying && !nowPlaying.standby &&
-    nowPlaying.playStatus === 'PLAY_STATE' &&
-    preset.tuneInId && nowPlaying.tuneInId === preset.tuneInId;
+  // Is this the preset the player is on? Match by TuneIn id when known, else by
+  // name (the speaker doesn't expose the live id). starting/buffering shows a
+  // loader on the tile; PLAY_STATE shows the live equalizer.
+  const st = player.station;
+  const matches = !!st && (
+    (preset.tuneInId && st.tuneInId && preset.tuneInId === st.tuneInId) ||
+    sameStation(preset.name, st.name)
+  );
+  const isPlaying = matches && player.status === 'playing';
+  const isStarting = matches && (player.status === 'starting' || player.status === 'buffering');
 
   return (
-    <div className={cx('tile', isPlaying && 'is-playing')} ref={ref}>
+    <div className={cx('tile', isPlaying && 'is-playing', isStarting && 'is-starting')} ref={ref}>
       <button className="tile-main" onClick={onPlay}>
         <span className="tile-row">
           <span className="tile-logo">
@@ -57,6 +64,11 @@ function PresetTile({ preset, nowPlaying, onPlay, onAssign }) {
       {isPlaying && (
         <span className="tile-live">
           <span className="bars"><i/><i/><i/><i/></span>
+        </span>
+      )}
+      {isStarting && (
+        <span className="tile-live">
+          <span className="mp-spinner tile-spinner" />
         </span>
       )}
       </button>
@@ -76,7 +88,7 @@ function PresetTile({ preset, nowPlaying, onPlay, onAssign }) {
   );
 }
 
-export function Presets({ presets, nowPlaying, onPlay, onAssign }) {
+export function Presets({ presets, player, onPlay, onAssign }) {
   const { t } = useI18n();
   return (
     <section className="sect">
@@ -89,7 +101,7 @@ export function Presets({ presets, nowPlaying, onPlay, onAssign }) {
           <PresetTile
             key={i}
             preset={preset}
-            nowPlaying={nowPlaying}
+            player={player}
             onPlay={() => preset && onPlay(preset, i + 1)}
             onAssign={() => onAssign(i + 1)}
           />
