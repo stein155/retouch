@@ -420,6 +420,8 @@ curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1 &
 
 # Hand the speaker a one-time instruction to fetch and run the on-speaker setup,
 # then tell it to restart so the instruction takes effect.
+# NOTE: the agent self-heals a speaker that stays stuck on this string (see
+# speaker.BootstrapURL in internal/speaker). Keep the two literals in sync.
 if send "envswitch boseurls set \"$PLACE;curl -sSL $NETINSTALL -o /tmp/b;sh /tmp/b\" \"$PLACE/update\""; then
 	ok "$(msg sent_setup)"
 else
