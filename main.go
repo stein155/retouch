@@ -26,6 +26,7 @@ import (
 	"github.com/stein155/retouch/internal/speaker"
 	"github.com/stein155/retouch/internal/store"
 	"github.com/stein155/retouch/internal/tunein"
+	"github.com/stein155/retouch/internal/urlguard"
 	"github.com/stein155/retouch/internal/web"
 )
 
@@ -108,6 +109,12 @@ func main() {
 
 	// Keep the speaker paired to our marge account so native sources stay enabled.
 	go autopair.New(bc, info.Account, autopair.DefaultAuthToken, *pairEvery, logger.With("comp", "autopair")).Run(ctx)
+
+	// Self-heal a speaker whose installer cleanup did not stick: if the cloud URL is
+	// still the one-shot install bootstrap string, repoint it at our stub. Only that
+	// exact string is touched, so a deliberate recovery command pushed through the same
+	// channel keeps working.
+	go urlguard.New(bc, base, *pairEvery, logger.With("comp", "urlguard")).Run(ctx)
 
 	var wg sync.WaitGroup
 	serve := func(name, addr string, h http.Handler) {
