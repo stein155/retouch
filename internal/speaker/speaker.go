@@ -32,6 +32,7 @@ type Info struct {
 	Account   string // margeAccountUUID; empty when the speaker is not paired
 	Name      string // user-visible speaker name
 	Type      string // device model, e.g. "SoundTouch 10"
+	Software  string // SCM firmware/software version
 	IP        string // current LAN address
 	SerialSCM string // SCM component serial
 	SerialPkg string // PackagedProduct component serial
@@ -50,6 +51,7 @@ func (c *Client) Info(ctx context.Context) (*Info, error) {
 		Account    string `xml:"margeAccountUUID"`
 		Components []struct {
 			Category string `xml:"componentCategory"`
+			Software string `xml:"softwareVersion"`
 			Serial   string `xml:"serialNumber"`
 		} `xml:"components>component"`
 		Network []struct {
@@ -64,6 +66,7 @@ func (c *Client) Info(ctx context.Context) (*Info, error) {
 		switch comp.Category {
 		case "SCM":
 			info.SerialSCM = comp.Serial
+			info.Software = comp.Software
 		case "PackagedProduct":
 			info.SerialPkg = comp.Serial
 		}

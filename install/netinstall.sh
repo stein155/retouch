@@ -50,6 +50,15 @@ restart_agent() {
 	[ -x "$START" ] && "$START" >/tmp/retouch-start.log 2>&1 &
 }
 
+# reboot_after_cleanup applies the cleaned boseurls on firmware that only makes
+# envswitch changes live after boot. The boot launcher is already installed, so the
+# speaker comes back with ReTouch and without the one-shot bootstrap URL.
+reboot_after_cleanup() {
+	log "rebooting to apply cleaned cloud URLs"
+	command -v nc >/dev/null 2>&1 && printf '%s\n' 'sys reboot' | nc -w 2 127.0.0.1 17000 >/dev/null 2>&1 && exit 0
+	/sbin/reboot 2>>"$LOG" || reboot 2>>"$LOG" || log "could not reboot automatically"
+}
+
 # write_start_script writes the boot launcher. It binds the web UI on $WEB_LISTEN and
 # then makes a BEST-EFFORT attempt to expose it on exactly one uniform port, :8080,
 # while hiding the raw $WEB_LISTEN port from the LAN — WITHOUT touching Bose's own setup
@@ -168,6 +177,7 @@ if [ -x "$BIN" ] && { [ -z "$TAG" ] || [ "$TAG" = "$INSTALLED" ]; }; then
 	redirect_cloud
 	clean_urls
 	restart_agent
+	reboot_after_cleanup
 	exit 0
 fi
 
@@ -195,4 +205,5 @@ write_rc_local
 redirect_cloud
 clean_urls
 restart_agent
+reboot_after_cleanup
 log "done ($TAG); web UI on $WEB_LISTEN, marge on $MARGE_LISTEN. Cloud URLs point at the on-speaker stub."

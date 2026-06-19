@@ -59,14 +59,14 @@ func main() {
 
 	bc := speaker.New(*host)
 	// Personalise the replayed account documents with this speaker's own identity.
-	infoCtx, infoCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	info, err := bc.Info(infoCtx)
-	infoCancel()
+	// On boot, :8090 can come up after ReTouch; do not freeze empty placeholders into
+	// Marge documents just because the first request races the speaker firmware.
+	info, err := waitSpeakerInfo(context.Background(), bc, 90*time.Second)
 	if err != nil {
 		logger.Warn("read speaker /info (account docs keep placeholders)", "err", err, "speaker", *host)
 		info = &speaker.Info{}
 	} else {
-		logger.Info("speaker identity", "device", info.DeviceID, "account", info.Account, "name", info.Name)
+		logger.Info("speaker identity", "device", info.DeviceID, "account", info.Account, "name", info.Name, "software", info.Software)
 	}
 
 	// Resolve the marge account. The old margeAccountUUID was a Bose-cloud id; locally
@@ -80,14 +80,28 @@ func main() {
 		logger.Info("synthesised local account id", "account", info.Account)
 	}
 
+	presetCtx, presetCancel := context.WithTimeout(context.Background(), 8*time.Second)
+	speakerPresets, err := bc.Presets(presetCtx)
+	presetCancel()
+	if err != nil {
+		logger.Warn("read speaker presets for marge seed", "err", err)
+	} else {
+		logger.Info("seed marge presets from speaker", "count", len(speakerPresets))
+	}
+	nativePresets := make([]marge.PresetSeed, 0, len(speakerPresets))
+	for _, p := range speakerPresets {
+		nativePresets = append(nativePresets, marge.PresetSeed{Slot: p.Slot, Name: p.Name, Location: p.Location, Logo: p.Logo})
+	}
+
 	tc := tunein.New()
 	set := settings.Open(*presets + ".settings")
 	webSrv := web.New(tc, bc, st, set, logger)
-	margeSrv, err := marge.New(base, info, *presets+".marge", tc, logger.With("comp", "marge"))
+	margeSrv, err := marge.New(base, info, *presets+".marge", nativePresets, tc, logger.With("comp", "marge"))
 	if err != nil {
 		logger.Error("init marge stub", "err", err)
 		os.Exit(1)
 	}
+	webSrv.SetPresetMirror(margeSrv)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -119,6 +133,33 @@ func main() {
 
 	logger.Info("stlocal up", "webui", *listen, "marge", *margeAddr, "marge-base", base, "speaker", *host, "presets", *presets)
 	wg.Wait()
+}
+
+func waitSpeakerInfo(ctx context.Context, bc *speaker.Client, timeout time.Duration) (*speaker.Info, error) {
+	deadline := time.Now().Add(timeout)
+	var last error
+	for {
+		c, cancel := context.WithTimeout(ctx, 5*time.Second)
+		info, err := bc.Info(c)
+		cancel()
+		if err == nil && info.DeviceID != "" && info.Name != "" && info.IP != "" && info.Software != "" {
+			return info, nil
+		}
+		if err != nil {
+			last = err
+		}
+		if time.Now().After(deadline) {
+			if last != nil {
+				return nil, last
+			}
+			return nil, context.DeadlineExceeded
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
 }
 
 // synthAccount derives a stable 7-digit local marge account id from the device id.
