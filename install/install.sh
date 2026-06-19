@@ -22,6 +22,7 @@ PLACE="http://x.invalid"        # harmless placeholder the speaker overwrites it
 API_PORT=8090                   # speakers answer here; used only to find them
 APP_PORT=8000                   # ReTouch's web app; also reachable on :80 via redirect
 SETUP_PORT=17000                # where we hand the speaker its setup instructions
+APP_URL_PORT=8080               # where ReTouch is exposed after install
 
 # ---- pretty output ---------------------------------------------------------
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -157,6 +158,9 @@ say "This restarts the speaker once — it'll be back in a minute or two."
 say ""
 
 send() { printf '%s\n' "$1" | nc -w 3 "$IP" "$SETUP_PORT" >/dev/null 2>&1; }
+URL="http://$IP:$APP_URL_PORT"
+was_up=0
+curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1 && was_up=1
 
 # Hand the speaker a one-time instruction to fetch and run the on-speaker setup,
 # then tell it to restart so the instruction takes effect.
@@ -170,11 +174,36 @@ ok "asked the speaker to restart"
 
 # ---- wait for ReTouch to come up ------------------------------------------
 say ""
+# When updating an already running install, the old ReTouch can still answer for a
+# short while after the reboot request. Wait for that instance to disappear first,
+# otherwise we can report success before the speaker has actually restarted.
+if [ "$was_up" -eq 1 ]; then
+	printf 'Waiting for the speaker to restart %s(first it goes offline)%s' "$DIM" "$R"
+	down=0
+	n=0
+	while [ "$n" -lt 60 ]; do            # ~2 minutes for the old service to stop
+		if ! curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
+			down=1; break
+		fi
+		printf '.'
+		sleep 2
+		n=$((n + 1))
+	done
+	printf '\n\n'
+	if [ "$down" -ne 1 ]; then
+		warn "the speaker did not go offline after the restart request."
+		say ""
+		say "  ReTouch is still answering at ${B}$URL${R}, so the restart may not have started yet."
+		say "  Give it another minute, then run this installer again if it still hasn't updated."
+		say ""
+		exit 0
+	fi
+fi
+
 printf 'Waiting for ReTouch to come online %s(this takes a minute or two)%s' "$DIM" "$R"
 # Probe the app's own API (/api/settings only answers from ReTouch, so Bose's setup
 # page can't look like a false "ready"). ReTouch is exposed on exactly one uniform
 # port — :8080 — on every speaker, so that is the only URL we wait for and advertise.
-URL="http://$IP:8080"
 up=0
 n=0
 while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
