@@ -32,7 +32,9 @@ CFG=/opt/Bose/etc/SoundTouchSdkPrivateCfg.xml
 START=$HOME_DIR/start.sh
 
 log() { echo "[retouch] $*" >>"$LOG" 2>&1; }
-giveup() { : >"$GAVEUP"; log "$*; giving up"; exit 0; }
+# giveup records the TARGET tag it gave up on (not just an empty marker) so a later
+# run can tell "gave up on this exact release" from "a newer release is out, retry".
+giveup() { echo "${TAG:-}" >"$GAVEUP"; log "$*; giving up (target ${TAG:-?})"; exit 0; }
 
 LAUNCH="$BIN -speaker-host 127.0.0.1 -listen $WEB_LISTEN -listen-marge $MARGE_LISTEN -marge-base $MARGE_BASE -presets $HOME_DIR/presets.json"
 
@@ -124,8 +126,6 @@ redirect_cloud() {
 	mount / -o ro,remount 2>/dev/null
 }
 
-[ -f "$GAVEUP" ] && { log "gave up earlier (remove $GAVEUP to retry)"; exit 0; }
-
 mkdir "$LOCK" 2>/dev/null || { log "locked"; exit 0; }
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
@@ -162,6 +162,27 @@ if [ -x "$BIN" ] && { [ -z "$TAG" ] || [ "$TAG" = "$INSTALLED" ]; }; then
 fi
 
 [ -n "$TAG" ] || { log "no tag and no binary installed; retry next boot"; exit 0; }
+
+# Honour a previous give-up only for the SAME target tag. netinstall used to write a
+# bare .gaveup marker and then skip on EVERY later boot — so a handful of transient
+# failures (boot network not warm yet, clock skew, a flaky download) dead-ended the
+# speaker forever, with no SSH-free way to recover, and install.sh would hang waiting
+# for a version that never arrived. Now the marker carries the tag we gave up on: if a
+# newer release exists, we clear it and retry automatically; only a working older
+# binary on the exact same failed tag is left alone (so we don't re-download every boot
+# while boseurls is still stuck). Remove $GAVEUP by hand to force a same-tag retry.
+if [ -f "$GAVEUP" ]; then
+	gave=$(cat "$GAVEUP" 2>/dev/null || echo "")
+	if [ "$gave" = "$TAG" ] && [ -x "$BIN" ]; then
+		log "gave up on $TAG earlier; same target — keeping ${INSTALLED:-none} (rm $GAVEUP to force)"
+		write_rc_local
+		redirect_cloud
+		restart_agent
+		exit 0
+	fi
+	log "previous give-up was for '${gave:-?}', target now '$TAG' — clearing and retrying"
+	rm -f "$GAVEUP" "$ATTEMPTS"
+fi
 
 n=$(cat "$ATTEMPTS" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" >"$ATTEMPTS"
 log "installing $TAG (have ${INSTALLED:-none}); attempt $n/$MAX_ATTEMPTS"

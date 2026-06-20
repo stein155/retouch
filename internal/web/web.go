@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,17 +53,18 @@ type releaseInfo struct {
 
 // Server wires the UI to the speaker and TuneIn search.
 type Server struct {
-	tunein   *tunein.Client
-	speaker  *speaker.Client
-	store    *store.Store
-	settings *settings.Store
-	mirror   PresetMirror
-	log      *slog.Logger
-	version  string
-	homeDir  string
-	updateMu sync.Mutex
-	ui       http.Handler // serves the embedded dist bundle
-	proxy    *http.Client // for the same-origin TuneIn / logo proxies
+	tunein    *tunein.Client
+	speaker   *speaker.Client
+	store     *store.Store
+	settings  *settings.Store
+	mirror    PresetMirror
+	log       *slog.Logger
+	version   string
+	homeDir   string
+	startedAt time.Time
+	updateMu  sync.Mutex
+	ui        http.Handler // serves the embedded dist bundle
+	proxy     *http.Client // for the same-origin TuneIn / logo proxies
 }
 
 // PresetMirror receives successful direct speaker preset writes so the local cloud
@@ -79,15 +82,16 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		panic("web: embedded dist missing: " + err.Error())
 	}
 	return &Server{
-		tunein:   tc,
-		speaker:  b,
-		store:    s,
-		settings: set,
-		log:      log,
-		version:  version,
-		homeDir:  homeDir,
-		ui:       http.FileServer(http.FS(sub)),
-		proxy:    &http.Client{Timeout: 12 * time.Second},
+		tunein:    tc,
+		speaker:   b,
+		store:     s,
+		settings:  set,
+		log:       log,
+		version:   version,
+		homeDir:   homeDir,
+		startedAt: time.Now(),
+		ui:        http.FileServer(http.FS(sub)),
+		proxy:     &http.Client{Timeout: 12 * time.Second},
 	}
 }
 
@@ -114,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("GET /api/version", s.versionInfo)
+	mux.HandleFunc("GET /api/debug", s.debugBundle)
 	mux.HandleFunc("POST /api/update", s.updateApp)
 	// Everything else is the embedded single-page UI. More specific /api/...
 	// patterns above win; this serves index.html, assets and icons.
@@ -123,6 +128,100 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) versionInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"version": s.version, "updatable": s.updatable()})
+}
+
+// debugBundle returns a plain-text snapshot of the agent version, runtime, the
+// PERSISTENT installer state, and the tails of the install/start/agent logs. It is
+// meant to be opened in a browser (http://<speaker>:8080/api/debug) and pasted into a
+// GitHub issue — no SSH needed. Read-only: it changes nothing on the speaker.
+//
+// The .gaveup / .attempts fields are the usual culprit when a speaker is stuck on an
+// old release: netinstall writes .gaveup after MAX_ATTEMPTS failures and then refuses
+// to retry on every later boot, so install.sh waits forever for a version that never
+// arrives. Surfacing them here turns that silent dead-end into something a user can see.
+func (s *Server) debugBundle(w http.ResponseWriter, r *http.Request) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "ReTouch debug bundle\n")
+	fmt.Fprintf(&b, "version    : %s\n", s.version)
+	fmt.Fprintf(&b, "updatable  : %v\n", s.updatable())
+	fmt.Fprintf(&b, "home       : %s\n", s.homeDir)
+	fmt.Fprintf(&b, "clock      : %s\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(&b, "uptime     : %s\n", time.Since(s.startedAt).Round(time.Second))
+	fmt.Fprintf(&b, "runtime    : %s %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
+
+	b.WriteString("\n== installer state (persistent; survives reboots) ==\n")
+	fmt.Fprintf(&b, ".version   : %s\n", readFileLine(filepath.Join(s.homeDir, ".version")))
+	fmt.Fprintf(&b, ".attempts  : %s\n", readFileLine(filepath.Join(s.homeDir, ".attempts")))
+	gaveUp := fileExists(filepath.Join(s.homeDir, ".gaveup"))
+	fmt.Fprintf(&b, ".gaveup    : %v", gaveUp)
+	if gaveUp {
+		b.WriteString("   <-- netinstall has given up; it will NOT retry until this is cleared")
+	}
+	b.WriteByte('\n')
+
+	for _, lg := range []struct{ name, path string }{
+		{"install log", "/tmp/retouch-install.log"},
+		{"start log", "/tmp/retouch-start.log"},
+		{"agent log", "/tmp/retouch.log"},
+	} {
+		fmt.Fprintf(&b, "\n== %s (%s) ==\n", lg.name, lg.path)
+		b.WriteString(tailFile(lg.path, 8<<10))
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	io.WriteString(w, b.String())
+}
+
+// readFileLine returns the first line of a small state file, or "<none>".
+func readFileLine(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "<none>"
+	}
+	s := strings.TrimSpace(string(b))
+	if s == "" {
+		return "<empty>"
+	}
+	return s
+}
+
+// tailFile returns at most max bytes from the end of path, dropping a leading partial
+// line when truncated. Missing/empty files yield a short placeholder instead of an error.
+func tailFile(path string, max int64) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return "<none>\n"
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return "<unreadable>\n"
+	}
+	truncated := fi.Size() > max
+	if truncated {
+		if _, err := f.Seek(-max, io.SeekEnd); err != nil {
+			return "<unreadable>\n"
+		}
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "<unreadable>\n"
+	}
+	out := string(data)
+	if truncated {
+		if i := strings.IndexByte(out, '\n'); i >= 0 {
+			out = "…(truncated)\n" + out[i+1:]
+		}
+	}
+	if strings.TrimSpace(out) == "" {
+		return "<empty>\n"
+	}
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	return out
 }
 
 func (s *Server) updatable() bool {
