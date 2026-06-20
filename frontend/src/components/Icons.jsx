@@ -44,6 +44,12 @@ export const Icon = {
       <path d="M4 10v4h3l4 3.5V6.5L7 10H4Z"/><path d="m15 10 5 4M20 10l-5 4"/>
     </svg>
   ),
+  speaker: (p) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <rect x="6" y="3" width="12" height="18" rx="2.5"/>
+      <circle cx="12" cy="14" r="3.5"/><circle cx="12" cy="6.5" r="0.5" fill="currentColor"/>
+    </svg>
+  ),
   settings: (p) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
       <circle cx="12" cy="12" r="3"/>

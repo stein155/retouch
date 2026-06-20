@@ -11,8 +11,8 @@ its cloud servers. It is a single Go program that runs **on the speaker itself**
 1. Emulates the small part of the Bose cloud API the firmware checks in with, so the
    speaker re-enables its own native internet-radio sources.
 2. Serves a web app (port `:8000`, reached on `:80` via a boot-time redirect) for
-   searching stations, managing the six presets,
-   and controlling playback.
+   searching stations, managing the six presets, controlling playback, grouping
+   other ReTouch speakers into multiroom zones, and updating itself over the air.
 
 It does **not** stream or re-route audio — the speaker plays radio itself, exactly
 as it did before. ReTouch only stands in for the API that used to live in the cloud.
@@ -22,7 +22,8 @@ as it did before. ReTouch only stands in for the API that used to live in the cl
 ```
 main.go              flags + HTTP servers (web app + local cloud-API emulation)
 internal/tunein/     TuneIn directory client (search / resolve / describe)
-internal/speaker/    speaker control (play, presets, volume, name, bass)
+internal/speaker/    speaker control (play, presets, volume, name, bass, multiroom zones)
+internal/discover/   finds other ReTouch speakers on the LAN (for multiroom)
 internal/marge/      local emulation of the Bose cloud API the firmware expects
 internal/autopair/   keeps the speaker's sources enabled
 internal/settings/   persisted app settings (name, bass, language)

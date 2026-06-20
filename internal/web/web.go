@@ -12,6 +12,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,6 +26,7 @@ import (
 
 	"encoding/json"
 
+	"github.com/stein155/retouch/internal/discover"
 	"github.com/stein155/retouch/internal/settings"
 	"github.com/stein155/retouch/internal/speaker"
 	"github.com/stein155/retouch/internal/store"
@@ -132,6 +134,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/volume", s.setVolume)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
+	mux.HandleFunc("GET /api/multiroom", s.multiroom)
+	mux.HandleFunc("GET /api/multiroom/speakers", s.multiroomSpeakers)
+	mux.HandleFunc("POST /api/multiroom/group", s.multiroomGroup)
+	mux.HandleFunc("POST /api/multiroom/ungroup", s.multiroomUngroup)
 	mux.HandleFunc("GET /api/version", s.versionInfo)
 	mux.HandleFunc("GET /api/debug", s.debugBundle)
 	mux.HandleFunc("POST /api/update", s.updateApp)
@@ -139,6 +145,159 @@ func (s *Server) Handler() http.Handler {
 	// patterns above win; this serves index.html, assets and icons.
 	mux.HandleFunc("GET /", s.serveUI)
 	return mux
+}
+
+// multiroom returns this speaker's identity and its current multiroom zone, so
+// the UI can show whether it is grouped and which other speakers are members.
+// This is the fast read (no network sweep — see multiroomSpeakers for that).
+func (s *Server) multiroom(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	self, err := s.speaker.Info(ctx)
+	if err != nil {
+		s.fail(w, "speaker info failed", err)
+		return
+	}
+	out := map[string]any{
+		"self":     map[string]string{"deviceId": self.DeviceID, "name": self.Name, "ip": self.IP},
+		"isMaster": false,
+		"members":  []speaker.Member{},
+	}
+	if z, err := s.speaker.GetZone(ctx); err == nil {
+		out["master"] = z.Master
+		out["isMaster"] = z.Master != "" && z.Master == self.DeviceID
+		out["members"] = z.Members
+	} else {
+		s.log.Warn("read zone", "err", err)
+	}
+	writeJSON(w, 200, out)
+}
+
+// multiroomSpeakers sweeps the local network for other SoundTouch speakers and
+// returns them, each flagged with whether it is already in this speaker's zone.
+// The sweep takes a couple of seconds, so the UI shows a spinner while it runs.
+func (s *Server) multiroomSpeakers(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	self, err := s.speaker.Info(ctx)
+	if err != nil {
+		s.fail(w, "speaker info failed", err)
+		return
+	}
+	grouped := map[string]bool{}
+	if z, err := s.speaker.GetZone(ctx); err == nil && z.Master == self.DeviceID {
+		for _, m := range z.Members {
+			grouped[m.DeviceID] = true
+		}
+	}
+	found, err := discover.Scan(ctx, self.IP, self.DeviceID)
+	if err != nil {
+		s.fail(w, "scan failed", err)
+		return
+	}
+	type row struct {
+		discover.Speaker
+		Grouped bool `json:"grouped"`
+	}
+	rows := make([]row, 0, len(found))
+	for _, sp := range found {
+		rows = append(rows, row{Speaker: sp, Grouped: grouped[sp.DeviceID]})
+	}
+	writeJSON(w, 200, rows)
+}
+
+// multiroomGroup adds the speaker at the posted IP to a zone mastered by THIS
+// speaker (creating the zone if there isn't one yet), so it plays in sync with
+// whatever this speaker is playing. Uses Bose's own setZone / addZoneSlave.
+func (s *Server) multiroomGroup(w http.ResponseWriter, r *http.Request) {
+	ip, ok := s.zoneTargetIP(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	self, err := s.speaker.Info(ctx)
+	if err != nil {
+		s.fail(w, "speaker info failed", err)
+		return
+	}
+	slaveInfo, err := speaker.New(ip).Info(ctx)
+	if err != nil || slaveInfo.DeviceID == "" {
+		s.fail(w, "could not reach that speaker", err)
+		return
+	}
+	master := speaker.Member{DeviceID: self.DeviceID, IP: self.IP}
+	slave := speaker.Member{DeviceID: slaveInfo.DeviceID, IP: ip}
+
+	// Extend an existing zone we already master; otherwise establish a fresh one.
+	z, _ := s.speaker.GetZone(ctx)
+	if z != nil && z.Master == self.DeviceID && len(z.Members) > 0 {
+		err = s.speaker.AddZoneSlave(ctx, master, []speaker.Member{slave})
+	} else {
+		err = s.speaker.SetZone(ctx, master, []speaker.Member{slave})
+	}
+	if err != nil {
+		s.fail(w, "grouping failed", err)
+		return
+	}
+	s.log.Info("multiroom group", "master", self.DeviceID, "slave", slave.DeviceID, "ip", ip)
+	writeJSON(w, 200, map[string]string{"status": "grouped"})
+}
+
+// multiroomUngroup removes the speaker at the posted IP from this speaker's zone.
+// The slave's deviceID is taken from the current zone (so it works even if the
+// slave has since gone offline), falling back to a live probe.
+func (s *Server) multiroomUngroup(w http.ResponseWriter, r *http.Request) {
+	ip, ok := s.zoneTargetIP(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	self, err := s.speaker.Info(ctx)
+	if err != nil {
+		s.fail(w, "speaker info failed", err)
+		return
+	}
+	slave := speaker.Member{IP: ip}
+	if z, err := s.speaker.GetZone(ctx); err == nil {
+		for _, m := range z.Members {
+			if m.IP == ip {
+				slave.DeviceID = m.DeviceID
+				break
+			}
+		}
+	}
+	if slave.DeviceID == "" {
+		if info, err := speaker.New(ip).Info(ctx); err == nil {
+			slave.DeviceID = info.DeviceID
+		}
+	}
+	master := speaker.Member{DeviceID: self.DeviceID, IP: self.IP}
+	if err := s.speaker.RemoveZoneSlave(ctx, master, []speaker.Member{slave}); err != nil {
+		s.fail(w, "ungrouping failed", err)
+		return
+	}
+	s.log.Info("multiroom ungroup", "master", self.DeviceID, "slave", slave.DeviceID, "ip", ip)
+	writeJSON(w, 200, map[string]string{"status": "ungrouped"})
+}
+
+// zoneTargetIP decodes and validates the {"ip": "..."} body shared by the
+// group/ungroup endpoints.
+func (s *Server) zoneTargetIP(w http.ResponseWriter, r *http.Request) (string, bool) {
+	var body struct {
+		IP string `json:"ip"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.fail(w, "bad body", err)
+		return "", false
+	}
+	ip := strings.TrimSpace(body.IP)
+	if net.ParseIP(ip) == nil {
+		http.Error(w, "valid ip required", http.StatusBadRequest)
+		return "", false
+	}
+	return ip, true
 }
 
 func (s *Server) versionInfo(w http.ResponseWriter, r *http.Request) {
