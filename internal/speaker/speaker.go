@@ -303,6 +303,104 @@ func (c *Client) Select(ctx context.Context, source, itemType, location, name, a
 	return c.post(ctx, "/select", ci)
 }
 
+// Member is one speaker in a multiroom zone: its deviceID (which is also the
+// speaker's MAC, used as the zone's master id and a member's text content) and
+// its current LAN address.
+type Member struct {
+	DeviceID string `json:"deviceId"`
+	IP       string `json:"ip"`
+}
+
+// Zone is the speaker's current multiroom grouping as reported by /getZone. Master
+// is the master speaker's deviceID (empty when the speaker is not in any zone);
+// Members lists every speaker in the zone (the master first, then the slaves).
+type Zone struct {
+	Master  string   `json:"master"`
+	Members []Member `json:"members"`
+}
+
+// GetZone reads the speaker's current multiroom zone via /getZone. An ungrouped
+// speaker reports an empty <zone/>, so Master == "" and Members is empty.
+func (c *Client) GetZone(ctx context.Context) (*Zone, error) {
+	body, err := c.get(ctx, "/getZone")
+	if err != nil {
+		return nil, err
+	}
+	var x struct {
+		Master  string `xml:"master,attr"`
+		Members []struct {
+			IP       string `xml:"ipaddress,attr"`
+			DeviceID string `xml:",chardata"`
+		} `xml:"member"`
+	}
+	if err := xml.Unmarshal(body, &x); err != nil {
+		return nil, err
+	}
+	z := &Zone{Master: strings.TrimSpace(x.Master)}
+	for _, m := range x.Members {
+		id := strings.TrimSpace(m.DeviceID)
+		if id == "" {
+			continue
+		}
+		z.Members = append(z.Members, Member{DeviceID: id, IP: strings.TrimSpace(m.IP)})
+	}
+	return z, nil
+}
+
+// SetZone creates (or replaces) a multiroom zone with master as the controlling
+// speaker and slaves as the other members; it is POSTed to the master itself.
+// The Bose firmware syncs the slaves to whatever the master is playing. The
+// master is listed first as a member and senderIPAddress carries the master IP —
+// the form the firmware expects when establishing a fresh zone.
+func (c *Client) SetZone(ctx context.Context, master Member, slaves []Member) error {
+	return c.post(ctx, "/setZone", setZoneBody(master, slaves))
+}
+
+// AddZoneSlave adds slaves to the existing zone mastered by master. Unlike
+// SetZone it omits senderIPAddress and lists only the speakers being added.
+func (c *Client) AddZoneSlave(ctx context.Context, master Member, slaves []Member) error {
+	return c.zoneMembers(ctx, "/addZoneSlave", master, slaves)
+}
+
+// RemoveZoneSlave removes slaves from the zone mastered by master. When the last
+// slave is removed the firmware dissolves the zone.
+func (c *Client) RemoveZoneSlave(ctx context.Context, master Member, slaves []Member) error {
+	return c.zoneMembers(ctx, "/removeZoneSlave", master, slaves)
+}
+
+func (c *Client) zoneMembers(ctx context.Context, path string, master Member, slaves []Member) error {
+	return c.post(ctx, path, zoneBody(master, slaves))
+}
+
+// setZoneBody builds the /setZone request: the master carries senderIPAddress and
+// is listed first as a member, followed by the slaves.
+func setZoneBody(master Member, slaves []Member) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, `<zone master="%s" senderIPAddress="%s">`, xmlEsc(master.DeviceID), xmlEsc(master.IP))
+	b.WriteString(memberXML(master))
+	for _, s := range slaves {
+		b.WriteString(memberXML(s))
+	}
+	b.WriteString(`</zone>`)
+	return b.String()
+}
+
+// zoneBody builds the /addZoneSlave and /removeZoneSlave request: just the master
+// id and the members being added/removed (no senderIPAddress, no master member).
+func zoneBody(master Member, slaves []Member) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, `<zone master="%s">`, xmlEsc(master.DeviceID))
+	for _, s := range slaves {
+		b.WriteString(memberXML(s))
+	}
+	b.WriteString(`</zone>`)
+	return b.String()
+}
+
+func memberXML(m Member) string {
+	return `<member ipaddress="` + xmlEsc(m.IP) + `">` + xmlEsc(m.DeviceID) + `</member>`
+}
+
 func xmlEsc(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;").Replace(s)
 }

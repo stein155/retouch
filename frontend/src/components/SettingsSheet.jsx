@@ -1,7 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon } from './Icons';
 import { useI18n, LANGS } from '../lib/i18n';
-import { getSettings, saveSettings, getVersion, startUpdate } from '../lib/api';
+import {
+  getSettings, saveSettings, getVersion, startUpdate,
+  findSpeakers, groupSpeaker, ungroupSpeaker,
+} from '../lib/api';
 
 const cx = (...a) => a.filter(Boolean).join(' ');
 const fmtBass = (v) => (v > 0 ? '+' + v : String(v));
@@ -63,6 +66,80 @@ function BassSlider({ value, min, max, origin, onChange }) {
       <div className="slider-fill" style={{ left: `${fillLeft}%`, width: `${fillWidth}%` }} />
       <div className="slider-thumb" style={{ left: `${pct}%` }} />
     </div>
+  );
+}
+
+// Multiroom: group other SoundTouch speakers on the network with this one (this
+// radio is the zone master; the rest follow it via Bose's native zone API). The
+// list comes from a network sweep, so it auto-scans on open and offers a manual
+// rescan. Each row toggles membership; toggles apply optimistically and revert
+// on failure.
+function MultiroomSection() {
+  const { t } = useI18n();
+  const [speakers, setSpeakers] = useState(null); // null = not scanned yet; [] = scanned, none found
+  const [scanning, setScanning] = useState(false);
+  const [busy, setBusy] = useState({}); // ip -> in-flight toggle
+
+  const scan = useCallback(async () => {
+    setScanning(true);
+    const list = await findSpeakers();
+    setSpeakers(list);
+    setScanning(false);
+  }, []);
+
+  useEffect(() => { scan(); }, [scan]);
+
+  const toggle = async (sp) => {
+    if (busy[sp.ip]) return;
+    const want = !sp.grouped;
+    setBusy((b) => ({ ...b, [sp.ip]: true }));
+    setSpeakers((list) => list.map((x) => (x.ip === sp.ip ? { ...x, grouped: want } : x)));
+    try {
+      await (want ? groupSpeaker(sp.ip) : ungroupSpeaker(sp.ip));
+    } catch {
+      setSpeakers((list) => list.map((x) => (x.ip === sp.ip ? { ...x, grouped: !want } : x)));
+    } finally {
+      setBusy((b) => ({ ...b, [sp.ip]: false }));
+    }
+  };
+
+  return (
+    <>
+      <div className="form-section" style={{ marginTop: 22 }}>{t('multiroom')}</div>
+      <div className="field-hint" style={{ marginTop: 0, marginBottom: 8 }}>{t('multiroomHint')}</div>
+      {speakers && speakers.length > 0 && (
+        <div className="field-card">
+          {speakers.map((sp) => (
+            <div className="field-row spk-row" key={sp.deviceId || sp.ip}>
+              <span className="spk-icon"><Icon.speaker width="20" height="20" /></span>
+              <span className="spk-text">
+                <span className="spk-name">{sp.name || 'SoundTouch'}</span>
+                {sp.model && <span className="spk-model">{sp.model}</span>}
+              </span>
+              <button
+                type="button"
+                className={cx('spk-toggle', sp.grouped && 'is-on')}
+                role="switch"
+                aria-checked={sp.grouped}
+                aria-label={sp.name || sp.ip}
+                disabled={!!busy[sp.ip]}
+                onClick={() => toggle(sp)}
+              >
+                <span className="spk-knob" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {speakers && speakers.length === 0 && !scanning && (
+        <div className="field-hint">{t('noSpeakers')}</div>
+      )}
+      <button className="update-btn spk-scan" onClick={scan} disabled={scanning}>
+        {scanning
+          ? <><span className="mp-spinner" /><span>{t('scanning')}</span></>
+          : <><Icon.search width="18" height="18" /><span>{t('findSpeakers')}</span></>}
+      </button>
+    </>
   );
 }
 
@@ -211,6 +288,8 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
               </select>
               <span className="select-chev" aria-hidden="true"><Icon.chevron width="18" height="18" /></span>
             </div>
+
+            <MultiroomSection />
 
             {ver && (
               <>

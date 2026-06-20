@@ -38,6 +38,10 @@ export const I18N = {
     updating: 'Updating… the speaker restarts and comes back in about a minute.',
     updateDone: 'Updated to', updateError: 'Update failed. Please try again.',
     updatesOnSpeaker: 'Updates are only available on the speaker itself.',
+    multiroom: 'Multiroom',
+    multiroomHint: 'Play in sync on other SoundTouch speakers nearby. This radio leads; the rest follow.',
+    findSpeakers: 'Search again', scanning: 'Looking for speakers…',
+    noSpeakers: 'No other speakers found.',
   },
   nl: {
     appTitle: 'Radio', settings: 'Instellingen', thisRadio: 'Deze radio',
@@ -60,6 +64,10 @@ export const I18N = {
     updating: 'Bezig met bijwerken… de speaker herstart en is over ongeveer een minuut terug.',
     updateDone: 'Bijgewerkt naar', updateError: 'Bijwerken mislukt. Probeer het opnieuw.',
     updatesOnSpeaker: 'Bijwerken kan alleen op de speaker zelf.',
+    multiroom: 'Multiroom',
+    multiroomHint: 'Speel gelijk af op andere SoundTouch-speakers in de buurt. Deze radio is de baas; de rest volgt.',
+    findSpeakers: 'Opnieuw zoeken', scanning: 'Speakers zoeken…',
+    noSpeakers: 'Geen andere speakers gevonden.',
   },
   de: {
     appTitle: 'Radio', settings: 'Einstellungen', thisRadio: 'Dieses Radio',
@@ -82,6 +90,10 @@ export const I18N = {
     updating: 'Wird aktualisiert… der Lautsprecher startet neu und ist in etwa einer Minute zurück.',
     updateDone: 'Aktualisiert auf', updateError: 'Aktualisierung fehlgeschlagen. Bitte erneut versuchen.',
     updatesOnSpeaker: 'Aktualisierungen sind nur auf dem Lautsprecher selbst möglich.',
+    multiroom: 'Multiroom',
+    multiroomHint: 'Auf weiteren SoundTouch-Lautsprechern synchron abspielen. Dieses Radio führt, die anderen folgen.',
+    findSpeakers: 'Erneut suchen', scanning: 'Suche Lautsprecher…',
+    noSpeakers: 'Keine weiteren Lautsprecher gefunden.',
   },
   fr: {
     appTitle: 'Radio', settings: 'Réglages', thisRadio: 'Cette radio',
@@ -104,6 +116,10 @@ export const I18N = {
     updating: "Mise à jour… l'enceinte redémarre et revient dans environ une minute.",
     updateDone: 'Mis à jour vers', updateError: 'Échec de la mise à jour. Réessayez.',
     updatesOnSpeaker: "Les mises à jour ne sont disponibles que sur l'enceinte elle-même.",
+    multiroom: 'Multiroom',
+    multiroomHint: "Diffusez en synchro sur d'autres enceintes SoundTouch. Cette radio mène, les autres suivent.",
+    findSpeakers: 'Rechercher à nouveau', scanning: "Recherche d'enceintes…",
+    noSpeakers: 'Aucune autre enceinte trouvée.',
   },
   es: {
     appTitle: 'Radio', settings: 'Ajustes', thisRadio: 'Esta radio',
@@ -126,6 +142,10 @@ export const I18N = {
     updating: 'Actualizando… el altavoz se reinicia y vuelve en aproximadamente un minuto.',
     updateDone: 'Actualizado a', updateError: 'Error al actualizar. Inténtalo de nuevo.',
     updatesOnSpeaker: 'Las actualizaciones solo están disponibles en el altavoz.',
+    multiroom: 'Multiroom',
+    multiroomHint: 'Reproduce en sincronía en otros altavoces SoundTouch. Esta radio manda; los demás siguen.',
+    findSpeakers: 'Buscar de nuevo', scanning: 'Buscando altavoces…',
+    noSpeakers: 'No se encontraron otros altavoces.',
   },
   af: {
     appTitle: 'Radio', settings: 'Instellings', thisRadio: 'Hierdie radio',
@@ -148,6 +168,10 @@ export const I18N = {
     updating: "Besig om by te werk… die luidspreker herbegin en is oor ongeveer 'n minuut terug.",
     updateDone: 'Bygewerk na', updateError: 'Bywerk het misluk. Probeer weer.',
     updatesOnSpeaker: 'Bywerkings is net op die luidspreker self beskikbaar.',
+    multiroom: 'Multiroom',
+    multiroomHint: 'Speel gelyktydig op ander SoundTouch-luidsprekers. Hierdie radio lei; die ander volg.',
+    findSpeakers: 'Soek weer', scanning: 'Soek luidsprekers…',
+    noSpeakers: 'Geen ander luidsprekers gevind nie.',
   },
 };
 

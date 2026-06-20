@@ -166,6 +166,32 @@ export async function saveSettings(patch) {
   return send('/api/settings', 'PUT', patch);
 }
 
+// Multiroom — native Bose zone grouping. This speaker acts as the zone master;
+// other speakers on the network join it and play in sync (Bose's own setZone /
+// addZoneSlave / removeZoneSlave under the hood).
+
+// getMultiroom returns { self:{deviceId,name,ip}, isMaster, master, members }.
+export async function getMultiroom() {
+  try { return await getJSON('/api/multiroom'); } catch { return null; }
+}
+
+// findSpeakers sweeps the LAN for other SoundTouch speakers. Each row is
+// { deviceId, name, model, ip, grouped }. Slow (a network scan), so callers
+// should show a spinner. Returns [] on failure.
+export async function findSpeakers() {
+  try { return (await getJSON('/api/multiroom/speakers')) || []; } catch { return []; }
+}
+
+// groupSpeaker adds the speaker at ip to this speaker's zone (this one master).
+export async function groupSpeaker(ip) {
+  return send('/api/multiroom/group', 'POST', { ip });
+}
+
+// ungroupSpeaker removes the speaker at ip from this speaker's zone.
+export async function ungroupSpeaker(ip) {
+  return send('/api/multiroom/ungroup', 'POST', { ip });
+}
+
 // getVersion returns { version, updatable }. updatable is true only on an installed
 // speaker (where ReTouch can replace its own binary). Returns null if unreachable.
 export async function getVersion() {
