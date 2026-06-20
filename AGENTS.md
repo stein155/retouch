@@ -25,6 +25,7 @@ internal/tunein/     TuneIn directory client (search / resolve / describe)
 internal/speaker/    speaker control (play, presets, volume, name, bass, multiroom zones)
 internal/discover/   finds other ReTouch speakers on the LAN (for multiroom)
 internal/marge/      local emulation of the Bose cloud API the firmware expects
+internal/homekit/    HomeKit (HAP) bridge — exposes the speaker to Apple Home
 internal/autopair/   keeps the speaker's sources enabled
 internal/settings/   persisted app settings (name, bass, language)
 internal/store/      small on-disk state (presets, etc.)
@@ -36,8 +37,10 @@ install/             wireless install: install.sh / netinstall.sh / uninstall.sh
 
 ## Build & test
 
-This is a stdlib-only Go module (`go.mod`). **Do not install toolchains on the host
-— always build inside Docker** and clean up afterward.
+This is an almost stdlib-only Go module (`go.mod`) with a single dependency,
+`github.com/brutella/hap`, used only by `internal/homekit` (see Conventions for why).
+**Do not install toolchains on the host — always build inside Docker** and clean up
+afterward.
 
 ```sh
 # build for the speaker (ARMv7) and for local testing (amd64)
@@ -72,6 +75,12 @@ is self-contained. Rebuild the frontend whenever you change anything under
   configuration is backed up first so it can be fully restored.
 - An autostart entry relaunches ReTouch on every boot; on boot it re-checks in so the
   native radio sources come back automatically.
+- When enabled (the installer enables it), the HomeKit bridge listens on its own LAN
+  port (`:51827`) — separate from the `:8080` web UI and not affected by the `:8000`
+  redirect/hide rules — and advertises an Apple Home accessory via its own mDNS. The
+  setup code is derived from the speaker's device id (stable across reboots) and shown
+  in the UI / at `GET /api/homekit`. Pairing state lives under the install dir, so
+  `uninstall.sh` removes it with everything else.
 - Everything is reversible via `install/uninstall.sh`.
 
 When referring to a speaker in code, docs, or scripts, use a placeholder such as
@@ -79,7 +88,11 @@ When referring to a speaker in code, docs, or scripts, use a placeholder such as
 
 ## Conventions
 
-- **Stdlib-only Go.** Don't add Go dependencies without a strong reason.
+- **Stdlib-only Go.** Don't add Go dependencies without a strong reason. The one
+  exception is `github.com/brutella/hap` (HomeKit): the HomeKit Accessory Protocol
+  needs SRP pairing, Curve25519/ChaCha20-Poly1305 transport crypto and its own mDNS
+  advertisement, none of which is feasible on the stdlib. It is confined to
+  `internal/homekit`; the rest of the tree stays stdlib-only.
 - **Reversible by default.** Anything that changes the speaker must back up what it
   replaces and be undoable from `uninstall.sh`.
 - **No domain jargon in user-facing text.** Installer and UI copy should read plainly

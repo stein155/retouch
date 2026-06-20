@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stein155/retouch/internal/autopair"
+	"github.com/stein155/retouch/internal/homekit"
 	"github.com/stein155/retouch/internal/marge"
 	"github.com/stein155/retouch/internal/settings"
 	"github.com/stein155/retouch/internal/speaker"
@@ -40,6 +41,11 @@ func main() {
 	presets := flag.String("presets", "presets.json", "path to the presets JSON file")
 	accountID := flag.String("account-id", "", "marge account UUID to keep the speaker paired to (default: whatever the speaker reports); enables autopair")
 	pairEvery := flag.Duration("pair-interval", 5*time.Minute, "how often autopair re-checks the speaker's association")
+	homeKit := flag.Bool("homekit", false, "expose the speaker to Apple Home over HomeKit (HAP)")
+	homeKitAddr := flag.String("homekit-addr", ":51827", "TCP listen address for the HomeKit/HAP server")
+	homeKitPin := flag.String("homekit-pin", "", "8-digit HomeKit setup code (default: derived from the speaker's device id)")
+	homeKitName := flag.String("homekit-name", "", "accessory name shown in the Home app (default: the speaker's name)")
+	homeKitStore := flag.String("homekit-store", "", "directory for HomeKit pairing state (default: <presets dir>/homekit)")
 	verbose := flag.Bool("v", false, "verbose: log every speaker request to the pairing stub")
 	flag.Parse()
 
@@ -111,6 +117,30 @@ func main() {
 
 	// Keep the speaker paired to our marge account so native sources stay enabled.
 	go autopair.New(bc, info.Account, autopair.DefaultAuthToken, *pairEvery, logger.With("comp", "autopair")).Run(ctx)
+
+	// Bridge the speaker into Apple Home (opt-in). Runs independently of the web/marge
+	// servers; a failure here never takes ReTouch's core functionality down.
+	if *homeKit {
+		hkStore := *homeKitStore
+		if hkStore == "" {
+			hkStore = filepath.Join(filepath.Dir(*presets), "homekit")
+		}
+		hkCfg := homekit.Config{Pin: *homeKitPin, Name: *homeKitName, Addr: *homeKitAddr, StorageDir: hkStore}
+		hkName := *homeKitName
+		if hkName == "" {
+			hkName = info.Name
+		}
+		webSrv.SetHomeKit(&web.HomeKitInfo{
+			Enabled: true,
+			Name:    hkName,
+			Code:    homekit.FmtPin(homekit.PinFor(*homeKitPin, info.DeviceID)),
+		})
+		go func() {
+			if err := homekit.Run(ctx, bc, info, hkCfg, logger.With("comp", "homekit")); err != nil {
+				logger.Error("homekit bridge stopped", "err", err)
+			}
+		}()
+	}
 
 	var wg sync.WaitGroup
 	serve := func(name, addr string, h http.Handler) {

@@ -60,6 +60,7 @@ type Server struct {
 	store     *store.Store
 	settings  *settings.Store
 	mirror    PresetMirror
+	homekit   *HomeKitInfo // set when the HomeKit bridge is enabled; nil otherwise
 	log       *slog.Logger
 	version   string
 	homeDir   string
@@ -117,6 +118,18 @@ func (s *Server) SetPresetMirror(m PresetMirror) {
 	s.mirror = m
 }
 
+// HomeKitInfo is what the UI needs to show the Apple Home pairing code.
+type HomeKitInfo struct {
+	Enabled bool   `json:"enabled"`
+	Name    string `json:"name,omitempty"`
+	Code    string `json:"code,omitempty"` // XXX-XX-XXX setup code
+}
+
+// SetHomeKit makes the HomeKit pairing details available to GET /api/homekit.
+func (s *Server) SetHomeKit(hk *HomeKitInfo) {
+	s.homekit = hk
+}
+
 // Handler returns the HTTP mux.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -138,6 +151,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/multiroom/speakers", s.multiroomSpeakers)
 	mux.HandleFunc("POST /api/multiroom/group", s.multiroomGroup)
 	mux.HandleFunc("POST /api/multiroom/ungroup", s.multiroomUngroup)
+	mux.HandleFunc("GET /api/homekit", s.homeKitInfo)
 	mux.HandleFunc("GET /api/version", s.versionInfo)
 	mux.HandleFunc("GET /api/debug", s.debugBundle)
 	mux.HandleFunc("POST /api/update", s.updateApp)
@@ -787,6 +801,16 @@ func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]string{"status": "stopped"})
+}
+
+// homeKitInfo reports whether the Apple Home bridge is on and, if so, the setup
+// code to type into the Home app. Returns {"enabled":false} when HomeKit is off.
+func (s *Server) homeKitInfo(w http.ResponseWriter, r *http.Request) {
+	if s.homekit == nil {
+		writeJSON(w, 200, HomeKitInfo{Enabled: false})
+		return
+	}
+	writeJSON(w, 200, s.homekit)
 }
 
 func (s *Server) now(w http.ResponseWriter, r *http.Request) {

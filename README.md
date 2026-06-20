@@ -26,6 +26,8 @@ presets, and control playback from your phone or browser.
 - ▶️ **Play / stop and volume**, with live now-playing (station name + logo)
 - 🔗 **Multiroom** — find your other ReTouch speakers and group them so they play
   in sync, using Bose's own native zones
+- 🏠 **Apple Home (HomeKit)** — the speaker shows up in the Home app and Siri, with
+  power, volume, mute, and the six presets as selectable inputs
 - ⚙️ **Settings** — speaker name, bass, and the app's language
 - ⬆️ **Over-the-air updates** — update straight from the app; the speaker fetches
   the latest release and restarts itself
@@ -45,6 +47,21 @@ speaker adds the search, presets, and controls.
 finds your other ReTouch speakers on the network and uses Bose's own zone API to
 group them, so one speaker leads and the rest play in perfect sync, exactly like
 multiroom did when the Bose app still worked.
+
+## Apple Home (HomeKit)
+
+ReTouch can bridge the speaker into **Apple Home**, so you can control it from the
+Home app and Siri ("Hey Siri, turn on the kitchen speaker", "play preset 2"). It is
+enabled by the installer and appears as a **Television** accessory: power on/off,
+volume and mute, and your six presets shown as selectable inputs.
+
+To pair it, open the **Home** app → **Add Accessory** → *More options*, pick the
+speaker, and enter the **setup code** shown in ReTouch's Settings (also available at
+`http://<speaker>:8080/api/homekit`). The code is fixed per speaker.
+
+This bridge only stands in for HomeKit — the speaker still plays radio itself, exactly
+as before. It uses one Go dependency (`github.com/brutella/hap`) for the HomeKit
+protocol; the rest of ReTouch stays dependency-free.
 
 ## Install (and update)
 
@@ -96,6 +113,7 @@ internal/tunein/     TuneIn directory client (search / resolve / describe)
 internal/speaker/    speaker control (play, presets, volume, name, bass, multiroom zones)
 internal/discover/   finds other ReTouch speakers on the LAN (for multiroom)
 internal/marge/      local emulation of the Bose cloud API the firmware expects
+internal/homekit/    HomeKit (HAP) bridge — exposes the speaker to Apple Home
 internal/autopair/   keeps the speaker's sources enabled
 internal/settings/   persisted app settings (name, bass, language)
 internal/store/      small on-disk state (presets, etc.)
