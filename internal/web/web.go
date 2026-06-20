@@ -5,14 +5,20 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"encoding/json"
@@ -36,7 +42,12 @@ var distFS embed.FS
 const (
 	tuneInBase   = "https://opml.radiotime.com"
 	logoMaxBytes = 2 << 20 // 2 MiB
+	repo         = "stein155/retouch"
 )
+
+type releaseInfo struct {
+	TagName string `json:"tag_name"`
+}
 
 // Server wires the UI to the speaker and TuneIn search.
 type Server struct {
@@ -47,6 +58,8 @@ type Server struct {
 	mirror   PresetMirror
 	log      *slog.Logger
 	version  string
+	homeDir  string
+	updateMu sync.Mutex
 	ui       http.Handler // serves the embedded dist bundle
 	proxy    *http.Client // for the same-origin TuneIn / logo proxies
 }
@@ -59,7 +72,7 @@ type PresetMirror interface {
 }
 
 // New builds a Server.
-func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Store, version string, log *slog.Logger) *Server {
+func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Store, version, homeDir string, log *slog.Logger) *Server {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		// dist is embedded at build time; this only fails if the build is broken.
@@ -72,6 +85,7 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		settings: set,
 		log:      log,
 		version:  version,
+		homeDir:  homeDir,
 		ui:       http.FileServer(http.FS(sub)),
 		proxy:    &http.Client{Timeout: 12 * time.Second},
 	}
@@ -100,6 +114,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("GET /api/version", s.versionInfo)
+	mux.HandleFunc("POST /api/update", s.updateApp)
 	// Everything else is the embedded single-page UI. More specific /api/...
 	// patterns above win; this serves index.html, assets and icons.
 	mux.HandleFunc("GET /", s.serveUI)
@@ -107,7 +122,16 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) versionInfo(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]string{"version": s.version})
+	writeJSON(w, 200, map[string]any{"version": s.version, "updatable": s.updatable()})
+}
+
+func (s *Server) updatable() bool {
+	return filepath.IsAbs(s.homeDir) && s.homeDir != "/" && fileExists(filepath.Join(s.homeDir, "retouch"))
+}
+
+func fileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
 }
 
 func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +142,189 @@ func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) {
 	}
 	s.ui.ServeHTTP(w, r)
 }
+
+func (s *Server) updateApp(w http.ResponseWriter, r *http.Request) {
+	if !s.updatable() {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "updates are only available on an installed speaker"})
+		return
+	}
+	if !s.updateMu.TryLock() {
+		writeJSON(w, http.StatusConflict, map[string]string{"status": "updating"})
+		return
+	}
+	latest, err := s.latestRelease(r.Context())
+	if err != nil {
+		s.updateMu.Unlock()
+		s.fail(w, "latest release check failed", err)
+		return
+	}
+	if latest == "" {
+		s.updateMu.Unlock()
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "latest release missing tag"})
+		return
+	}
+	if latest == s.version {
+		s.updateMu.Unlock()
+		writeJSON(w, 200, map[string]string{"status": "current", "version": s.version})
+		return
+	}
+
+	go func(from, to string) {
+		defer s.updateMu.Unlock()
+		if err := s.installRelease(context.Background(), to); err != nil {
+			s.log.Warn("self-update failed", "from", from, "to", to, "err", err)
+			return
+		}
+		s.log.Info("self-update installed; restarting", "from", from, "to", to)
+		s.restartAfterUpdate()
+	}(s.version, latest)
+
+	writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": latest})
+}
+
+func (s *Server) latestRelease(ctx context.Context) (string, error) {
+	var rel releaseInfo
+	if err := s.getJSON(ctx, "https://api.github.com/repos/"+repo+"/releases/latest", &rel); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(rel.TagName), nil
+}
+
+func (s *Server) installRelease(ctx context.Context, tag string) error {
+	bin := filepath.Join(s.homeDir, "retouch")
+	newBin := bin + ".new"
+	sums := filepath.Join(s.homeDir, "SHA256SUMS")
+	base := "https://github.com/" + repo + "/releases/download/" + tag
+	if err := s.downloadFile(ctx, base+"/retouch-armv7l", newBin, 0o755); err != nil {
+		return err
+	}
+	if err := s.downloadFile(ctx, base+"/SHA256SUMS", sums, 0o644); err != nil {
+		_ = os.Remove(newBin)
+		return err
+	}
+	want, err := checksumFor(sums, "retouch-armv7l")
+	if err != nil {
+		_ = os.Remove(newBin)
+		return err
+	}
+	got, err := sha256File(newBin)
+	if err != nil {
+		_ = os.Remove(newBin)
+		return err
+	}
+	if want != got {
+		_ = os.Remove(newBin)
+		return errChecksumMismatch{want: want, got: got}
+	}
+	if err := os.Rename(newBin, bin); err != nil {
+		_ = os.Remove(newBin)
+		return err
+	}
+	return os.WriteFile(filepath.Join(s.homeDir, ".version"), []byte(tag+"\n"), 0o644)
+}
+
+func (s *Server) getJSON(ctx context.Context, target string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "ReTouch/"+s.version)
+	resp, err := s.proxy.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return errHTTPStatus{url: target, status: resp.StatusCode}
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 256*1024)).Decode(out)
+}
+
+func (s *Server) downloadFile(ctx context.Context, target, path string, mode fs.FileMode) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "ReTouch/"+s.version)
+	resp, err := s.proxy.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return errHTTPStatus{url: target, status: resp.StatusCode}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(f, resp.Body)
+	closeErr := f.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
+}
+
+func checksumFor(path, name string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == name {
+			return strings.ToLower(fields[0]), nil
+		}
+	}
+	return "", errMissingChecksum{name: name}
+}
+
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func (s *Server) restartAfterUpdate() {
+	start := filepath.Join(s.homeDir, "start.sh")
+	if fileExists(start) {
+		cmd := exec.Command("sh", "-c", "sleep 1; "+shellQuote(start)+" >/tmp/retouch-start.log 2>&1 &")
+		if err := cmd.Start(); err != nil {
+			s.log.Warn("schedule restart", "err", err)
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+		os.Exit(0)
+	}
+	s.log.Warn("start script missing after update", "path", start)
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+type errHTTPStatus struct {
+	url    string
+	status int
+}
+
+func (e errHTTPStatus) Error() string { return e.url + " status " + strconv.Itoa(e.status) }
+
+type errMissingChecksum struct{ name string }
+
+func (e errMissingChecksum) Error() string { return "missing checksum for " + e.name }
+
+type errChecksumMismatch struct{ want, got string }
+
+func (e errChecksumMismatch) Error() string { return "checksum mismatch " + e.got + " != " + e.want }
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -98,7 +99,7 @@ func main() {
 
 	tc := tunein.New()
 	set := settings.Open(*presets + ".settings")
-	webSrv := web.New(tc, bc, st, set, version, logger)
+	webSrv := web.New(tc, bc, st, set, version, filepath.Dir(*presets), logger)
 	margeSrv, err := marge.New(base, info, *presets+".marge", nativePresets, tc, logger.With("comp", "marge"))
 	if err != nil {
 		logger.Error("init marge stub", "err", err)

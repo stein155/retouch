@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Icon } from './Icons';
 import { useI18n, LANGS } from '../lib/i18n';
-import { getSettings, saveSettings } from '../lib/api';
+import { getSettings, saveSettings, getVersion, startUpdate } from '../lib/api';
 
 const cx = (...a) => a.filter(Boolean).join(' ');
 const fmtBass = (v) => (v > 0 ? '+' + v : String(v));
@@ -73,7 +73,10 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
   const [name, setName] = useState('');
   const [bass, setBass] = useState(0);
   const [caps, setCaps] = useState({ min: -9, max: 0, default: 0 });
+  const [ver, setVer] = useState(null);                  // { version, updatable }
+  const [upd, setUpd] = useState({ phase: 'idle', text: '' }); // idle | busy | done | error
   const nameTimer = useRef(null);
+  const pollRef = useRef(null);
 
   useEffect(() => {
     if (!open) return;
@@ -85,7 +88,51 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
         setCaps({ min: s.bass.min ?? -9, max: s.bass.max ?? 0, default: s.bass.default ?? 0 });
       }
     });
+    getVersion().then((v) => v && setVer(v));
   }, [open]);
+
+  // Stop any version poll when the sheet closes or unmounts.
+  useEffect(() => {
+    if (open) return;
+    clearTimeout(pollRef.current);
+    setUpd({ phase: 'idle', text: '' });
+  }, [open]);
+  useEffect(() => () => clearTimeout(pollRef.current), []);
+
+  // Poll /api/version until the speaker comes back on the target tag (it restarts
+  // mid-update, so the endpoint drops out for a bit). Times out after ~3 minutes.
+  const pollVersion = (target) => {
+    const startV = ver?.version;
+    let n = 0;
+    const tick = async () => {
+      n += 1;
+      const v = await getVersion();
+      if (v?.version && (target ? v.version === target : v.version !== startV)) {
+        setVer(v);
+        setUpd({ phase: 'done', text: `${t('updateDone')} ${v.version}` });
+        return;
+      }
+      if (n >= 45) { setUpd({ phase: 'error', text: t('updateError') }); return; }
+      pollRef.current = setTimeout(tick, 4000);
+    };
+    pollRef.current = setTimeout(tick, 6000);
+  };
+
+  const onUpdate = async () => {
+    if (upd.phase === 'busy') return;
+    setUpd({ phase: 'busy', text: t('updating') });
+    let res;
+    try { res = await startUpdate(); } catch { setUpd({ phase: 'error', text: t('updateError') }); return; }
+    if (res.status === 200 && res.body.status === 'current') {
+      setUpd({ phase: 'done', text: t('upToDate') });
+      return;
+    }
+    if (res.body.status === 'updating' || res.status === 202) {
+      pollVersion(res.body.to || null);
+      return;
+    }
+    setUpd({ phase: 'error', text: t('updateError') });
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -164,6 +211,31 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
               </select>
               <span className="select-chev" aria-hidden="true"><Icon.chevron width="18" height="18" /></span>
             </div>
+
+            {ver && (
+              <>
+                <div className="form-section" style={{ marginTop: 22 }}>{t('software')}</div>
+                <div className="field-card">
+                  <div className="field-row">
+                    <span className="field-row-label">{t('version')}</span>
+                    <span className="field-row-value">{ver.version}</span>
+                  </div>
+                </div>
+                {ver.updatable ? (
+                  <>
+                    <button className="update-btn" onClick={onUpdate} disabled={upd.phase === 'busy'}>
+                      <Icon.download width="18" height="18" />
+                      <span>{t('updateNow')}</span>
+                    </button>
+                    {upd.text && (
+                      <div className={cx('field-hint', upd.phase === 'error' && 'is-error')}>{upd.text}</div>
+                    )}
+                  </>
+                ) : (
+                  <div className="field-hint">{t('updatesOnSpeaker')}</div>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -111,7 +111,8 @@ msg() {
 		en:no_address) printf 'no speaker address given.' ;;
 		en:your_speaker) printf 'your speaker' ;;
 		en:setting_up) printf 'Setting up ReTouch on %%s (%%s)' ;;
-		en:restart_once) printf "This restarts the speaker once - it will be back in a minute or two." ;;
+		en:restart_once) printf "If an install or update is needed, the speaker restarts once." ;;
+		en:installed_already) printf 'ReTouch is already installed on %%s' ;;
 		en:sent_setup) printf 'sent the setup instructions' ;;
 		en:couldnt_reach) printf "could not reach %%s at %%s. Check it is switched on and on the same network, then try again." ;;
 		en:asked_restart) printf 'asked the speaker to restart' ;;
@@ -151,7 +152,8 @@ msg() {
 		nl:no_address) printf 'geen speakeradres opgegeven.' ;;
 		nl:your_speaker) printf 'je speaker' ;;
 		nl:setting_up) printf 'ReTouch instellen op %%s (%%s)' ;;
-		nl:restart_once) printf 'De speaker wordt een keer herstart - hij is over een minuut of twee terug.' ;;
+		nl:restart_once) printf 'Als installatie of update nodig is, wordt de speaker een keer herstart.' ;;
+		nl:installed_already) printf 'ReTouch is al geinstalleerd op %%s' ;;
 		nl:sent_setup) printf 'installatie-instructies verzonden' ;;
 		nl:couldnt_reach) printf 'kon %%s niet bereiken op %%s. Controleer of hij aan staat en op hetzelfde netwerk zit, en probeer opnieuw.' ;;
 		nl:asked_restart) printf 'speaker gevraagd om te herstarten' ;;
@@ -190,7 +192,8 @@ msg() {
 		de:no_address) printf 'keine Lautsprecheradresse angegeben.' ;;
 		de:your_speaker) printf 'dein Lautsprecher' ;;
 		de:setting_up) printf 'ReTouch wird auf %%s (%%s) eingerichtet' ;;
-		de:restart_once) printf 'Der Lautsprecher startet einmal neu - er ist in ein bis zwei Minuten wieder da.' ;;
+		de:restart_once) printf 'Wenn eine Installation oder Aktualisierung noetig ist, startet der Lautsprecher einmal neu.' ;;
+		de:installed_already) printf 'ReTouch ist bereits auf %%s installiert' ;;
 		de:sent_setup) printf 'Installationsanweisungen gesendet' ;;
 		de:couldnt_reach) printf 'konnte %%s unter %%s nicht erreichen. Pruefe, ob er eingeschaltet und im selben Netzwerk ist, und versuche es erneut.' ;;
 		de:asked_restart) printf 'Lautsprecher zum Neustart aufgefordert' ;;
@@ -229,7 +232,8 @@ msg() {
 		fr:no_address) printf "aucune adresse d'enceinte indiquee." ;;
 		fr:your_speaker) printf 'votre enceinte' ;;
 		fr:setting_up) printf 'Configuration de ReTouch sur %%s (%%s)' ;;
-		fr:restart_once) printf "L'enceinte redemarre une fois - elle sera de retour dans une minute ou deux." ;;
+		fr:restart_once) printf "Si une installation ou une mise a jour est necessaire, l'enceinte redemarre une fois." ;;
+		fr:installed_already) printf 'ReTouch est deja installe sur %%s' ;;
 		fr:sent_setup) printf 'instructions de configuration envoyees' ;;
 		fr:couldnt_reach) printf "impossible de joindre %%s a %%s. Verifiez qu'elle est allumee et sur le meme reseau, puis reessayez." ;;
 		fr:asked_restart) printf "redemarrage de l'enceinte demande" ;;
@@ -268,7 +272,8 @@ msg() {
 		es:no_address) printf 'no se indico ninguna direccion de altavoz.' ;;
 		es:your_speaker) printf 'tu altavoz' ;;
 		es:setting_up) printf 'Configurando ReTouch en %%s (%%s)' ;;
-		es:restart_once) printf 'El altavoz se reinicia una vez - volvera en uno o dos minutos.' ;;
+		es:restart_once) printf 'Si hace falta instalar o actualizar, el altavoz se reinicia una vez.' ;;
+		es:installed_already) printf 'ReTouch ya esta instalado en %%s' ;;
 		es:sent_setup) printf 'instrucciones de configuracion enviadas' ;;
 		es:couldnt_reach) printf 'no se pudo contactar con %%s en %%s. Comprueba que este encendido y en la misma red, e intentalo de nuevo.' ;;
 		es:asked_restart) printf 'se pidio al altavoz que se reiniciara' ;;
@@ -307,7 +312,8 @@ msg() {
 		af:no_address) printf 'geen luidsprekeradres gegee nie.' ;;
 		af:your_speaker) printf 'jou luidspreker' ;;
 		af:setting_up) printf 'Stel ReTouch op %%s (%%s) op' ;;
-		af:restart_once) printf 'Die luidspreker herbegin een keer - dit is oor n minuut of twee terug.' ;;
+		af:restart_once) printf 'As installasie of opdatering nodig is, herbegin die luidspreker een keer.' ;;
+		af:installed_already) printf 'ReTouch is reeds op %%s geinstalleer' ;;
 		af:sent_setup) printf 'opstelinstruksies gestuur' ;;
 		af:couldnt_reach) printf 'kon %%s by %%s nie bereik nie. Kyk dat dit aangeskakel is en op dieselfde netwerk is, en probeer weer.' ;;
 		af:asked_restart) printf 'luidspreker gevra om te herbegin' ;;
@@ -482,6 +488,63 @@ app_ready() {
 	fi
 	return 1
 }
+
+print_ready() {
+	say ""
+	say "  ${GRN}${B}✓ $(msg ready)${R}"
+	say ""
+	say "  $(msg open_here)"
+	say ""
+	say "      ${B}$URL${R}"
+	say ""
+	say "  ${DIM}$(msg tip_open)${R}"
+	say "  ${DIM}$(msg tip_app)${R}"
+	say ""
+}
+
+wait_ready() {
+	up=0
+	n=0
+	while [ "$n" -lt 90 ]; do
+		if app_ready; then up=1; break; fi
+		step_tick
+		sleep 4
+		n=$((n + 1))
+	done
+	[ "$up" -eq 1 ]
+}
+
+if [ "$was_up" -eq 1 ]; then
+	step_ok "$(fmt installed_already "$NAME")"
+	if app_ready; then
+		print_ready
+		exit 0
+	fi
+	if curl -fsS --connect-timeout 2 --max-time 5 -X POST "$URL/api/update" >/dev/null 2>&1; then
+		step_ok "update started"
+		step_start "$(msg waiting_restart)" "$(msg waiting_restart_hint)"
+		down=0
+		n=0
+		while [ "$n" -lt 60 ]; do
+			if ! curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
+				down=1; break
+			fi
+			step_tick
+			sleep 2
+			n=$((n + 1))
+		done
+		step_clear
+		step_start "$(msg waiting_online)" "$(msg waiting_online_hint)"
+		if wait_ready; then
+			step_clear
+			print_ready
+			exit 0
+		fi
+		step_clear
+		warn "$(msg not_answered)"
+		exit 1
+	fi
+fi
 
 # Hand the speaker a one-time instruction to fetch and run the on-speaker setup,
 # then tell it to restart so the instruction takes effect.
