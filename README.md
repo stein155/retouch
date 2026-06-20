@@ -1,4 +1,4 @@
-# ReTouch · internet radio for Bose SoundTouch
+# ReTouch · for SoundTouch
 
 **Your SoundTouch went quiet when Bose switched off its servers. ReTouch brings
 the radio back — running entirely on the speaker, with nothing else to set up.**
