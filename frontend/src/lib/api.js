@@ -165,3 +165,19 @@ export async function getSettings() {
 export async function saveSettings(patch) {
   return send('/api/settings', 'PUT', patch);
 }
+
+// getVersion returns { version, updatable }. updatable is true only on an installed
+// speaker (where ReTouch can replace its own binary). Returns null if unreachable.
+export async function getVersion() {
+  try { return await getJSON('/api/version'); } catch { return null; }
+}
+
+// startUpdate asks the speaker to fetch the latest release and replace itself.
+// Returns the server's JSON. On a real update the speaker restarts, so the next
+// /api/version may briefly fail until it comes back — the caller polls for that.
+export async function startUpdate() {
+  const r = await fetch('/api/update', { method: 'POST', headers: { Accept: 'application/json' } });
+  let body = null;
+  try { body = await r.json(); } catch { /* ignore */ }
+  return { ok: r.ok, status: r.status, body: body || {} };
+}
