@@ -50,6 +50,11 @@ export const Icon = {
       <circle cx="12" cy="14" r="3.5"/><circle cx="12" cy="6.5" r="0.5" fill="currentColor"/>
     </svg>
   ),
+  refresh: (p) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M20 11a8 8 0 1 0-.6 4"/><path d="M20 5v6h-6"/>
+    </svg>
+  ),
   settings: (p) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
       <circle cx="12" cy="12" r="3"/>
