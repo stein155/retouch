@@ -149,6 +149,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
   const [name, setName] = useState('');
   const [bass, setBass] = useState(0);
   const [caps, setCaps] = useState({ min: -9, max: 0, default: 0 });
+  const [host, setHost] = useState('');                  // friendly .local address
   const [ver, setVer] = useState(null);                  // { version, updatable }
   const [upd, setUpd] = useState({ phase: 'idle', text: '' }); // idle | busy | done | error
   const nameTimer = useRef(null);
@@ -159,6 +160,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     getSettings().then((s) => {
       if (!s) return;
       if (typeof s.name === 'string') setName(s.name);
+      if (typeof s.host === 'string') setHost(s.host);
       if (s.bass) {
         setBass(s.bass.actual ?? 0);
         setCaps({ min: s.bass.min ?? -9, max: s.bass.max ?? 0, default: s.bass.default ?? 0 });
@@ -262,6 +264,9 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
                 />
               </div>
             </div>
+            {host && (
+              <div className="field-hint">{t('reachableAt')} <b>{host}</b></div>
+            )}
 
             <div className="form-section" style={{ marginTop: 22 }}>{t('sound')}</div>
             <div className="bass-card">
