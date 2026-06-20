@@ -657,10 +657,12 @@ func (s *Server) enrichTuneIn(ctx context.Context, np *speaker.NowPlaying) {
 	if !ok {
 		return
 	}
-	if np.Track == "" {
+	// For TuneIn radio the speaker fills Track with the station name as a
+	// placeholder and never knows the artist (that came from the Bose cloud), so
+	// TuneIn's live song wins whenever it has one. When TuneIn has no song we
+	// leave the speaker's value alone — the UI then just shows the station.
+	if t.Song != "" {
 		np.Track = t.Song
-	}
-	if np.Artist == "" {
 		np.Artist = t.Artist
 	}
 	if np.Art == "" {
