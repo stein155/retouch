@@ -135,9 +135,8 @@ function MultiroomSection() {
         <div className="field-hint">{t('noSpeakers')}</div>
       )}
       <button className="update-btn spk-scan" onClick={scan} disabled={scanning}>
-        {scanning
-          ? <><span className="mp-spinner" /><span>{t('scanning')}</span></>
-          : <><Icon.search width="18" height="18" /><span>{t('findSpeakers')}</span></>}
+        {scanning ? <span className="mp-spinner" /> : <Icon.search width="18" height="18" />}
+        <span>{t('findSpeakers')}</span>
       </button>
     </>
   );
