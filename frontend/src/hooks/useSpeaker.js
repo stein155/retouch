@@ -28,6 +28,12 @@ export function useSpeaker() {
   // What's on screen right now (real or pending), so a tap can remember which
   // station we're switching *away* from.
   const shownNameRef = useRef('');
+  // Identity (logo + TuneIn id) of the station we last picked. The speaker's
+  // own now-playing reports tuneInId: null and often a blank art right after a
+  // switch, so once pending clears we'd otherwise drop back to the initials
+  // fallback until TuneIn enrichment warms up. We keep what we already knew and
+  // backfill it for the same station so the logo never regresses.
+  const lastPickedRef = useRef(null); // { name, logo, tuneInId }
 
   const refresh = useCallback(async () => {
     const [np, vol] = await Promise.all([getNowPlaying(), getVolume()]);
@@ -59,6 +65,11 @@ export function useSpeaker() {
   // station: { name, tuneInId?, logo? }.
   const playOptimistic = useCallback((station) => {
     if (!station) return;
+    lastPickedRef.current = {
+      name: station.name || '',
+      logo: station.logo || '',
+      tuneInId: station.tuneInId || null,
+    };
     setPending({
       name: station.name || '',
       tuneInId: station.tuneInId || null,
@@ -101,12 +112,17 @@ export function useSpeaker() {
     if (ps === 'PLAY_STATE') status = 'playing';
     else if (ps === 'STOP_STATE') return { status: 'idle', station: null };
     else status = 'buffering'; // BUFFERING_STATE or a transient non-standby state
+    // Backfill the logo/TuneIn id we picked for this station when the speaker
+    // doesn't supply them, so the player keeps the real logo instead of dropping
+    // to initials between the switch and TuneIn enrichment catching up.
+    const picked = lastPickedRef.current;
+    const known = picked && sameStation(nowPlaying.stationName, picked.name) ? picked : null;
     return {
       status,
       station: {
         name: nowPlaying.stationName,
-        art: nowPlaying.art || '',
-        tuneInId: nowPlaying.tuneInId || null,
+        art: nowPlaying.art || (known ? known.logo : ''),
+        tuneInId: nowPlaying.tuneInId || (known ? known.tuneInId : null),
         track: nowPlaying.track || '',
         artist: nowPlaying.artist || '',
       },
