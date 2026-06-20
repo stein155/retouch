@@ -372,12 +372,13 @@ func (c *Client) zoneMembers(ctx context.Context, path string, master Member, sl
 	return c.post(ctx, path, zoneBody(master, slaves))
 }
 
-// setZoneBody builds the /setZone request: the master carries senderIPAddress and
-// is listed first as a member, followed by the slaves.
+// setZoneBody builds the /setZone request: the master carries senderIPAddress on
+// the <zone> element, and ONLY the slaves are listed as members (the master is
+// identified by the master attribute, not repeated as a member). This matches the
+// battle-tested libsoundtouch / Home Assistant implementation.
 func setZoneBody(master Member, slaves []Member) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `<zone master="%s" senderIPAddress="%s">`, xmlEsc(master.DeviceID), xmlEsc(master.IP))
-	b.WriteString(memberXML(master))
 	for _, s := range slaves {
 		b.WriteString(memberXML(s))
 	}

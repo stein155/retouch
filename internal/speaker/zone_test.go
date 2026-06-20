@@ -12,12 +12,12 @@ var (
 )
 
 // TestSetZoneBody pins the exact /setZone wire format the SoundTouch firmware
-// expects: master id + senderIPAddress on the <zone>, the master listed first as
-// a member, then each slave.
+// expects: master id + senderIPAddress on the <zone>, then ONLY the slaves as
+// members (the master is named by the attribute, not repeated as a member —
+// matching libsoundtouch / Home Assistant).
 func TestSetZoneBody(t *testing.T) {
 	got := setZoneBody(master, []Member{slaveA, slaveB})
 	want := `<zone master="F4E11E3B013F" senderIPAddress="192.168.1.10">` +
-		`<member ipaddress="192.168.1.10">F4E11E3B013F</member>` +
 		`<member ipaddress="192.168.1.11">A0F6FD123456</member>` +
 		`<member ipaddress="192.168.1.12">B1E7AE789ABC</member>` +
 		`</zone>`
