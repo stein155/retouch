@@ -468,24 +468,21 @@ latest_tag() {
 		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1
 }
 
-release_asset() {
-	curl -fsSL "https://raw.githubusercontent.com/$REPO/$TARGET_TAG/internal/web/dist/index.html" \
-		| sed -n 's#.*src="\./assets/\([^"]*\.js\)".*#\1#p' | head -1
-}
-
 TARGET_TAG=$(latest_tag)
 [ -n "$TARGET_TAG" ] || die "could not determine the latest ReTouch release. Check your internet connection and try again."
-TARGET_ASSET=$(release_asset)
 
+# app_ready is true only when ReTouch answers with the EXACT target release version.
+# We key on /api/version alone. An earlier version also accepted a match on the served
+# JS asset filename, but Vite content-hashes that filename, so a backend-only release
+# reuses it — and the OLD running build then looked "ready", making updates silently
+# no-op (the installer reported success without changing anything). The version string
+# (set via -ldflags at release build) is the only signal that reliably tells the new
+# build apart from the old one.
 app_ready() {
 	body=$(curl -fsS --connect-timeout 2 --max-time 3 "$URL/api/version" 2>/dev/null || true)
 	case "$body" in
 		*'"version":"'$TARGET_TAG'"'*|*'"version": "'$TARGET_TAG'"'*) return 0 ;;
 	esac
-	if [ -n "$TARGET_ASSET" ]; then
-		body=$(curl -fsS --connect-timeout 2 --max-time 3 "$URL/" 2>/dev/null) || return 1
-		case "$body" in *"./assets/$TARGET_ASSET"*) return 0 ;; esac
-	fi
 	return 1
 }
 
@@ -505,7 +502,7 @@ print_ready() {
 wait_ready() {
 	up=0
 	n=0
-	while [ "$n" -lt 90 ]; do
+	while [ "$n" -lt 90 ]; do              # ~6 minutes, plenty for a reboot + setup
 		if app_ready; then up=1; break; fi
 		step_tick
 		sleep 4
@@ -514,36 +511,36 @@ wait_ready() {
 	[ "$up" -eq 1 ]
 }
 
-if [ "$was_up" -eq 1 ]; then
-	step_ok "$(fmt installed_already "$NAME")"
-	if app_ready; then
-		print_ready
-		exit 0
-	fi
-	if curl -fsS --connect-timeout 2 --max-time 5 -X POST "$URL/api/update" >/dev/null 2>&1; then
-		step_ok "Update started"
-		step_start "$(msg waiting_restart)" "$(msg waiting_restart_hint)"
-		down=0
-		n=0
-		while [ "$n" -lt 60 ]; do
-			if ! curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
-				down=1; break
-			fi
-			step_tick
-			sleep 2
-			n=$((n + 1))
-		done
-		step_clear
-		step_start "$(msg waiting_online)" "$(msg waiting_online_hint)"
-		if wait_ready; then
-			step_clear
-			print_ready
-			exit 0
+# wait_offline waits for a real offline transition after a reboot request: the speaker
+# must actually stop answering before we trust the reboot took effect. It tolerates the
+# previous build answering briefly (updates) and, with nothing running yet (fresh
+# install), accepts "offline" after a short grace so a transient miss can't be read as
+# the new build. $1 = 1 if ReTouch was confirmed up beforehand.
+wait_offline() {
+	seen=$1
+	n=0
+	while [ "$n" -lt 60 ]; do              # ~2 minutes for the service to stop
+		if curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
+			seen=1
+		elif [ "$seen" -eq 1 ] || [ "$n" -ge 5 ]; then
+			return 0
 		fi
-		step_clear
-		warn "$(msg not_answered)"
-		exit 1
-	fi
+		step_tick
+		sleep 2
+		n=$((n + 1))
+	done
+	return 1
+}
+
+# If the speaker is already on the latest release there is nothing to do — don't reboot
+# it for nothing. This is version-based (app_ready), so a speaker on an OLDER build is
+# never mistaken for up to date; it falls through to the install/update flow below, which
+# is the SAME path for an update and a first install: bootstrap, wait offline, wait back
+# online on the target, repoint the cloud URLs, restart, wait online again, done.
+if [ "$was_up" -eq 1 ] && app_ready; then
+	step_ok "$(fmt installed_already "$NAME")"
+	print_ready
+	exit 0
 fi
 
 # Hand the speaker a one-time instruction to fetch and run the on-speaker setup,
@@ -559,28 +556,12 @@ send "sys reboot"
 step_ok "$(msg asked_restart)"
 
 # ---- wait for ReTouch to come up ------------------------------------------
-# When updating an already running install, the old ReTouch can still answer for a
-# short while after the reboot request. Always watch for a real offline transition;
-# otherwise a slow/restarting old app can be mistaken for the newly installed one.
+# Step 1: wait for the reboot to actually take the speaker offline. When updating an
+# already running install the old build can still answer briefly after the reboot
+# request, so we insist on a real offline transition — otherwise a slow/restarting old
+# build would be mistaken for the freshly installed one.
 step_start "$(msg waiting_restart)" "$(msg waiting_restart_hint)"
-down=0
-saw_up=$was_up
-n=0
-while [ "$n" -lt 60 ]; do            # ~2 minutes for the old service to stop
-	if curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
-		saw_up=1
-	else
-		# Fresh installs may not have an old app. Give it a short chance to appear so
-		# a transient miss cannot make us accept the old process as the new install.
-		if [ "$saw_up" -eq 1 ] || [ "$n" -ge 5 ]; then
-			down=1; break
-		fi
-	fi
-	step_tick
-	sleep 2
-	n=$((n + 1))
-done
-if [ "$down" -ne 1 ]; then
+if ! wait_offline "$was_up"; then
 	step_warn "$(msg not_offline)"
 	say ""
 	say "  $(fmt still_answering "${B}$URL${R}")"
@@ -590,21 +571,11 @@ if [ "$down" -ne 1 ]; then
 fi
 step_clear
 
-# Probe the app's version API. /api/settings only proves some ReTouch is online;
-# /api/version must match the latest release so an old binary cannot look updated.
-# ReTouch is exposed on exactly one uniform port — :8080 — on every speaker, so that
-# is the only URL we wait for and advertise.
+# Step 2: wait for ReTouch to come back online on the target release. app_ready keys on
+# /api/version, so an old binary can never look updated. ReTouch is exposed on exactly
+# one uniform port — :8080 — on every speaker, so that is the only URL we wait for.
 step_start "$(msg waiting_online)" "$(msg waiting_online_hint)"
-up=0
-n=0
-while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
-	if app_ready; then
-		up=1; break
-	fi
-	step_tick
-	sleep 4
-	n=$((n + 1))
-done
+wait_ready
 
 # ReTouch is online, but the speaker's cloud URLs still hold the one-time bootstrap
 # string — its marge URL only goes live after a boot. Now that the speaker is fully up,
@@ -622,31 +593,21 @@ if [ "$up" -eq 1 ]; then
 	send "sys configuration swUpdateUrl $MARGE_BASE/updates/soundtouch"
 	send "sys reboot"
 	step_start "$(msg final_restart)" "$(msg final_restart_hint)"
-	# The cloud-URL change only goes live after this reboot, and the speaker can take
-	# a minute to come back. Give the reboot time to actually take the agent offline
-	# (so the still-running pre-reboot app isn't mistaken for "ready"), THEN always wait
-	# for it to return on the right version before reporting success. The previous
-	# version only waited if it happened to catch the speaker going offline within ~40s;
-	# if it missed that window it printed "ready" while the speaker was still rebooting.
-	n=0
-	while [ "$n" -lt 10 ]; do            # ~20s grace so the reboot has begun
-		step_tick
-		sleep 2
-		n=$((n + 1))
-	done
-	up=0
-	n=0
-	while [ "$n" -lt 90 ]; do            # ~6 minutes for the final restart to finish
-		if app_ready; then
-			up=1; break
-		fi
-		step_tick
-		sleep 4
-		n=$((n + 1))
-	done
+	# The cloud-URL change only goes live after this reboot, and the speaker can take a
+	# minute to come back. ReTouch is up RIGHT NOW and already on the target version, so
+	# app_ready alone can't tell the pre-reboot app from the post-reboot one — we MUST
+	# first see it go offline, then wait for it to return. The previous version only
+	# waited if it caught the speaker going offline within ~40s; if it missed that window
+	# it printed "ready" while the speaker was still rebooting.
+	if wait_offline 1; then
+		wait_ready
+	else
+		up=0
+	fi
 	step_clear
 fi
 
+step_clear
 say ""
 if [ "$up" -eq 1 ]; then
 	say "  ${GRN}${B}✓ $(msg ready)${R}"
