@@ -30,6 +30,8 @@ import (
 	"github.com/stein155/retouch/internal/web"
 )
 
+var version = "dev"
+
 func main() {
 	listen := flag.String("listen", ":8000", "web UI / API listen address")
 	margeAddr := flag.String("listen-marge", ":9080", "pairing-stub HTTP listen address; point the speaker's margeServerUrl / bmxRegistryUrl here")
@@ -96,7 +98,7 @@ func main() {
 
 	tc := tunein.New()
 	set := settings.Open(*presets + ".settings")
-	webSrv := web.New(tc, bc, st, set, logger)
+	webSrv := web.New(tc, bc, st, set, version, logger)
 	margeSrv, err := marge.New(base, info, *presets+".marge", nativePresets, tc, logger.With("comp", "marge"))
 	if err != nil {
 		logger.Error("init marge stub", "err", err)
@@ -138,7 +140,7 @@ func main() {
 	serve("webui", *listen, webSrv.Handler())
 	serve("marge", *margeAddr, margeSrv.Handler())
 
-	logger.Info("stlocal up", "webui", *listen, "marge", *margeAddr, "marge-base", base, "speaker", *host, "presets", *presets)
+	logger.Info("stlocal up", "version", version, "webui", *listen, "marge", *margeAddr, "marge-base", base, "speaker", *host, "presets", *presets)
 	wg.Wait()
 }
 

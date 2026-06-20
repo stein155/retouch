@@ -101,7 +101,7 @@ msg() {
 		en:title) printf 'ReTouch - internet radio for your Bose SoundTouch' ;;
 		en:looking) printf 'Looking for Bose speakers on your network' ;;
 		en:no_network) printf "could not work out your network automatically - you can type the address below." ;;
-		en:found_speakers) printf 'Found %s Bose speaker(s):' ;;
+		en:found_speakers) printf 'Found %%s Bose speaker(s):' ;;
 		en:enter_address) printf 'Enter an address myself' ;;
 		en:which_one) printf 'Which one?' ;;
 		en:no_keyboard) printf 'no keyboard input available. Re-run and pass the address, e.g.  sh -s -- 192.168.1.42' ;;
@@ -110,15 +110,15 @@ msg() {
 		en:where_to_find) printf "(You will find it in the Bose app, or your router's device list.)" ;;
 		en:no_address) printf 'no speaker address given.' ;;
 		en:your_speaker) printf 'your speaker' ;;
-		en:setting_up) printf 'Setting up ReTouch on %s (%s)' ;;
+		en:setting_up) printf 'Setting up ReTouch on %%s (%%s)' ;;
 		en:restart_once) printf "This restarts the speaker once - it will be back in a minute or two." ;;
 		en:sent_setup) printf 'sent the setup instructions' ;;
-		en:couldnt_reach) printf "could not reach %s at %s. Check it is switched on and on the same network, then try again." ;;
+		en:couldnt_reach) printf "could not reach %%s at %%s. Check it is switched on and on the same network, then try again." ;;
 		en:asked_restart) printf 'asked the speaker to restart' ;;
 		en:waiting_restart) printf 'Waiting for the speaker to restart ' ;;
 		en:waiting_restart_hint) printf '(first it goes offline)' ;;
 		en:not_offline) printf 'the speaker did not go offline after the restart request.' ;;
-		en:still_answering) printf 'ReTouch is still answering at %s, so the restart may not have started yet.' ;;
+		en:still_answering) printf 'ReTouch is still answering at %%s, so the restart may not have started yet.' ;;
 		en:retry_update) printf "Give it another minute, then run this installer again if it still has not updated." ;;
 		en:waiting_online) printf 'Waiting for ReTouch to come online ' ;;
 		en:waiting_online_hint) printf '(this takes a minute or two)' ;;
@@ -131,7 +131,7 @@ msg() {
 		en:tip_app) printf 'It will then open and behave just like a normal app.' ;;
 		en:not_answered) printf "ReTouch has not answered yet." ;;
 		en:still_finishing_1) printf 'The speaker may still be finishing its restart. Give it another minute,' ;;
-		en:still_finishing_2) printf 'then open %s in your browser.' ;;
+		en:still_finishing_2) printf 'then open %%s in your browser.' ;;
 		en:if_never) printf 'If it never comes up, just run this installer again.' ;;
 		en:*) printf '%s' "$1" ;;
 
@@ -141,7 +141,7 @@ msg() {
 		nl:title) printf 'ReTouch - internetradio voor je Bose SoundTouch' ;;
 		nl:looking) printf 'Bose-speakers zoeken op je netwerk' ;;
 		nl:no_network) printf 'kon je netwerk niet automatisch bepalen - je kunt het adres hieronder typen.' ;;
-		nl:found_speakers) printf '%s Bose-speaker(s) gevonden:' ;;
+		nl:found_speakers) printf '%%s Bose-speaker(s) gevonden:' ;;
 		nl:enter_address) printf 'Zelf een adres invoeren' ;;
 		nl:which_one) printf 'Welke?' ;;
 		nl:no_keyboard) printf 'geen toetsenbordinvoer beschikbaar. Start opnieuw en geef het adres mee, bijv.  sh -s -- 192.168.1.42' ;;
@@ -150,15 +150,15 @@ msg() {
 		nl:where_to_find) printf '(Je vindt het in de Bose-app, of in de apparatenlijst van je router.)' ;;
 		nl:no_address) printf 'geen speakeradres opgegeven.' ;;
 		nl:your_speaker) printf 'je speaker' ;;
-		nl:setting_up) printf 'ReTouch instellen op %s (%s)' ;;
+		nl:setting_up) printf 'ReTouch instellen op %%s (%%s)' ;;
 		nl:restart_once) printf 'De speaker wordt een keer herstart - hij is over een minuut of twee terug.' ;;
 		nl:sent_setup) printf 'installatie-instructies verzonden' ;;
-		nl:couldnt_reach) printf 'kon %s niet bereiken op %s. Controleer of hij aan staat en op hetzelfde netwerk zit, en probeer opnieuw.' ;;
+		nl:couldnt_reach) printf 'kon %%s niet bereiken op %%s. Controleer of hij aan staat en op hetzelfde netwerk zit, en probeer opnieuw.' ;;
 		nl:asked_restart) printf 'speaker gevraagd om te herstarten' ;;
 		nl:waiting_restart) printf 'Wachten tot de speaker herstart ' ;;
 		nl:waiting_restart_hint) printf '(eerst gaat hij offline)' ;;
 		nl:not_offline) printf 'de speaker ging niet offline na het herstartverzoek.' ;;
-		nl:still_answering) printf 'ReTouch antwoordt nog steeds op %s, dus de herstart is misschien nog niet begonnen.' ;;
+		nl:still_answering) printf 'ReTouch antwoordt nog steeds op %%s, dus de herstart is misschien nog niet begonnen.' ;;
 		nl:retry_update) printf 'Wacht nog een minuut en start deze installer opnieuw als hij nog niet is bijgewerkt.' ;;
 		nl:waiting_online) printf 'Wachten tot ReTouch online komt ' ;;
 		nl:waiting_online_hint) printf '(dit duurt een minuut of twee)' ;;
@@ -171,7 +171,7 @@ msg() {
 		nl:tip_app) printf 'Hij opent daarna als een normale app.' ;;
 		nl:not_answered) printf 'ReTouch heeft nog niet geantwoord.' ;;
 		nl:still_finishing_1) printf 'De speaker is misschien nog bezig met herstarten. Wacht nog een minuut,' ;;
-		nl:still_finishing_2) printf 'en open daarna %s in je browser.' ;;
+		nl:still_finishing_2) printf 'en open daarna %%s in je browser.' ;;
 		nl:if_never) printf 'Als hij niet opkomt, start deze installer dan opnieuw.' ;;
 
 		de:could_not_continue) printf 'Kann nicht fortfahren' ;;
@@ -180,7 +180,7 @@ msg() {
 		de:title) printf 'ReTouch - Internetradio fuer deinen Bose SoundTouch' ;;
 		de:looking) printf 'Suche Bose-Lautsprecher in deinem Netzwerk' ;;
 		de:no_network) printf 'konnte dein Netzwerk nicht automatisch erkennen - du kannst die Adresse unten eingeben.' ;;
-		de:found_speakers) printf '%s Bose-Lautsprecher gefunden:' ;;
+		de:found_speakers) printf '%%s Bose-Lautsprecher gefunden:' ;;
 		de:enter_address) printf 'Adresse selbst eingeben' ;;
 		de:which_one) printf 'Welcher?' ;;
 		de:no_keyboard) printf 'keine Tastatureingabe verfuegbar. Starte erneut und uebergib die Adresse, z. B.  sh -s -- 192.168.1.42' ;;
@@ -189,15 +189,15 @@ msg() {
 		de:where_to_find) printf '(Du findest sie in der Bose-App oder in der Geraeteliste deines Routers.)' ;;
 		de:no_address) printf 'keine Lautsprecheradresse angegeben.' ;;
 		de:your_speaker) printf 'dein Lautsprecher' ;;
-		de:setting_up) printf 'ReTouch wird auf %s (%s) eingerichtet' ;;
+		de:setting_up) printf 'ReTouch wird auf %%s (%%s) eingerichtet' ;;
 		de:restart_once) printf 'Der Lautsprecher startet einmal neu - er ist in ein bis zwei Minuten wieder da.' ;;
 		de:sent_setup) printf 'Installationsanweisungen gesendet' ;;
-		de:couldnt_reach) printf 'konnte %s unter %s nicht erreichen. Pruefe, ob er eingeschaltet und im selben Netzwerk ist, und versuche es erneut.' ;;
+		de:couldnt_reach) printf 'konnte %%s unter %%s nicht erreichen. Pruefe, ob er eingeschaltet und im selben Netzwerk ist, und versuche es erneut.' ;;
 		de:asked_restart) printf 'Lautsprecher zum Neustart aufgefordert' ;;
 		de:waiting_restart) printf 'Warte auf den Neustart des Lautsprechers ' ;;
 		de:waiting_restart_hint) printf '(zuerst geht er offline)' ;;
 		de:not_offline) printf 'der Lautsprecher ging nach der Neustartanforderung nicht offline.' ;;
-		de:still_answering) printf 'ReTouch antwortet noch unter %s, der Neustart hat also moeglicherweise noch nicht begonnen.' ;;
+		de:still_answering) printf 'ReTouch antwortet noch unter %%s, der Neustart hat also moeglicherweise noch nicht begonnen.' ;;
 		de:retry_update) printf 'Warte noch eine Minute und starte diesen Installer erneut, falls er noch nicht aktualisiert wurde.' ;;
 		de:waiting_online) printf 'Warte, bis ReTouch online ist ' ;;
 		de:waiting_online_hint) printf '(das dauert ein bis zwei Minuten)' ;;
@@ -210,7 +210,7 @@ msg() {
 		de:tip_app) printf 'Danach oeffnet es sich wie eine normale App.' ;;
 		de:not_answered) printf 'ReTouch hat noch nicht geantwortet.' ;;
 		de:still_finishing_1) printf 'Der Lautsprecher beendet moeglicherweise noch seinen Neustart. Warte noch eine Minute,' ;;
-		de:still_finishing_2) printf 'und oeffne dann %s in deinem Browser.' ;;
+		de:still_finishing_2) printf 'und oeffne dann %%s in deinem Browser.' ;;
 		de:if_never) printf 'Wenn es nicht startet, fuehre diesen Installer einfach erneut aus.' ;;
 
 		fr:could_not_continue) printf 'Impossible de continuer' ;;
@@ -219,7 +219,7 @@ msg() {
 		fr:title) printf 'ReTouch - radio Internet pour votre Bose SoundTouch' ;;
 		fr:looking) printf 'Recherche des enceintes Bose sur votre reseau' ;;
 		fr:no_network) printf "impossible de detecter votre reseau automatiquement - vous pouvez saisir l'adresse ci-dessous." ;;
-		fr:found_speakers) printf '%s enceinte(s) Bose trouvee(s) :' ;;
+		fr:found_speakers) printf '%%s enceinte(s) Bose trouvee(s) :' ;;
 		fr:enter_address) printf 'Saisir une adresse moi-meme' ;;
 		fr:which_one) printf 'Laquelle ?' ;;
 		fr:no_keyboard) printf "aucune saisie clavier disponible. Relancez avec l'adresse, par ex.  sh -s -- 192.168.1.42" ;;
@@ -228,15 +228,15 @@ msg() {
 		fr:where_to_find) printf "(Vous la trouverez dans l'app Bose ou dans la liste des appareils de votre routeur.)" ;;
 		fr:no_address) printf "aucune adresse d'enceinte indiquee." ;;
 		fr:your_speaker) printf 'votre enceinte' ;;
-		fr:setting_up) printf 'Configuration de ReTouch sur %s (%s)' ;;
+		fr:setting_up) printf 'Configuration de ReTouch sur %%s (%%s)' ;;
 		fr:restart_once) printf "L'enceinte redemarre une fois - elle sera de retour dans une minute ou deux." ;;
 		fr:sent_setup) printf 'instructions de configuration envoyees' ;;
-		fr:couldnt_reach) printf "impossible de joindre %s a %s. Verifiez qu'elle est allumee et sur le meme reseau, puis reessayez." ;;
+		fr:couldnt_reach) printf "impossible de joindre %%s a %%s. Verifiez qu'elle est allumee et sur le meme reseau, puis reessayez." ;;
 		fr:asked_restart) printf "redemarrage de l'enceinte demande" ;;
 		fr:waiting_restart) printf "Attente du redemarrage de l'enceinte " ;;
 		fr:waiting_restart_hint) printf "(elle passe d'abord hors ligne)" ;;
 		fr:not_offline) printf "l'enceinte n'est pas passee hors ligne apres la demande de redemarrage." ;;
-		fr:still_answering) printf "ReTouch repond encore a %s, le redemarrage n'a donc peut-etre pas encore commence." ;;
+		fr:still_answering) printf "ReTouch repond encore a %%s, le redemarrage n'a donc peut-etre pas encore commence." ;;
 		fr:retry_update) printf "Attendez encore une minute, puis relancez cet installateur si la mise a jour n'est toujours pas faite." ;;
 		fr:waiting_online) printf 'Attente de ReTouch en ligne ' ;;
 		fr:waiting_online_hint) printf '(cela prend une minute ou deux)' ;;
@@ -249,7 +249,7 @@ msg() {
 		fr:tip_app) printf "Il s'ouvrira ensuite comme une app normale." ;;
 		fr:not_answered) printf "ReTouch n'a pas encore repondu." ;;
 		fr:still_finishing_1) printf "L'enceinte termine peut-etre encore son redemarrage. Attendez une minute," ;;
-		fr:still_finishing_2) printf 'puis ouvrez %s dans votre navigateur.' ;;
+		fr:still_finishing_2) printf 'puis ouvrez %%s dans votre navigateur.' ;;
 		fr:if_never) printf "S'il ne demarre jamais, relancez simplement cet installateur." ;;
 
 		es:could_not_continue) printf 'No se pudo continuar' ;;
@@ -258,7 +258,7 @@ msg() {
 		es:title) printf 'ReTouch - radio por Internet para tu Bose SoundTouch' ;;
 		es:looking) printf 'Buscando altavoces Bose en tu red' ;;
 		es:no_network) printf 'no se pudo detectar tu red automaticamente - puedes escribir la direccion abajo.' ;;
-		es:found_speakers) printf 'Se encontraron %s altavoz/altavoces Bose:' ;;
+		es:found_speakers) printf 'Se encontraron %%s altavoz/altavoces Bose:' ;;
 		es:enter_address) printf 'Introducir una direccion manualmente' ;;
 		es:which_one) printf 'Cual?' ;;
 		es:no_keyboard) printf 'no hay entrada de teclado disponible. Ejecuta de nuevo y pasa la direccion, p. ej.  sh -s -- 192.168.1.42' ;;
@@ -267,15 +267,15 @@ msg() {
 		es:where_to_find) printf '(La encontraras en la app de Bose o en la lista de dispositivos de tu router.)' ;;
 		es:no_address) printf 'no se indico ninguna direccion de altavoz.' ;;
 		es:your_speaker) printf 'tu altavoz' ;;
-		es:setting_up) printf 'Configurando ReTouch en %s (%s)' ;;
+		es:setting_up) printf 'Configurando ReTouch en %%s (%%s)' ;;
 		es:restart_once) printf 'El altavoz se reinicia una vez - volvera en uno o dos minutos.' ;;
 		es:sent_setup) printf 'instrucciones de configuracion enviadas' ;;
-		es:couldnt_reach) printf 'no se pudo contactar con %s en %s. Comprueba que este encendido y en la misma red, e intentalo de nuevo.' ;;
+		es:couldnt_reach) printf 'no se pudo contactar con %%s en %%s. Comprueba que este encendido y en la misma red, e intentalo de nuevo.' ;;
 		es:asked_restart) printf 'se pidio al altavoz que se reiniciara' ;;
 		es:waiting_restart) printf 'Esperando a que el altavoz se reinicie ' ;;
 		es:waiting_restart_hint) printf '(primero se desconecta)' ;;
 		es:not_offline) printf 'el altavoz no se desconecto despues de pedir el reinicio.' ;;
-		es:still_answering) printf 'ReTouch sigue respondiendo en %s, asi que puede que el reinicio aun no haya empezado.' ;;
+		es:still_answering) printf 'ReTouch sigue respondiendo en %%s, asi que puede que el reinicio aun no haya empezado.' ;;
 		es:retry_update) printf 'Espera otro minuto y ejecuta este instalador de nuevo si aun no se ha actualizado.' ;;
 		es:waiting_online) printf 'Esperando a que ReTouch este en linea ' ;;
 		es:waiting_online_hint) printf '(esto tarda uno o dos minutos)' ;;
@@ -288,7 +288,7 @@ msg() {
 		es:tip_app) printf 'Luego se abrira y se comportara como una app normal.' ;;
 		es:not_answered) printf 'ReTouch aun no ha respondido.' ;;
 		es:still_finishing_1) printf 'Puede que el altavoz aun este terminando de reiniciarse. Espera otro minuto,' ;;
-		es:still_finishing_2) printf 'y abre %s en tu navegador.' ;;
+		es:still_finishing_2) printf 'y abre %%s en tu navegador.' ;;
 		es:if_never) printf 'Si nunca aparece, ejecuta este instalador de nuevo.' ;;
 
 		af:could_not_continue) printf 'Kan nie voortgaan nie' ;;
@@ -297,7 +297,7 @@ msg() {
 		af:title) printf 'ReTouch - internetradio vir jou Bose SoundTouch' ;;
 		af:looking) printf 'Soek vir Bose-luidsprekers op jou netwerk' ;;
 		af:no_network) printf 'kon nie jou netwerk outomaties bepaal nie - jy kan die adres hieronder tik.' ;;
-		af:found_speakers) printf '%s Bose-luidspreker(s) gevind:' ;;
+		af:found_speakers) printf '%%s Bose-luidspreker(s) gevind:' ;;
 		af:enter_address) printf 'Voer self n adres in' ;;
 		af:which_one) printf 'Watter een?' ;;
 		af:no_keyboard) printf 'geen sleutelbordinvoer beskikbaar nie. Begin weer en gee die adres, bv.  sh -s -- 192.168.1.42' ;;
@@ -306,15 +306,15 @@ msg() {
 		af:where_to_find) printf '(Jy kry dit in die Bose-app, of in jou router se toestellys.)' ;;
 		af:no_address) printf 'geen luidsprekeradres gegee nie.' ;;
 		af:your_speaker) printf 'jou luidspreker' ;;
-		af:setting_up) printf 'Stel ReTouch op %s (%s) op' ;;
+		af:setting_up) printf 'Stel ReTouch op %%s (%%s) op' ;;
 		af:restart_once) printf 'Die luidspreker herbegin een keer - dit is oor n minuut of twee terug.' ;;
 		af:sent_setup) printf 'opstelinstruksies gestuur' ;;
-		af:couldnt_reach) printf 'kon %s by %s nie bereik nie. Kyk dat dit aangeskakel is en op dieselfde netwerk is, en probeer weer.' ;;
+		af:couldnt_reach) printf 'kon %%s by %%s nie bereik nie. Kyk dat dit aangeskakel is en op dieselfde netwerk is, en probeer weer.' ;;
 		af:asked_restart) printf 'luidspreker gevra om te herbegin' ;;
 		af:waiting_restart) printf 'Wag dat die luidspreker herbegin ' ;;
 		af:waiting_restart_hint) printf '(eers gaan dit vanlyn)' ;;
 		af:not_offline) printf 'die luidspreker het nie vanlyn gegaan na die herbeginversoek nie.' ;;
-		af:still_answering) printf 'ReTouch antwoord nog by %s, so die herbegin het dalk nog nie begin nie.' ;;
+		af:still_answering) printf 'ReTouch antwoord nog by %%s, so die herbegin het dalk nog nie begin nie.' ;;
 		af:retry_update) printf 'Wag nog n minuut en voer hierdie installeerder weer uit as dit nog nie opgedateer het nie.' ;;
 		af:waiting_online) printf 'Wag dat ReTouch aanlyn kom ' ;;
 		af:waiting_online_hint) printf '(dit neem n minuut of twee)' ;;
@@ -327,7 +327,7 @@ msg() {
 		af:tip_app) printf 'Dit sal dan oopmaak en soos n gewone app werk.' ;;
 		af:not_answered) printf 'ReTouch het nog nie geantwoord nie.' ;;
 		af:still_finishing_1) printf 'Die luidspreker is dalk nog besig om te herbegin. Wag nog n minuut,' ;;
-		af:still_finishing_2) printf 'en maak dan %s in jou blaaier oop.' ;;
+		af:still_finishing_2) printf 'en maak dan %%s in jou blaaier oop.' ;;
 		af:if_never) printf 'As dit nooit opkom nie, voer hierdie installeerder net weer uit.' ;;
 
 		*) old=$LANG_CODE; LANG_CODE=en; msg "$1"; LANG_CODE=$old ;;
@@ -457,6 +457,32 @@ URL="http://$IP:$APP_URL_PORT"
 was_up=0
 curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1 && was_up=1
 
+latest_tag() {
+	curl -fsSL https://api.github.com/repos/$REPO/releases/latest \
+		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1
+}
+
+release_asset() {
+	curl -fsSL "https://raw.githubusercontent.com/$REPO/$TARGET_TAG/internal/web/dist/index.html" \
+		| sed -n 's#.*src="\./assets/\([^"]*\.js\)".*#\1#p' | head -1
+}
+
+TARGET_TAG=$(latest_tag)
+[ -n "$TARGET_TAG" ] || die "could not determine the latest ReTouch release. Check your internet connection and try again."
+TARGET_ASSET=$(release_asset)
+
+app_ready() {
+	body=$(curl -fsS --connect-timeout 2 --max-time 3 "$URL/api/version" 2>/dev/null || true)
+	case "$body" in
+		*'"version":"'$TARGET_TAG'"'*|*'"version": "'$TARGET_TAG'"'*) return 0 ;;
+	esac
+	if [ -n "$TARGET_ASSET" ]; then
+		body=$(curl -fsS --connect-timeout 2 --max-time 3 "$URL/" 2>/dev/null) || return 1
+		case "$body" in *"./assets/$TARGET_ASSET"*) return 0 ;; esac
+	fi
+	return 1
+}
+
 # Hand the speaker a one-time instruction to fetch and run the on-speaker setup,
 # then tell it to restart so the instruction takes effect.
 # NOTE: the agent self-heals a speaker that stays stuck on this string (see
@@ -471,39 +497,45 @@ step_ok "$(msg asked_restart)"
 
 # ---- wait for ReTouch to come up ------------------------------------------
 # When updating an already running install, the old ReTouch can still answer for a
-# short while after the reboot request. Wait for that instance to disappear first,
-# otherwise we can report success before the speaker has actually restarted.
-if [ "$was_up" -eq 1 ]; then
-	step_start "$(msg waiting_restart)" "$(msg waiting_restart_hint)"
-	down=0
-	n=0
-	while [ "$n" -lt 60 ]; do            # ~2 minutes for the old service to stop
-		if ! curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
+# short while after the reboot request. Always watch for a real offline transition;
+# otherwise a slow/restarting old app can be mistaken for the newly installed one.
+step_start "$(msg waiting_restart)" "$(msg waiting_restart_hint)"
+down=0
+saw_up=$was_up
+n=0
+while [ "$n" -lt 60 ]; do            # ~2 minutes for the old service to stop
+	if curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
+		saw_up=1
+	else
+		# Fresh installs may not have an old app. Give it a short chance to appear so
+		# a transient miss cannot make us accept the old process as the new install.
+		if [ "$saw_up" -eq 1 ] || [ "$n" -ge 5 ]; then
 			down=1; break
 		fi
-		step_tick
-		sleep 2
-		n=$((n + 1))
-	done
-	if [ "$down" -ne 1 ]; then
-		step_warn "$(msg not_offline)"
-		say ""
-		say "  $(fmt still_answering "${B}$URL${R}")"
-		say "  $(msg retry_update)"
-		say ""
-		exit 0
 	fi
-	step_clear
+	step_tick
+	sleep 2
+	n=$((n + 1))
+done
+if [ "$down" -ne 1 ]; then
+	step_warn "$(msg not_offline)"
+	say ""
+	say "  $(fmt still_answering "${B}$URL${R}")"
+	say "  $(msg retry_update)"
+	say ""
+	exit 0
 fi
+step_clear
 
-# Probe the app's own API (/api/settings only answers from ReTouch, so Bose's setup
-# page can't look like a false "ready"). ReTouch is exposed on exactly one uniform
-# port — :8080 — on every speaker, so that is the only URL we wait for and advertise.
+# Probe the app's version API. /api/settings only proves some ReTouch is online;
+# /api/version must match the latest release so an old binary cannot look updated.
+# ReTouch is exposed on exactly one uniform port — :8080 — on every speaker, so that
+# is the only URL we wait for and advertise.
 step_start "$(msg waiting_online)" "$(msg waiting_online_hint)"
 up=0
 n=0
 while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
-	if curl -fsS --connect-timeout 2 --max-time 3 "$URL/api/settings" >/dev/null 2>&1; then
+	if app_ready; then
 		up=1; break
 	fi
 	step_tick
@@ -541,7 +573,7 @@ if [ "$up" -eq 1 ]; then
 		up=0
 		n=0
 		while [ "$n" -lt 90 ]; do            # ~6 minutes for the final restart to finish
-			if curl -fsS --connect-timeout 2 --max-time 3 "$URL/api/settings" >/dev/null 2>&1; then
+			if app_ready; then
 				up=1; break
 			fi
 			step_tick

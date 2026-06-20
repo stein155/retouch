@@ -41,7 +41,7 @@ jobs:
           GOARCH: arm
           GOARM: '7'
           CGO_ENABLED: '0'
-        run: go build -ldflags "-s -w" -o retouch-armv7l .
+        run: go build -ldflags "-s -w -X main.version=${{ github.event.release.tag_name || github.ref_name }}" -o retouch-armv7l .
 
       - name: Checksums
         run: sha256sum retouch-armv7l > SHA256SUMS

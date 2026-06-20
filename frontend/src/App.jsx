@@ -8,6 +8,8 @@ import { Icon } from './components/Icons';
 import { playPreset, stopPlayback, setVolume, storePreset, selectStation, getSettings, saveSettings } from './lib/api';
 import { makeT, I18nContext, useI18n, detectInitialLang, LANGS } from './lib/i18n';
 
+const clean = (value) => (typeof value === 'string' ? value.trim() : '');
+
 // Single speaker driven through the on-box STLocal agent (runs on the speaker
 // itself and serves this UI at /). The speaker name comes from its own settings.
 function Header({ onSettings }) {
@@ -43,8 +45,8 @@ export default function App() {
     getSettings().then((s) => {
       if (!s) return;
       if (s.language && LANGS.some((l) => l.code === s.language)) setLang(s.language);
-      if (s.name) setSpeakerName(s.name);
-      if (s.model) setSpeakerModel(s.model);
+      if (clean(s.name)) setSpeakerName(clean(s.name));
+      if (clean(s.model)) setSpeakerModel(clean(s.model));
     });
   }, []);
 

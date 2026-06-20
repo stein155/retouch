@@ -5,6 +5,7 @@ import { useI18n } from '../lib/i18n';
 import { sameStation } from '../lib/station';
 
 const cx = (...a) => a.filter(Boolean).join(' ');
+const clean = (value) => (typeof value === 'string' ? value.trim() : '');
 
 function PresetTile({ preset, player, onPlay, onAssign }) {
   const { t } = useI18n();
@@ -37,7 +38,7 @@ function PresetTile({ preset, player, onPlay, onAssign }) {
     );
   }
 
-  const name = preset.name || '?';
+  const name = clean(preset.name) || '?';
 
   // Is this the preset the player is on? Match by TuneIn id when known, else by
   // name (the speaker doesn't expose the live id). starting/buffering shows a

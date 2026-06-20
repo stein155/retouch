@@ -28,26 +28,26 @@ async function send(path, method, body) {
   return r.status === 204 ? null : r.json().catch(() => null);
 }
 
-// Now playing — STLocal returns {source,track,artist,station,art,playStatus}.
+const clean = (value) => (typeof value === 'string' ? value.trim() : '');
+
+// Now playing — STLocal returns {source,track,artist,station,stationId,art,playStatus}.
 // Normalised to the shape the UI expects (standby / stationName / tuneInId).
 export async function getNowPlaying() {
   try {
     const np = await getJSON('/api/now');
-    const source = np.source || '';
+    const source = clean(np.source);
     if (!source || source === 'STANDBY' || source === 'INVALID_SOURCE') {
       return { standby: true };
     }
     return {
       standby: false,
       source,
-      stationName: np.station || '',
-      track: np.track || '',
-      artist: np.artist || '',
-      playStatus: np.playStatus || '',
-      art: np.art || '',
-      // STLocal does not expose the TuneIn id of what's live; catalog match is
-      // done by name in the hook instead.
-      tuneInId: null,
+      stationName: clean(np.station) || clean(np.track),
+      track: clean(np.track),
+      artist: clean(np.artist),
+      playStatus: clean(np.playStatus),
+      art: clean(np.art),
+      tuneInId: clean(np.stationId) || null,
     };
   } catch {
     return null;
@@ -76,7 +76,7 @@ export async function getPresets() {
         const tuneInId = p.stationId || (p.location || '').match(/station\/(s\d+)/)?.[1] || null;
         slots[slot - 1] = {
           slot,
-          name: p.name || '',
+          name: clean(p.name),
           tuneInId,
           location: p.location || '',
           logo: p.logo || '',
@@ -95,7 +95,7 @@ export async function setVolume(value) {
 
 // Select (play) a TuneIn station by id.
 export async function selectStation(tuneInId, name) {
-  return send('/api/play', 'POST', { stationId: tuneInId, name });
+  return send('/api/play', 'POST', { stationId: tuneInId, name: clean(name) });
 }
 
 // Play a preset slot. STLocal plays the station saved on that slot server-side.
@@ -116,7 +116,7 @@ export async function stopPlayback() {
 
 // Save a station to a preset slot (STLocal's local store).
 export async function storePreset(slot, tuneInId, name, logo) {
-  return send(`/api/presets/${slot}`, 'PUT', { stationId: tuneInId, name, logo: logo || '' });
+  return send(`/api/presets/${slot}`, 'PUT', { stationId: tuneInId, name: clean(name), logo: logo || '' });
 }
 
 // TuneIn OPML search via the same-origin /api/tunein proxy. The original walked
