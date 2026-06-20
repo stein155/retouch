@@ -60,6 +60,7 @@ type Server struct {
 	store     *store.Store
 	settings  *settings.Store
 	mirror    PresetMirror
+	mdns      Hostnamer
 	log       *slog.Logger
 	version   string
 	homeDir   string
@@ -90,6 +91,13 @@ type PresetMirror interface {
 	RemovePreset(slot int)
 }
 
+// Hostnamer is the mDNS responder: it reports the advertised name (e.g.
+// "keuken.local") and re-advertises when the speaker is renamed.
+type Hostnamer interface {
+	Hostname() string
+	SetName(name string)
+}
+
 // New builds a Server.
 func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Store, version, homeDir string, log *slog.Logger) *Server {
 	sub, err := fs.Sub(distFS, "dist")
@@ -115,6 +123,12 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 // SetPresetMirror attaches the local cloud preset store after both servers exist.
 func (s *Server) SetPresetMirror(m PresetMirror) {
 	s.mirror = m
+}
+
+// SetMDNS attaches the mDNS responder so settings can show the .local address and
+// renames re-advertise it.
+func (s *Server) SetMDNS(h Hostnamer) {
+	s.mdns = h
 }
 
 // Handler returns the HTTP mux.
@@ -893,6 +907,9 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	if b, err := s.speaker.Bass(ctx); err == nil {
 		out["bass"] = b
 	}
+	if s.mdns != nil {
+		out["host"] = s.mdns.Hostname() // friendly .local address, e.g. "keuken.local"
+	}
 	writeJSON(w, 200, out)
 }
 
@@ -914,6 +931,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		if err := s.speaker.SetName(ctx, *body.Name); err != nil {
 			s.fail(w, "set name failed", err)
 			return
+		}
+		if s.mdns != nil {
+			s.mdns.SetName(*body.Name) // re-advertise <name>.local
 		}
 	}
 	if body.Bass != nil {
