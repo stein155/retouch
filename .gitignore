@@ -7,3 +7,9 @@
 presets.json
 frontend/node_modules/
 frontend/dist/
+
+# Built web UI — produced by `npm run build` (CI), not committed. The .gitkeep
+# keeps the directory present so `//go:embed all:dist` still compiles on a fresh
+# checkout before the frontend has been built.
+/internal/web/dist/*
+!/internal/web/dist/.gitkeep
