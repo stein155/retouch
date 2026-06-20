@@ -1,0 +1,111 @@
+name: Beta Build
+
+# Build a test release from any PR, branch, tag, or SHA. The published prerelease
+# has the same asset layout as a normal release, so install.sh can deploy it by
+# setting RETOUCH_TARGET_TAG.
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'Pull request number to build, e.g. 30'
+        required: false
+        type: string
+      ref:
+        description: 'Branch, tag, or SHA to build when pr is empty'
+        required: false
+        default: main
+        type: string
+      tag:
+        description: 'Optional beta tag; defaults to beta-<ref>-<sha>'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check out requested source
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.pr }}" ]; then
+            case "${{ inputs.pr }}" in
+              *[!0-9]*|'') echo "pr must be a number" >&2; exit 1 ;;
+            esac
+            git fetch origin "pull/${{ inputs.pr }}/head:beta-pr-${{ inputs.pr }}"
+            git checkout "beta-pr-${{ inputs.pr }}"
+          else
+            git fetch origin "${{ inputs.ref }}"
+            git checkout FETCH_HEAD
+          fi
+
+      - name: Choose beta tag
+        id: meta
+        shell: bash
+        run: |
+          short_sha=$(git rev-parse --short=7 HEAD)
+          if [ -n "${{ inputs.tag }}" ]; then
+            tag="${{ inputs.tag }}"
+          elif [ -n "${{ inputs.pr }}" ]; then
+            tag="beta-pr-${{ inputs.pr }}-${short_sha}"
+          else
+            safe_ref=$(printf '%s' "${{ inputs.ref }}" | tr -cs 'A-Za-z0-9._-' '-')
+            safe_ref=${safe_ref#-}
+            safe_ref=${safe_ref%-}
+            tag="beta-${safe_ref}-${short_sha}"
+          fi
+          printf 'tag=%s\n' "$tag" >>"$GITHUB_OUTPUT"
+          printf 'sha=%s\n' "$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build web UI
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build   # outputs to ../internal/web/dist (embedded by go:embed)
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.22'
+
+      - name: Cross-compile agent (armv7l)
+        env:
+          GOOS: linux
+          GOARCH: arm
+          GOARM: '7'
+          CGO_ENABLED: '0'
+        run: go build -ldflags "-s -w -X main.version=${{ steps.meta.outputs.tag }}" -o retouch-armv7l .
+
+      - name: Checksums
+        run: sha256sum retouch-armv7l > SHA256SUMS
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: retouch-${{ steps.meta.outputs.tag }}
+          retention-days: 14
+          path: |
+            retouch-armv7l
+            SHA256SUMS
+
+      - name: Publish beta prerelease
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ steps.meta.outputs.sha }}
+          name: ReTouch ${{ steps.meta.outputs.tag }}
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: |
+            retouch-armv7l
+            SHA256SUMS
