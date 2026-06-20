@@ -21,7 +21,7 @@ set -u
 
 REPO=stein155/retouch
 BRANCH=main
-NETINSTALL="https://raw.githubusercontent.com/$REPO/$BRANCH/install/netinstall.sh"
+NETINSTALL="${RETOUCH_NETINSTALL_URL:-https://raw.githubusercontent.com/$REPO/$BRANCH/install/netinstall.sh}"
 PLACE="http://x.invalid"        # harmless placeholder the speaker overwrites itself
 MARGE_BASE="http://127.0.0.1:9080"  # on-speaker stub; where we repoint the cloud URLs
 
@@ -464,8 +464,19 @@ was_up=0
 curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1 && was_up=1
 
 latest_tag() {
-	curl -fsSL https://api.github.com/repos/$REPO/releases/latest \
-		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1
+	if [ -n "${RETOUCH_TARGET_TAG:-}" ]; then
+		printf '%s\n' "$RETOUCH_TARGET_TAG"
+		return 0
+	fi
+	n=0
+	while [ "$n" -lt 5 ]; do
+		tag=$(curl -fsSL https://api.github.com/repos/$REPO/releases/latest 2>/dev/null \
+			| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+		[ -n "$tag" ] && { printf '%s\n' "$tag"; return 0; }
+		n=$((n + 1))
+		sleep 2
+	done
+	return 1
 }
 
 TARGET_TAG=$(latest_tag)
@@ -518,12 +529,15 @@ wait_ready() {
 # the new build. $1 = 1 if ReTouch was confirmed up beforehand.
 wait_offline() {
 	seen=$1
+	misses=0
 	n=0
 	while [ "$n" -lt 60 ]; do              # ~2 minutes for the service to stop
 		if curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
 			seen=1
+			misses=0
 		elif [ "$seen" -eq 1 ] || [ "$n" -ge 5 ]; then
-			return 0
+			misses=$((misses + 1))
+			[ "$misses" -ge 3 ] && return 0
 		fi
 		step_tick
 		sleep 2
@@ -545,9 +559,12 @@ fi
 
 # Hand the speaker a one-time instruction to fetch and run the on-speaker setup,
 # then tell it to restart so the instruction takes effect.
-# NOTE: the agent self-heals a speaker that stays stuck on this string (see
-# speaker.BootstrapURL in internal/speaker). Keep the two literals in sync.
-if send "envswitch boseurls set \"$PLACE;curl -sSL $NETINSTALL -o /tmp/b;sh /tmp/b\" \"$PLACE/update\""; then
+NETINSTALL_ENV=
+[ -z "${RETOUCH_TARGET_TAG:-}" ] || NETINSTALL_ENV="$NETINSTALL_ENV RETOUCH_TARGET_TAG=$RETOUCH_TARGET_TAG"
+[ -z "${RETOUCH_RELEASE_BASE:-}" ] || NETINSTALL_ENV="$NETINSTALL_ENV RETOUCH_RELEASE_BASE=$RETOUCH_RELEASE_BASE"
+NETINSTALL_RUN="sh /tmp/b"
+[ -z "$NETINSTALL_ENV" ] || NETINSTALL_RUN="$NETINSTALL_ENV sh /tmp/b"
+if send "envswitch boseurls set \"$PLACE;curl -sSL $NETINSTALL -o /tmp/b;$NETINSTALL_RUN\" \"$PLACE/update\""; then
 	step_ok "$(msg sent_setup)"
 else
 	die "$(fmt couldnt_reach "$NAME" "$IP")"

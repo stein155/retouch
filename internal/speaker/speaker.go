@@ -25,19 +25,6 @@ func New(host string) *Client {
 	return &Client{host: host, http: &http.Client{Timeout: 4 * time.Second}}
 }
 
-// BootstrapURL is the exact one-shot cloud URL install/install.sh writes into the
-// speaker's boseurls to set ReTouch up over the air (see install.sh, the `envswitch
-// boseurls set` call). The firmware runs the embedded command early in boot — that is
-// how the agent gets installed without SSH — after which the URL is meant to be reset
-// to the local stub. When that reset does not stick, this literal is left behind as the
-// live margeServerUrl, so native sources break and the curl|sh re-runs every boot.
-//
-// urlguard rewrites ONLY this exact string. A recovery command deliberately pushed
-// through the same channel (e.g. one that enables SSH) does not match, so it is left
-// in place and keeps running until the operator clears it. Keep this in sync with the
-// bootstrap string in install/install.sh.
-const BootstrapURL = "http://x.invalid;curl -sSL https://raw.githubusercontent.com/stein155/retouch/main/install/netinstall.sh -o /tmp/b;sh /tmp/b"
-
 // Info is a trimmed view of /info: the speaker's identity. Used to fill the
 // pairing stub's replayed account documents with this speaker's real values.
 type Info struct {
@@ -375,24 +362,4 @@ func (c *Client) cli(ctx context.Context, cmd string) error {
 	_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 	_, err = conn.Write([]byte(cmd + "\n"))
 	return err
-}
-
-// PointCloudAtStub repoints the speaker's cloud URLs at base (the on-speaker stub),
-// both for this boot (`sys configuration`) and persistently (`envswitch boseurls`), so
-// native sources resolve locally and the boot-time bootstrap does not re-run. This
-// mirrors the cleanup install/netinstall.sh performs, kept here so the agent can
-// self-heal a speaker whose installer cleanup did not stick.
-func (c *Client) PointCloudAtStub(ctx context.Context, base string) error {
-	for _, cmd := range []string{
-		"envswitch boseurls set " + base + " " + base + "/updates/soundtouch",
-		"sys configuration bmxRegistryUrl " + base + "/bmx/registry/v1/services",
-		"sys configuration statsServerUrl " + base,
-		"sys configuration margeServerUrl " + base,
-		"sys configuration swUpdateUrl " + base + "/updates/soundtouch",
-	} {
-		if err := c.cli(ctx, cmd); err != nil {
-			return err
-		}
-	}
-	return nil
 }

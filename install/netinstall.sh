@@ -14,7 +14,7 @@
 set -u
 
 REPO=stein155/retouch
-PIN_TAG=""                      # set e.g. "v0.1.0" to pin; empty = latest
+PIN_TAG="${RETOUCH_TARGET_TAG:-}" # set e.g. "v0.1.0" to pin; empty = latest
 HOME_DIR=/mnt/nv/retouch
 BIN=$HOME_DIR/retouch
 VERSION=$HOME_DIR/.version      # installed release tag
@@ -188,7 +188,7 @@ n=$(cat "$ATTEMPTS" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" >"$ATTEMPTS"
 log "installing $TAG (have ${INSTALLED:-none}); attempt $n/$MAX_ATTEMPTS"
 [ "$n" -gt "$MAX_ATTEMPTS" ] && giveup "exceeded $MAX_ATTEMPTS attempts"
 
-DL=https://github.com/$REPO/releases/download/$TAG
+DL=${RETOUCH_RELEASE_BASE:-https://github.com/$REPO/releases/download/$TAG}
 
 # Download binary + checksums and verify before swapping it in.
 curl -fsSL -o "$BIN.new" "$DL/retouch-armv7l" || { log "download failed"; exit 0; }
@@ -207,5 +207,5 @@ redirect_cloud
 restart_agent
 # The boseurls/runtime cloud-URL cleanup + the reboot that makes it live are driven from
 # install.sh once ReTouch is back online (the :17000 CLI is reliable there, not this
-# early in boot). On a stuck speaker the agent's urlguard also repoints as a fallback.
+# early in boot).
 log "done ($TAG); web UI on $WEB_LISTEN, marge on $MARGE_LISTEN. install.sh will finalise the cloud URLs."
