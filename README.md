@@ -24,7 +24,11 @@ presets, and control playback from your phone or browser.
 - 🔎 **Search internet radio** — TuneIn's public directory, no account or key
 - ⭐ **Six presets**, stored as the speaker's own native presets
 - ▶️ **Play / stop and volume**, with live now-playing (station name + logo)
+- 🔗 **Multiroom** — find your other ReTouch speakers and group them so they play
+  in sync, using Bose's own native zones
 - ⚙️ **Settings** — speaker name, bass, and the app's language
+- ⬆️ **Over-the-air updates** — update straight from the app; the speaker fetches
+  the latest release and restarts itself
 
 ## How it works
 
@@ -36,6 +40,11 @@ a healthy "cloud" again and re-enables its native radio. It does not stream or
 re-route audio — the speaker plays radio itself, exactly as before; ReTouch only
 takes the place of the API that used to live at Bose. A small web app on the
 speaker adds the search, presets, and controls.
+
+**Multiroom** works the same way — through the speaker, not around it. ReTouch
+finds your other ReTouch speakers on the network and uses Bose's own zone API to
+group them, so one speaker leads and the rest play in perfect sync, exactly like
+multiroom did when the Bose app still worked.
 
 ## Install (and update)
 
@@ -59,8 +68,10 @@ Linux systems.
 When it finishes you'll get a link like `http://192.168.1.42:8080`. Open it on your
 phone and use **Add to Home Screen** to keep ReTouch around like a normal app.
 
-**To update**, just run the same line again: if a newer release is available the
-speaker fetches it and restarts; if it is already up to date, nothing changes.
+**To update**, open the app and tap **Update now** in Settings — the speaker
+fetches the latest release over the air and restarts (about a minute). It does
+nothing if you're already up to date. You can also just run the install line
+again, which does the same thing.
 
 **To undo everything** (restore the factory configuration and remove ReTouch), run
 `install/uninstall.sh` on the speaker and reboot.
@@ -82,7 +93,8 @@ Other SoundTouch models and firmware versions may work too — if you try one, l
 ```
 main.go              flags + HTTP servers (web app + local cloud-API emulation)
 internal/tunein/     TuneIn directory client (search / resolve / describe)
-internal/speaker/    speaker control (play, presets, volume, name, bass)
+internal/speaker/    speaker control (play, presets, volume, name, bass, multiroom zones)
+internal/discover/   finds other ReTouch speakers on the LAN (for multiroom)
 internal/marge/      local emulation of the Bose cloud API the firmware expects
 internal/autopair/   keeps the speaker's sources enabled
 internal/settings/   persisted app settings (name, bass, language)
