@@ -64,7 +64,7 @@ export const I18N = {
   de: {
     appTitle: 'Radio', settings: 'Einstellungen', thisRadio: 'Dieses Radio',
     name: 'Name', namePlaceholder: 'z. B. Wohnzimmer',
-    sound: 'Klang', bass: 'Bass', bassHint: 'Passe die Tiefen nach Geschmack an.', language: 'Sprache',
+    sound: 'Klang', bass: 'Bass', bassHint: 'Passe die Tiefen nach Belieben an.', language: 'Sprache',
     yourStations: 'Deine Sender', tapToPlay: 'zum Abspielen tippen',
     emptySlot: 'Leerer Platz', tapToFill: 'zum Belegen tippen', replace: 'Ersetzen',
     findNew: 'Etwas Neues finden', findNewSub: 'Tausende Sender über TuneIn',
