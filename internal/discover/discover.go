@@ -1,13 +1,18 @@
-// Package discover finds other Bose SoundTouch speakers on the local network so
-// they can be grouped into a multiroom zone. It mirrors what install.sh does:
-// sweep the local /24 and ask each address for /info (port 8090); anything that
-// answers with a deviceID is a speaker. No mDNS, no cloud — just the speakers'
-// own local API, the same one ReTouch already talks to.
+// Package discover finds other ReTouch speakers on the local network so they can
+// be grouped into a multiroom zone. It mirrors what install.sh does: sweep the
+// local /24 and ask each address for /info (port 8090); anything that answers
+// with a deviceID is a SoundTouch. We then keep ONLY the ones that also have
+// ReTouch running — by probing ReTouch's own API on :8080 — so the list shows
+// only speakers we manage, not every Bose on the network. No mDNS, no cloud.
 package discover
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"sort"
 	"strconv"
 	"sync"
@@ -16,7 +21,7 @@ import (
 	"github.com/stein155/retouch/internal/speaker"
 )
 
-// Speaker is one discovered speaker on the LAN.
+// Speaker is one discovered ReTouch speaker on the LAN.
 type Speaker struct {
 	DeviceID string `json:"deviceId"`
 	Name     string `json:"name"`
@@ -25,14 +30,16 @@ type Speaker struct {
 }
 
 const (
-	probeTimeout = 700 * time.Millisecond // per-host /info probe budget
+	probeTimeout = 700 * time.Millisecond // per-host probe budget
 	parallelism  = 24                     // concurrent probes; keeps the sweep quick without flooding
+	retouchPort  = 8080                   // the uniform LAN port ReTouch is exposed on
 )
 
-// Scan sweeps the /24 around selfIP and returns every SoundTouch speaker that
-// answers, excluding the speaker at selfIP (and itself by deviceID). selfIP is
-// this speaker's own LAN address (from /info). Probes run in parallel with a
-// short per-host timeout so a full sweep finishes in a couple of seconds.
+// Scan sweeps the /24 around selfIP and returns every speaker that answers as a
+// SoundTouch AND has ReTouch running, excluding the speaker at selfIP (and itself
+// by deviceID). selfIP is this speaker's own LAN address (from /info). Probes run
+// in parallel with a short per-host timeout so a full sweep finishes in a couple
+// of seconds.
 func Scan(ctx context.Context, selfIP, selfDeviceID string) ([]Speaker, error) {
 	prefix, ok := slash24(selfIP)
 	if !ok {
@@ -55,11 +62,13 @@ func Scan(ctx context.Context, selfIP, selfDeviceID string) ([]Speaker, error) {
 		go func(ip string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if sp, ok := probe(ctx, ip); ok && sp.DeviceID != selfDeviceID {
-				mu.Lock()
-				found = append(found, sp)
-				mu.Unlock()
+			sp, ok := probe(ctx, ip)
+			if !ok || sp.DeviceID == selfDeviceID || !retouchRunning(ctx, ip) {
+				return
 			}
+			mu.Lock()
+			found = append(found, sp)
+			mu.Unlock()
 		}(ip)
 	}
 	wg.Wait()
@@ -83,6 +92,34 @@ func probe(ctx context.Context, ip string) (Speaker, bool) {
 		return Speaker{}, false
 	}
 	return Speaker{DeviceID: info.DeviceID, Name: info.Name, Model: info.Type, IP: ip}, true
+}
+
+// retouchRunning reports whether ReTouch answers on its LAN port at ip. It hits
+// ReTouch's own /api/version (200 + a version string), so a plain SoundTouch
+// without ReTouch is left out of the list.
+func retouchRunning(ctx context.Context, ip string) bool {
+	c, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	url := fmt.Sprintf("http://%s:%d/api/version", ip, retouchPort)
+	req, err := http.NewRequestWithContext(c, http.MethodGet, url, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var v struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<10)).Decode(&v); err != nil {
+		return false
+	}
+	return v.Version != ""
 }
 
 // slash24 returns the "a.b.c." prefix of a dotted IPv4 address.
