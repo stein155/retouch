@@ -131,11 +131,21 @@ trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
 mkdir -p "$HOME_DIR" 2>/dev/null
 
-# Resolve the target release tag (pinned, else the latest GitHub release).
+# Resolve the target release tag (pinned, else the latest GitHub release). At boot
+# the injected run can fire BEFORE the network/DNS is ready, so the latest-release
+# lookup returns nothing on the first try; retry for up to ~2 min rather than giving
+# up immediately — otherwise the speaker silently keeps the old binary (the injection
+# fires only once per boot) and an install.sh run waits forever for the new version.
 TAG="$PIN_TAG"
 if [ -z "$TAG" ]; then
-	TAG=$(curl -fsSL https://api.github.com/repos/$REPO/releases/latest \
-		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+	t=0
+	while [ "$t" -lt 30 ]; do
+		TAG=$(curl -fsSL https://api.github.com/repos/$REPO/releases/latest \
+			| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+		[ -n "$TAG" ] && break
+		log "GitHub not reachable yet (boot network warming up); retry $((t + 1))/30"
+		t=$((t + 1)); sleep 4
+	done
 fi
 INSTALLED=$(cat "$VERSION" 2>/dev/null || echo "")
 

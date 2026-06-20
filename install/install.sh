@@ -111,11 +111,11 @@ msg() {
 		en:no_address) printf 'no speaker address given.' ;;
 		en:your_speaker) printf 'your speaker' ;;
 		en:setting_up) printf 'Setting up ReTouch on %%s (%%s)' ;;
-		en:restart_once) printf "If an install or update is needed, the speaker restarts once." ;;
+		en:restart_once) printf "If an install or update is needed, the speaker restarts twice." ;;
 		en:installed_already) printf 'ReTouch is already installed on %%s' ;;
-		en:sent_setup) printf 'sent the setup instructions' ;;
+		en:sent_setup) printf 'Sent the setup instructions' ;;
 		en:couldnt_reach) printf "could not reach %%s at %%s. Check it is switched on and on the same network, then try again." ;;
-		en:asked_restart) printf 'asked the speaker to restart' ;;
+		en:asked_restart) printf 'Asked the speaker to restart' ;;
 		en:waiting_restart) printf 'Waiting for the speaker to restart ' ;;
 		en:waiting_restart_hint) printf '(first it goes offline)' ;;
 		en:not_offline) printf 'the speaker did not go offline after the restart request.' ;;
@@ -125,7 +125,7 @@ msg() {
 		en:waiting_online_hint) printf '(this takes a minute or two)' ;;
 		en:installed_ok) printf 'ReTouch is online' ;;
 		en:final_restart) printf 'One final restart of the speaker ' ;;
-		en:final_restart_hint) printf '(this takes about 20 seconds)' ;;
+		en:final_restart_hint) printf '(this can take up to a minute)' ;;
 		en:ready) printf 'ReTouch is ready!' ;;
 		en:open_here) printf 'Open it here:' ;;
 		en:tip_open) printf 'Tip: open that link on your phone, then use Add to Home Screen.' ;;
@@ -152,11 +152,11 @@ msg() {
 		nl:no_address) printf 'geen speakeradres opgegeven.' ;;
 		nl:your_speaker) printf 'je speaker' ;;
 		nl:setting_up) printf 'ReTouch instellen op %%s (%%s)' ;;
-		nl:restart_once) printf 'Als installatie of update nodig is, wordt de speaker een keer herstart.' ;;
+		nl:restart_once) printf 'Als installatie of update nodig is, wordt de speaker twee keer herstart.' ;;
 		nl:installed_already) printf 'ReTouch is al geinstalleerd op %%s' ;;
-		nl:sent_setup) printf 'installatie-instructies verzonden' ;;
+		nl:sent_setup) printf 'Installatie-instructies verzonden' ;;
 		nl:couldnt_reach) printf 'kon %%s niet bereiken op %%s. Controleer of hij aan staat en op hetzelfde netwerk zit, en probeer opnieuw.' ;;
-		nl:asked_restart) printf 'speaker gevraagd om te herstarten' ;;
+		nl:asked_restart) printf 'Speaker gevraagd om te herstarten' ;;
 		nl:waiting_restart) printf 'Wachten tot de speaker herstart ' ;;
 		nl:waiting_restart_hint) printf '(eerst gaat hij offline)' ;;
 		nl:not_offline) printf 'de speaker ging niet offline na het herstartverzoek.' ;;
@@ -166,7 +166,7 @@ msg() {
 		nl:waiting_online_hint) printf '(dit duurt een minuut of twee)' ;;
 		nl:installed_ok) printf 'ReTouch is online' ;;
 		nl:final_restart) printf 'Nog een laatste herstart van de speaker ' ;;
-		nl:final_restart_hint) printf '(dit duurt ongeveer 20 seconden)' ;;
+		nl:final_restart_hint) printf '(dit kan tot een minuut duren)' ;;
 		nl:ready) printf 'ReTouch is klaar!' ;;
 		nl:open_here) printf 'Open hem hier:' ;;
 		nl:tip_open) printf 'Tip: open die link op je telefoon en gebruik daarna Zet op beginscherm.' ;;
@@ -232,11 +232,11 @@ msg() {
 		fr:no_address) printf "aucune adresse d'enceinte indiquee." ;;
 		fr:your_speaker) printf 'votre enceinte' ;;
 		fr:setting_up) printf 'Configuration de ReTouch sur %%s (%%s)' ;;
-		fr:restart_once) printf "Si une installation ou une mise a jour est necessaire, l'enceinte redemarre une fois." ;;
+		fr:restart_once) printf "Si une installation ou une mise a jour est necessaire, l'enceinte redemarre deux fois." ;;
 		fr:installed_already) printf 'ReTouch est deja installe sur %%s' ;;
-		fr:sent_setup) printf 'instructions de configuration envoyees' ;;
+		fr:sent_setup) printf 'Instructions de configuration envoyees' ;;
 		fr:couldnt_reach) printf "impossible de joindre %%s a %%s. Verifiez qu'elle est allumee et sur le meme reseau, puis reessayez." ;;
-		fr:asked_restart) printf "redemarrage de l'enceinte demande" ;;
+		fr:asked_restart) printf "Redemarrage de l'enceinte demande" ;;
 		fr:waiting_restart) printf "Attente du redemarrage de l'enceinte " ;;
 		fr:waiting_restart_hint) printf "(elle passe d'abord hors ligne)" ;;
 		fr:not_offline) printf "l'enceinte n'est pas passee hors ligne apres la demande de redemarrage." ;;
@@ -246,7 +246,7 @@ msg() {
 		fr:waiting_online_hint) printf '(cela prend une minute ou deux)' ;;
 		fr:installed_ok) printf 'ReTouch est en ligne' ;;
 		fr:final_restart) printf "Un dernier redemarrage de l'enceinte " ;;
-		fr:final_restart_hint) printf '(cela prend environ 20 secondes)' ;;
+		fr:final_restart_hint) printf "(cela peut prendre jusqu'a une minute)" ;;
 		fr:ready) printf 'ReTouch est pret !' ;;
 		fr:open_here) printf 'Ouvrez-le ici :' ;;
 		fr:tip_open) printf "Astuce : ouvrez ce lien sur votre telephone, puis utilisez Ajouter a l'ecran d'accueil." ;;
@@ -272,11 +272,11 @@ msg() {
 		es:no_address) printf 'no se indico ninguna direccion de altavoz.' ;;
 		es:your_speaker) printf 'tu altavoz' ;;
 		es:setting_up) printf 'Configurando ReTouch en %%s (%%s)' ;;
-		es:restart_once) printf 'Si hace falta instalar o actualizar, el altavoz se reinicia una vez.' ;;
+		es:restart_once) printf 'Si hace falta instalar o actualizar, el altavoz se reinicia dos veces.' ;;
 		es:installed_already) printf 'ReTouch ya esta instalado en %%s' ;;
-		es:sent_setup) printf 'instrucciones de configuracion enviadas' ;;
+		es:sent_setup) printf 'Instrucciones de configuracion enviadas' ;;
 		es:couldnt_reach) printf 'no se pudo contactar con %%s en %%s. Comprueba que este encendido y en la misma red, e intentalo de nuevo.' ;;
-		es:asked_restart) printf 'se pidio al altavoz que se reiniciara' ;;
+		es:asked_restart) printf 'Se pidio al altavoz que se reiniciara' ;;
 		es:waiting_restart) printf 'Esperando a que el altavoz se reinicie ' ;;
 		es:waiting_restart_hint) printf '(primero se desconecta)' ;;
 		es:not_offline) printf 'el altavoz no se desconecto despues de pedir el reinicio.' ;;
@@ -286,7 +286,7 @@ msg() {
 		es:waiting_online_hint) printf '(esto tarda uno o dos minutos)' ;;
 		es:installed_ok) printf 'ReTouch esta en linea' ;;
 		es:final_restart) printf 'Un ultimo reinicio del altavoz ' ;;
-		es:final_restart_hint) printf '(esto tarda unos 20 segundos)' ;;
+		es:final_restart_hint) printf '(esto puede tardar hasta un minuto)' ;;
 		es:ready) printf 'ReTouch esta listo!' ;;
 		es:open_here) printf 'Abrelo aqui:' ;;
 		es:tip_open) printf 'Consejo: abre ese enlace en tu telefono y usa Anadir a pantalla de inicio.' ;;
@@ -312,11 +312,11 @@ msg() {
 		af:no_address) printf 'geen luidsprekeradres gegee nie.' ;;
 		af:your_speaker) printf 'jou luidspreker' ;;
 		af:setting_up) printf 'Stel ReTouch op %%s (%%s) op' ;;
-		af:restart_once) printf 'As installasie of opdatering nodig is, herbegin die luidspreker een keer.' ;;
+		af:restart_once) printf 'As installasie of opdatering nodig is, herbegin die luidspreker twee keer.' ;;
 		af:installed_already) printf 'ReTouch is reeds op %%s geinstalleer' ;;
-		af:sent_setup) printf 'opstelinstruksies gestuur' ;;
+		af:sent_setup) printf 'Opstelinstruksies gestuur' ;;
 		af:couldnt_reach) printf 'kon %%s by %%s nie bereik nie. Kyk dat dit aangeskakel is en op dieselfde netwerk is, en probeer weer.' ;;
-		af:asked_restart) printf 'luidspreker gevra om te herbegin' ;;
+		af:asked_restart) printf 'Luidspreker gevra om te herbegin' ;;
 		af:waiting_restart) printf 'Wag dat die luidspreker herbegin ' ;;
 		af:waiting_restart_hint) printf '(eers gaan dit vanlyn)' ;;
 		af:not_offline) printf 'die luidspreker het nie vanlyn gegaan na die herbeginversoek nie.' ;;
@@ -326,7 +326,7 @@ msg() {
 		af:waiting_online_hint) printf '(dit neem n minuut of twee)' ;;
 		af:installed_ok) printf 'ReTouch is aanlyn' ;;
 		af:final_restart) printf 'Nog n laaste herbegin van die luidspreker ' ;;
-		af:final_restart_hint) printf '(dit neem omtrent 20 sekondes)' ;;
+		af:final_restart_hint) printf "(dit kan tot 'n minuut duur)" ;;
 		af:ready) printf 'ReTouch is gereed!' ;;
 		af:open_here) printf 'Maak dit hier oop:' ;;
 		af:tip_open) printf 'Wenk: maak daardie skakel op jou foon oop en gebruik Voeg by tuisskerm.' ;;
@@ -468,24 +468,21 @@ latest_tag() {
 		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1
 }
 
-release_asset() {
-	curl -fsSL "https://raw.githubusercontent.com/$REPO/$TARGET_TAG/internal/web/dist/index.html" \
-		| sed -n 's#.*src="\./assets/\([^"]*\.js\)".*#\1#p' | head -1
-}
-
 TARGET_TAG=$(latest_tag)
 [ -n "$TARGET_TAG" ] || die "could not determine the latest ReTouch release. Check your internet connection and try again."
-TARGET_ASSET=$(release_asset)
 
+# app_ready is true only when ReTouch answers with the EXACT target release version.
+# We key on /api/version alone. An earlier version also accepted a match on the served
+# JS asset filename, but Vite content-hashes that filename, so a backend-only release
+# reuses it — and the OLD running build then looked "ready", making updates silently
+# no-op (the installer reported success without changing anything). The version string
+# (set via -ldflags at release build) is the only signal that reliably tells the new
+# build apart from the old one.
 app_ready() {
 	body=$(curl -fsS --connect-timeout 2 --max-time 3 "$URL/api/version" 2>/dev/null || true)
 	case "$body" in
 		*'"version":"'$TARGET_TAG'"'*|*'"version": "'$TARGET_TAG'"'*) return 0 ;;
 	esac
-	if [ -n "$TARGET_ASSET" ]; then
-		body=$(curl -fsS --connect-timeout 2 --max-time 3 "$URL/" 2>/dev/null) || return 1
-		case "$body" in *"./assets/$TARGET_ASSET"*) return 0 ;; esac
-	fi
 	return 1
 }
 
@@ -505,7 +502,7 @@ print_ready() {
 wait_ready() {
 	up=0
 	n=0
-	while [ "$n" -lt 90 ]; do
+	while [ "$n" -lt 90 ]; do              # ~6 minutes, plenty for a reboot + setup
 		if app_ready; then up=1; break; fi
 		step_tick
 		sleep 4
@@ -514,36 +511,36 @@ wait_ready() {
 	[ "$up" -eq 1 ]
 }
 
-if [ "$was_up" -eq 1 ]; then
-	step_ok "$(fmt installed_already "$NAME")"
-	if app_ready; then
-		print_ready
-		exit 0
-	fi
-	if curl -fsS --connect-timeout 2 --max-time 5 -X POST "$URL/api/update" >/dev/null 2>&1; then
-		step_ok "update started"
-		step_start "$(msg waiting_restart)" "$(msg waiting_restart_hint)"
-		down=0
-		n=0
-		while [ "$n" -lt 60 ]; do
-			if ! curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
-				down=1; break
-			fi
-			step_tick
-			sleep 2
-			n=$((n + 1))
-		done
-		step_clear
-		step_start "$(msg waiting_online)" "$(msg waiting_online_hint)"
-		if wait_ready; then
-			step_clear
-			print_ready
-			exit 0
+# wait_offline waits for a real offline transition after a reboot request: the speaker
+# must actually stop answering before we trust the reboot took effect. It tolerates the
+# previous build answering briefly (updates) and, with nothing running yet (fresh
+# install), accepts "offline" after a short grace so a transient miss can't be read as
+# the new build. $1 = 1 if ReTouch was confirmed up beforehand.
+wait_offline() {
+	seen=$1
+	n=0
+	while [ "$n" -lt 60 ]; do              # ~2 minutes for the service to stop
+		if curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
+			seen=1
+		elif [ "$seen" -eq 1 ] || [ "$n" -ge 5 ]; then
+			return 0
 		fi
-		step_clear
-		warn "$(msg not_answered)"
-		exit 1
-	fi
+		step_tick
+		sleep 2
+		n=$((n + 1))
+	done
+	return 1
+}
+
+# If the speaker is already on the latest release there is nothing to do — don't reboot
+# it for nothing. This is version-based (app_ready), so a speaker on an OLDER build is
+# never mistaken for up to date; it falls through to the install/update flow below, which
+# is the SAME path for an update and a first install: bootstrap, wait offline, wait back
+# online on the target, repoint the cloud URLs, restart, wait online again, done.
+if [ "$was_up" -eq 1 ] && app_ready; then
+	step_ok "$(fmt installed_already "$NAME")"
+	print_ready
+	exit 0
 fi
 
 # Hand the speaker a one-time instruction to fetch and run the on-speaker setup,
@@ -559,28 +556,12 @@ send "sys reboot"
 step_ok "$(msg asked_restart)"
 
 # ---- wait for ReTouch to come up ------------------------------------------
-# When updating an already running install, the old ReTouch can still answer for a
-# short while after the reboot request. Always watch for a real offline transition;
-# otherwise a slow/restarting old app can be mistaken for the newly installed one.
+# Step 1: wait for the reboot to actually take the speaker offline. When updating an
+# already running install the old build can still answer briefly after the reboot
+# request, so we insist on a real offline transition — otherwise a slow/restarting old
+# build would be mistaken for the freshly installed one.
 step_start "$(msg waiting_restart)" "$(msg waiting_restart_hint)"
-down=0
-saw_up=$was_up
-n=0
-while [ "$n" -lt 60 ]; do            # ~2 minutes for the old service to stop
-	if curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
-		saw_up=1
-	else
-		# Fresh installs may not have an old app. Give it a short chance to appear so
-		# a transient miss cannot make us accept the old process as the new install.
-		if [ "$saw_up" -eq 1 ] || [ "$n" -ge 5 ]; then
-			down=1; break
-		fi
-	fi
-	step_tick
-	sleep 2
-	n=$((n + 1))
-done
-if [ "$down" -ne 1 ]; then
+if ! wait_offline "$was_up"; then
 	step_warn "$(msg not_offline)"
 	say ""
 	say "  $(fmt still_answering "${B}$URL${R}")"
@@ -590,21 +571,11 @@ if [ "$down" -ne 1 ]; then
 fi
 step_clear
 
-# Probe the app's version API. /api/settings only proves some ReTouch is online;
-# /api/version must match the latest release so an old binary cannot look updated.
-# ReTouch is exposed on exactly one uniform port — :8080 — on every speaker, so that
-# is the only URL we wait for and advertise.
+# Step 2: wait for ReTouch to come back online on the target release. app_ready keys on
+# /api/version, so an old binary can never look updated. ReTouch is exposed on exactly
+# one uniform port — :8080 — on every speaker, so that is the only URL we wait for.
 step_start "$(msg waiting_online)" "$(msg waiting_online_hint)"
-up=0
-n=0
-while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
-	if app_ready; then
-		up=1; break
-	fi
-	step_tick
-	sleep 4
-	n=$((n + 1))
-done
+wait_ready
 
 # ReTouch is online, but the speaker's cloud URLs still hold the one-time bootstrap
 # string — its marge URL only goes live after a boot. Now that the speaker is fully up,
@@ -622,31 +593,21 @@ if [ "$up" -eq 1 ]; then
 	send "sys configuration swUpdateUrl $MARGE_BASE/updates/soundtouch"
 	send "sys reboot"
 	step_start "$(msg final_restart)" "$(msg final_restart_hint)"
-	gone=0
-	n=0
-	while [ "$n" -lt 20 ]; do            # ~40s for the final restart to begin
-		if ! curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1; then
-			gone=1; break
-		fi
-		step_tick
-		sleep 2
-		n=$((n + 1))
-	done
-	if [ "$gone" -eq 1 ]; then
+	# The cloud-URL change only goes live after this reboot, and the speaker can take a
+	# minute to come back. ReTouch is up RIGHT NOW and already on the target version, so
+	# app_ready alone can't tell the pre-reboot app from the post-reboot one — we MUST
+	# first see it go offline, then wait for it to return. The previous version only
+	# waited if it caught the speaker going offline within ~40s; if it missed that window
+	# it printed "ready" while the speaker was still rebooting.
+	if wait_offline 1; then
+		wait_ready
+	else
 		up=0
-		n=0
-		while [ "$n" -lt 90 ]; do            # ~6 minutes for the final restart to finish
-			if app_ready; then
-				up=1; break
-			fi
-			step_tick
-			sleep 4
-			n=$((n + 1))
-		done
 	fi
 	step_clear
 fi
 
+step_clear
 say ""
 if [ "$up" -eq 1 ]; then
 	say "  ${GRN}${B}✓ $(msg ready)${R}"
