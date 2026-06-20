@@ -186,7 +186,9 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
       const v = await getVersion();
       if (v?.version && (target ? v.version === target : v.version !== startV)) {
         setVer(v);
-        setUpd({ phase: 'done', text: `${t('updateDone')} ${v.version}` });
+        // The new build is now being served, but this page still runs the old
+        // bundle — surface a reload so the user picks up the update.
+        setUpd({ phase: 'updated', text: `${t('updateDone')} ${v.version}` });
         return;
       }
       if (n >= 45) { setUpd({ phase: 'error', text: t('updateError') }); return; }
@@ -302,10 +304,17 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
                 </div>
                 {ver.updatable ? (
                   <>
-                    <button className="update-btn" onClick={onUpdate} disabled={upd.phase === 'busy'}>
-                      <Icon.download width="18" height="18" />
-                      <span>{t('updateNow')}</span>
-                    </button>
+                    {upd.phase === 'updated' ? (
+                      <button className="update-btn" onClick={() => window.location.reload()}>
+                        <Icon.refresh width="18" height="18" />
+                        <span>{t('reloadNow')}</span>
+                      </button>
+                    ) : (
+                      <button className="update-btn" onClick={onUpdate} disabled={upd.phase === 'busy'}>
+                        <Icon.download width="18" height="18" />
+                        <span>{t('updateNow')}</span>
+                      </button>
+                    )}
                     {upd.text && (
                       <div className={cx('field-hint', upd.phase === 'error' && 'is-error')}>{upd.text}</div>
                     )}
