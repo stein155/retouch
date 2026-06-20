@@ -457,6 +457,32 @@ URL="http://$IP:$APP_URL_PORT"
 was_up=0
 curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1 && was_up=1
 
+latest_tag() {
+	curl -fsSL https://api.github.com/repos/$REPO/releases/latest \
+		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1
+}
+
+release_asset() {
+	curl -fsSL "https://raw.githubusercontent.com/$REPO/$TARGET_TAG/internal/web/dist/index.html" \
+		| sed -n 's#.*src="\./assets/\([^"]*\.js\)".*#\1#p' | head -1
+}
+
+TARGET_TAG=$(latest_tag)
+[ -n "$TARGET_TAG" ] || die "could not determine the latest ReTouch release. Check your internet connection and try again."
+TARGET_ASSET=$(release_asset)
+
+app_ready() {
+	body=$(curl -fsS --connect-timeout 2 --max-time 3 "$URL/api/version" 2>/dev/null || true)
+	case "$body" in
+		*'"version":"'$TARGET_TAG'"'*|*'"version": "'$TARGET_TAG'"'*) return 0 ;;
+	esac
+	if [ -n "$TARGET_ASSET" ]; then
+		body=$(curl -fsS --connect-timeout 2 --max-time 3 "$URL/" 2>/dev/null) || return 1
+		case "$body" in *"./assets/$TARGET_ASSET"*) return 0 ;; esac
+	fi
+	return 1
+}
+
 # Hand the speaker a one-time instruction to fetch and run the on-speaker setup,
 # then tell it to restart so the instruction takes effect.
 # NOTE: the agent self-heals a speaker that stays stuck on this string (see
@@ -501,14 +527,15 @@ if [ "$down" -ne 1 ]; then
 fi
 step_clear
 
-# Probe the app's own API (/api/settings only answers from ReTouch, so Bose's setup
-# page can't look like a false "ready"). ReTouch is exposed on exactly one uniform
-# port — :8080 — on every speaker, so that is the only URL we wait for and advertise.
+# Probe the app's version API. /api/settings only proves some ReTouch is online;
+# /api/version must match the latest release so an old binary cannot look updated.
+# ReTouch is exposed on exactly one uniform port — :8080 — on every speaker, so that
+# is the only URL we wait for and advertise.
 step_start "$(msg waiting_online)" "$(msg waiting_online_hint)"
 up=0
 n=0
 while [ "$n" -lt 90 ]; do            # ~6 minutes, plenty for a reboot + setup
-	if curl -fsS --connect-timeout 2 --max-time 3 "$URL/api/settings" >/dev/null 2>&1; then
+	if app_ready; then
 		up=1; break
 	fi
 	step_tick
@@ -546,7 +573,7 @@ if [ "$up" -eq 1 ]; then
 		up=0
 		n=0
 		while [ "$n" -lt 90 ]; do            # ~6 minutes for the final restart to finish
-			if curl -fsS --connect-timeout 2 --max-time 3 "$URL/api/settings" >/dev/null 2>&1; then
+			if app_ready; then
 				up=1; break
 			fi
 			step_tick

@@ -46,6 +46,7 @@ type Server struct {
 	settings *settings.Store
 	mirror   PresetMirror
 	log      *slog.Logger
+	version  string
 	ui       http.Handler // serves the embedded dist bundle
 	proxy    *http.Client // for the same-origin TuneIn / logo proxies
 }
@@ -58,7 +59,7 @@ type PresetMirror interface {
 }
 
 // New builds a Server.
-func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Store, log *slog.Logger) *Server {
+func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Store, version string, log *slog.Logger) *Server {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		// dist is embedded at build time; this only fails if the build is broken.
@@ -70,6 +71,7 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		store:    s,
 		settings: set,
 		log:      log,
+		version:  version,
 		ui:       http.FileServer(http.FS(sub)),
 		proxy:    &http.Client{Timeout: 12 * time.Second},
 	}
@@ -97,10 +99,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/volume", s.setVolume)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
+	mux.HandleFunc("GET /api/version", s.versionInfo)
 	// Everything else is the embedded single-page UI. More specific /api/...
 	// patterns above win; this serves index.html, assets and icons.
 	mux.HandleFunc("GET /", s.serveUI)
 	return mux
+}
+
+func (s *Server) versionInfo(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]string{"version": s.version})
 }
 
 func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) {
