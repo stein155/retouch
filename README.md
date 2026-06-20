@@ -1,17 +1,25 @@
-# ReTouch · for SoundTouch
+# ReTouch · internet radio for Bose SoundTouch
 
-ReTouch brings internet radio back to Bose SoundTouch speakers after Bose shut
-down its servers. It is a small, self-contained stand-in for the part of the Bose
-cloud the speaker relies on: it runs on the speaker itself and **emulates the
-cloud API** the firmware expects, so the speaker's own internet-radio sources
-light up again.
+**Your SoundTouch went quiet when Bose switched off its servers. ReTouch brings
+the radio back — running entirely on the speaker, with nothing else to set up.**
 
-On top of that it serves a clean little web app so you can search stations, set
-presets, and control playback from your phone or browser.
+You install it once from a terminal. After that, everything lives in a clean little
+web app on the speaker itself: search stations, set your six presets, group speakers
+for multiroom, and keep it updated — all from your phone.
 
-> A simple way to get basic internet-radio functionality back after Bose's
-> servers were switched off. "SoundTouch" and "Bose" are trademarks of Bose
-> Corporation; ReTouch is an unofficial community project — use at your own risk.
+> "SoundTouch" and "Bose" are trademarks of Bose Corporation. ReTouch is an
+> unofficial community project — use at your own risk.
+
+## No extra hardware. No cloud. No fuss.
+
+The whole thing is one tiny program that lives on a speaker you already own. There
+is nothing else to buy, run, or keep powered on:
+
+- ✅ **Runs on the speaker itself**, on your own Wi-Fi — that's the only "server"
+- ❌ **No Raspberry Pi** and no always-on computer humming in a closet
+- ❌ **No VPS, no cloud, no account** — nothing leaves your home network
+- ❌ **No desktop app** — after the one-time install you never touch a terminal again
+- 📱 **It's just a web page** — open the link, *Add to Home Screen*, and use it like any app
 
 ## Screenshots
 
@@ -19,7 +27,7 @@ presets, and control playback from your phone or browser.
 |:---:|:---:|:---:|
 | ![Home](screenshots/home.png) | ![Search](screenshots/search.png) | ![Settings](screenshots/settings.png) |
 
-## What it does
+## What you get
 
 - 🔎 **Search internet radio** — TuneIn's public directory, no account or key
 - ⭐ **Six presets**, stored as the speaker's own native presets
@@ -27,8 +35,8 @@ presets, and control playback from your phone or browser.
 - 🔗 **Multiroom** — find your other ReTouch speakers and group them so they play
   in sync, using Bose's own native zones
 - ⚙️ **Settings** — speaker name, bass, and the app's language
-- ⬆️ **Over-the-air updates** — update straight from the app; the speaker fetches
-  the latest release and restarts itself
+- ⬆️ **Over-the-air updates** — one tap in the app; the speaker fetches the latest
+  release and relaunches ReTouch in a few seconds (no reboot)
 
 ## How it works
 
@@ -46,32 +54,32 @@ finds your other ReTouch speakers on the network and uses Bose's own zone API to
 group them, so one speaker leads and the rest play in perfect sync, exactly like
 multiroom did when the Bose app still worked.
 
-## Install (and update)
+## Set it up once
 
-Installation is fully **wireless** — nothing is installed on your computer. Paste
-this one line into a terminal:
+Installation is **wireless** — nothing is installed on your computer, and this is
+the *only* time you need a terminal. Paste this one line into one (macOS or Linux):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/stein155/retouch/main/install/install.sh | sh
 ```
 
-The installer finds the Bose speakers on your network, lets you pick one (or type
-an address yourself), sets ReTouch up over the air, and then prints the link to
-open. The speaker restarts once and is back in a minute or two.
+It finds the Bose speakers on your network, lets you pick one (or type the address
+yourself), sets ReTouch up over the air, and prints a link like
+`http://192.168.1.42:8080`. The speaker restarts once and is back in a minute or two.
 
 > Already know the address? Skip the search:
 > `curl -fsSL .../install.sh | sh -s -- 192.168.1.42`
+>
+> The installer only needs `curl` and `nc` (netcat), which ship with macOS and most Linux.
 
-It needs two common tools, `curl` and `nc` (netcat), which ship with macOS and most
-Linux systems.
+**That's it for the terminal.** Open the link on your phone, tap *Add to Home
+Screen*, and from now on everything happens right there in the app:
 
-When it finishes you'll get a link like `http://192.168.1.42:8080`. Open it on your
-phone and use **Add to Home Screen** to keep ReTouch around like a normal app.
-
-**To update**, open the app and tap **Update now** in Settings — the speaker
-fetches the latest release over the air and restarts (about a minute). It does
-nothing if you're already up to date. You can also just run the install line
-again, which does the same thing.
+- ▶️ search, play, and manage your presets
+- 🔗 group your other speakers — **Settings ▸ Multiroom**
+- ⬆️ update over the air — **Settings ▸ Update now** (ReTouch reloads in a few
+  seconds, no reboot; does nothing if you're already current — you could also just
+  re-run the install line)
 
 **To undo everything** (restore the factory configuration and remove ReTouch), run
 `install/uninstall.sh` on the speaker and reboot.
