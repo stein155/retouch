@@ -22,7 +22,9 @@ set -u
 REPO=stein155/retouch
 BRANCH=main
 NETINSTALL="${RETOUCH_NETINSTALL_URL:-https://raw.githubusercontent.com/$REPO/$BRANCH/install/netinstall.sh}"
-PLACE="http://x.invalid"        # harmless placeholder the speaker overwrites itself
+# Safe placeholder for the boot-time installer handoff. Keep this different from
+# the legacy x.invalid bootstrap literal so old urlguard builds do not erase it.
+PLACE="http://rt.invalid"
 MARGE_BASE="http://127.0.0.1:9080"  # on-speaker stub; where we repoint the cloud URLs
 
 API_PORT=8090                   # speakers answer here; used only to find them
