@@ -100,6 +100,67 @@ func (c *Client) Describe(ctx context.Context, stationID string) (name, logo str
 	return dr.Body[0].Name, dr.Body[0].Logo
 }
 
+// boolish decodes a TuneIn flag that may arrive as a JSON bool (is_music) or a
+// quoted string ("true"). Anything truthy decodes to true.
+type boolish bool
+
+func (b *boolish) UnmarshalJSON(data []byte) error {
+	s := strings.Trim(strings.TrimSpace(string(data)), `"`)
+	*b = boolish(s == "true" || s == "1")
+	return nil
+}
+
+// Track is the song currently playing on a station, as TuneIn reports it. Any
+// field may be empty; Song+Artist are the useful pair for a "now playing" line.
+type Track struct {
+	Song   string `json:"song"`   // current track title
+	Artist string `json:"artist"` // current artist
+	Album  string `json:"album"`  // current album, often empty
+	Art    string `json:"art"`    // album/artist cover URL, often empty
+	Logo   string `json:"logo"`   // station logo (fallback cover)
+	IsLive bool   `json:"isLive"` // station carries live song metadata
+}
+
+// NowPlaying returns the track currently playing on a station via Describe.ashx.
+// Bose's cloud used to feed this metadata to the speaker; since the shutdown the
+// speaker only knows the station name, so ReTouch fetches it from TuneIn instead.
+// Best-effort: returns a zero Track (no error) when nothing is available.
+func (c *Client) NowPlaying(ctx context.Context, stationID string) (Track, error) {
+	u := fmt.Sprintf("%s/Describe.ashx?id=%s&render=json", base, urlQueryEscape(stationID))
+	body, err := c.get(ctx, u)
+	if err != nil {
+		return Track{}, err
+	}
+	var dr struct {
+		Body []struct {
+			IsMusic     boolish `json:"is_music"`
+			HasSong     boolish `json:"has_song"`
+			Logo        string  `json:"logo"`
+			CurrentSong string  `json:"current_song"`
+			Artist      string  `json:"current_artist"`
+			Album       string  `json:"current_album"`
+			AlbumArt    string  `json:"current_album_art"`
+			ArtistArt   string  `json:"current_artist_art"`
+		} `json:"body"`
+	}
+	if err := json.Unmarshal(body, &dr); err != nil || len(dr.Body) == 0 {
+		return Track{}, nil
+	}
+	b := dr.Body[0]
+	art := b.AlbumArt
+	if art == "" {
+		art = b.ArtistArt
+	}
+	return Track{
+		Song:   strings.TrimSpace(b.CurrentSong),
+		Artist: strings.TrimSpace(b.Artist),
+		Album:  strings.TrimSpace(b.Album),
+		Art:    art,
+		Logo:   b.Logo,
+		IsLive: bool(b.IsMusic) || bool(b.HasSong),
+	}, nil
+}
+
 // Resolve returns the stream URLs for a station id, in TuneIn's order.
 func (c *Client) Resolve(ctx context.Context, stationID string) ([]string, error) {
 	u := fmt.Sprintf("%s/Tune.ashx?id=%s&formats=%s", base, stationID, formats)

@@ -65,7 +65,21 @@ type Server struct {
 	updateMu  sync.Mutex
 	ui        http.Handler // serves the embedded dist bundle
 	proxy     *http.Client // for the same-origin TuneIn / logo proxies
+
+	npMu    sync.Mutex              // guards npCache
+	npCache map[string]npCacheEntry // TuneIn now-playing, keyed by station id
 }
+
+// npCacheEntry is a TuneIn now-playing lookup cached briefly so the UI's poll
+// (every few seconds) doesn't hammer Describe.ashx for the same station.
+type npCacheEntry struct {
+	track tunein.Track
+	at    time.Time
+}
+
+// npTTL is how long a TuneIn now-playing lookup stays fresh. Songs change every
+// few minutes, so a short cache keeps the line current without per-poll fetches.
+const npTTL = 15 * time.Second
 
 // PresetMirror receives successful direct speaker preset writes so the local cloud
 // emulation cannot later sync stale presets back to the speaker.
@@ -92,6 +106,7 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		startedAt: time.Now(),
 		ui:        http.FileServer(http.FS(sub)),
 		proxy:     &http.Client{Timeout: 12 * time.Second},
+		npCache:   map[string]npCacheEntry{},
 	}
 }
 
@@ -623,7 +638,58 @@ func (s *Server) now(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "now failed", err)
 		return
 	}
+	s.enrichTuneIn(ctx, np)
 	writeJSON(w, 200, np)
+}
+
+// enrichTuneIn fills in the song/artist/cover for a TuneIn station. The speaker
+// itself no longer gets this metadata (it came from the retired Bose cloud), so
+// ReTouch asks TuneIn directly and fills only the fields the speaker left blank.
+// Best-effort and cached: any failure leaves np untouched.
+func (s *Server) enrichTuneIn(ctx context.Context, np *speaker.NowPlaying) {
+	if np == nil || !strings.HasPrefix(np.StationID, "s") {
+		return
+	}
+	if np.PlayStatus != "" && np.PlayStatus != "PLAY_STATE" && np.PlayStatus != "BUFFERING_STATE" {
+		return // nothing is playing — don't show a stale song
+	}
+	t, ok := s.cachedNowPlaying(ctx, np.StationID)
+	if !ok {
+		return
+	}
+	if np.Track == "" {
+		np.Track = t.Song
+	}
+	if np.Artist == "" {
+		np.Artist = t.Artist
+	}
+	if np.Art == "" {
+		if t.Art != "" {
+			np.Art = t.Art
+		} else {
+			np.Art = t.Logo
+		}
+	}
+}
+
+// cachedNowPlaying returns the TuneIn now-playing for a station, served from a
+// short-lived cache so repeated polls don't re-hit TuneIn for every request.
+func (s *Server) cachedNowPlaying(ctx context.Context, stationID string) (tunein.Track, bool) {
+	s.npMu.Lock()
+	if e, ok := s.npCache[stationID]; ok && time.Since(e.at) < npTTL {
+		s.npMu.Unlock()
+		return e.track, true
+	}
+	s.npMu.Unlock()
+
+	t, err := s.tunein.NowPlaying(ctx, stationID)
+	if err != nil {
+		return tunein.Track{}, false
+	}
+	s.npMu.Lock()
+	s.npCache[stationID] = npCacheEntry{track: t, at: time.Now()}
+	s.npMu.Unlock()
+	return t, true
 }
 
 func (s *Server) getVolume(w http.ResponseWriter, r *http.Request) {

@@ -15,6 +15,13 @@ export function MiniPlayer({ player, volume, speakerName, onStop, onVolume }) {
   const speaker = clean(speakerName) || 'SoundTouch';
   const muted = volume === 0;
 
+  // Current track line from TuneIn now-playing: "Artist · Title" when both are
+  // known, else whichever we have. Hidden when it would just repeat the station.
+  const artist = clean(station?.artist);
+  const track = clean(station?.track);
+  const nowLine = artist && track ? `${artist} · ${track}` : track || artist;
+  const showNow = playing && nowLine && nowLine !== displayName;
+
   // Pill + sub-line label tracks the start-up phase so the user sees progress
   // instead of the station blinking away.
   const statusLabel =
@@ -39,7 +46,7 @@ export function MiniPlayer({ player, volume, speakerName, onStop, onVolume }) {
               <div className="mp-name" key={displayName}>{displayName}</div>
               <div className="mp-sub">
                 {playing
-                  ? `${clean(station?.track) && clean(station.track) !== displayName ? `${clean(station.track)} · ` : ''}${t('on')} ${speaker}`
+                  ? `${showNow ? `${nowLine} · ` : ''}${t('on')} ${speaker}`
                   : `${statusLabel} · ${speaker}`}
               </div>
             </div>
