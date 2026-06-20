@@ -4,13 +4,15 @@ import { Icon } from './Icons';
 import { useI18n } from '../lib/i18n';
 
 const cx = (...a) => a.filter(Boolean).join(' ');
+const clean = (value) => (typeof value === 'string' ? value.trim() : '');
 
 export function MiniPlayer({ player, volume, speakerName, onStop, onVolume }) {
   const { t } = useI18n();
   const { status, station } = player;
   const active = status !== 'idle' && !!station;
   const playing = status === 'playing';
-  const displayName = station?.name || '';
+  const displayName = clean(station?.name) || clean(station?.track) || '?';
+  const speaker = clean(speakerName) || 'SoundTouch';
   const muted = volume === 0;
 
   // Pill + sub-line label tracks the start-up phase so the user sees progress
@@ -37,8 +39,8 @@ export function MiniPlayer({ player, volume, speakerName, onStop, onVolume }) {
               <div className="mp-name" key={displayName}>{displayName}</div>
               <div className="mp-sub">
                 {playing
-                  ? `${station?.track && station.track !== displayName ? `${station.track} · ` : ''}${t('on')} ${speakerName}`
-                  : `${statusLabel} · ${speakerName}`}
+                  ? `${clean(station?.track) && clean(station.track) !== displayName ? `${clean(station.track)} · ` : ''}${t('on')} ${speaker}`
+                  : `${statusLabel} · ${speaker}`}
               </div>
             </div>
             <button className="mp-stop" aria-label={t('stop')} onClick={onStop}>
@@ -66,7 +68,7 @@ export function MiniPlayer({ player, volume, speakerName, onStop, onVolume }) {
             <Icon.play width="12" height="12" />
           </span>
           <span className="mp-idle-text">
-            {t('chooseStationFor')} <b style={{ color: 'var(--ink)' }}>{speakerName}</b>
+            {t('chooseStationFor')} <b style={{ color: 'var(--ink)' }}>{speaker}</b>
           </span>
           <span className="mp-idle-vol">{t('vol')} {volume}</span>
         </div>

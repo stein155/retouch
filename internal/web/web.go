@@ -99,8 +99,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	// Everything else is the embedded single-page UI. More specific /api/...
 	// patterns above win; this serves index.html, assets and icons.
-	mux.HandleFunc("GET /", s.ui.ServeHTTP)
+	mux.HandleFunc("GET /", s.serveUI)
 	return mux
+}
+
+func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-store")
+	}
+	s.ui.ServeHTTP(w, r)
 }
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {

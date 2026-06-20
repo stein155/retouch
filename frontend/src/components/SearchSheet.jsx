@@ -5,6 +5,7 @@ import { searchTuneIn } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 
 const cx = (...a) => a.filter(Boolean).join(' ');
+const clean = (value) => (typeof value === 'string' ? value.trim() : '');
 
 function StationRow({ station, onPick }) {
   const id = station.id || null;
@@ -63,7 +64,7 @@ export function SearchSheet({ open, mode, speakerName, onClose, onPick }) {
   }, [query]);
 
   const heading = mode?.mode === 'assign' ? t('chooseStation') : t('discoverStations');
-  const sub = mode?.mode === 'assign' ? `${t('forSlot')} ${mode.slot ?? 1}` : `${t('forSpeaker')} ${speakerName}`;
+  const sub = mode?.mode === 'assign' ? `${t('forSlot')} ${mode.slot ?? 1}` : `${t('forSpeaker')} ${clean(speakerName) || 'SoundTouch'}`;
 
   // Stations come live from TuneIn — its ids are always current, so a clicked
   // result plays the right station.

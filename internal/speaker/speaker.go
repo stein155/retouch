@@ -110,6 +110,7 @@ type NowPlaying struct {
 	Track      string `json:"track"`
 	Artist     string `json:"artist"`
 	Station    string `json:"station"`
+	StationID  string `json:"stationId,omitempty"`
 	Art        string `json:"art"`
 	PlayStatus string `json:"playStatus"`
 }
@@ -121,7 +122,11 @@ func (c *Client) NowPlaying(ctx context.Context) (*NowPlaying, error) {
 		return nil, err
 	}
 	var np struct {
-		Source     string `xml:"source,attr"`
+		Source string `xml:"source,attr"`
+		CI     struct {
+			Location string `xml:"location,attr"`
+			Name     string `xml:"itemName"`
+		} `xml:"ContentItem"`
 		Track      string `xml:"track"`
 		Artist     string `xml:"artist"`
 		Station    string `xml:"stationName"`
@@ -131,10 +136,25 @@ func (c *Client) NowPlaying(ctx context.Context) (*NowPlaying, error) {
 	if err := xml.Unmarshal(body, &np); err != nil {
 		return nil, err
 	}
+	station := strings.TrimSpace(np.Station)
+	if station == "" {
+		station = strings.TrimSpace(np.CI.Name)
+	}
 	return &NowPlaying{
 		Source: np.Source, Track: np.Track, Artist: np.Artist,
-		Station: np.Station, Art: np.Art, PlayStatus: np.PlayStatus,
+		Station: station, StationID: stationIDFromLocation(np.CI.Location), Art: np.Art, PlayStatus: np.PlayStatus,
 	}, nil
+}
+
+func stationIDFromLocation(location string) string {
+	location = strings.TrimSpace(location)
+	if location == "" {
+		return ""
+	}
+	if i := strings.LastIndex(location, "/"); i >= 0 {
+		return location[i+1:]
+	}
+	return location
 }
 
 // Preset is one of the speaker's native preset buttons, as reported by /presets.
