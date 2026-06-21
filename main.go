@@ -23,6 +23,7 @@ import (
 
 	"github.com/stein155/retouch/internal/autopair"
 	"github.com/stein155/retouch/internal/marge"
+	"github.com/stein155/retouch/internal/mdns"
 	"github.com/stein155/retouch/internal/settings"
 	"github.com/stein155/retouch/internal/speaker"
 	"github.com/stein155/retouch/internal/store"
@@ -111,6 +112,17 @@ func main() {
 
 	// Keep the speaker paired to our marge account so native sources stay enabled.
 	go autopair.New(bc, info.Account, autopair.DefaultAuthToken, *pairEvery, logger.With("comp", "autopair")).Run(ctx)
+
+	// Advertise a friendly <name>.local so the UI is reachable without the IP.
+	if info.IP != "" {
+		resp := mdns.New(info.IP, info.Name, logger.With("comp", "mdns"))
+		webSrv.SetMDNS(resp)
+		go func() {
+			if err := resp.Run(ctx); err != nil {
+				logger.Warn("mdns responder stopped", "err", err)
+			}
+		}()
+	}
 
 	var wg sync.WaitGroup
 	serve := func(name, addr string, h http.Handler) {
