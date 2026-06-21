@@ -81,11 +81,19 @@ jobs:
       - name: Checksums
         run: sha256sum retouch-armv7l > SHA256SUMS
 
+      # GitHub's Releases API returns 403 when asked to create a new tag that
+      # targets a bare fork-PR commit (the SHA only exists via refs/pull/N/head,
+      # not in any branch). Pushing the commit to a short-lived branch first
+      # gives the API a proper branch ref to target; we delete the branch once
+      # the release (and its tag) has been created.
+      - name: Push PR commit to temp branch for release targeting
+        run: git push origin "HEAD:refs/heads/${TAG}-build"
+
       - name: Publish beta prerelease
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.TAG }}
-          target_commitish: ${{ steps.pr.outputs.sha }}
+          target_commitish: ${{ env.TAG }}-build
           name: "PR #${{ env.PR }}: ${{ steps.pr.outputs.title }}"
           body: |
             Beta of PR #${{ env.PR }} (${{ steps.pr.outputs.title }})
@@ -98,6 +106,10 @@ jobs:
           files: |
             retouch-armv7l
             SHA256SUMS
+
+      - name: Delete temp branch
+        if: always()
+        run: git push origin --delete "refs/heads/${TAG}-build" || true
 
       - name: Comment install hint
         run: |
