@@ -57,3 +57,5 @@ export function StationLogo({ id, name, tuneInId, logo }) {
     </span>
   );
 }
+
+export default StationLogo;

@@ -1,73 +1,31 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Icon } from './Icons';
-import { useI18n, LANGS } from '../lib/i18n';
+import styled from 'styled-components';
+import { Icon } from '../atoms/Icon';
+import { Spinner } from '../atoms/Spinner';
+import { Button } from '../atoms/Button';
+import { BassSlider } from '../molecules/BassSlider';
+import { SpeakerRow } from '../molecules/SpeakerRow';
+import {
+  SheetScrim, SheetEl, SheetHandle, SheetBody, SheetHeader,
+} from '../molecules/Sheet';
+import {
+  Form, FormSection, FieldHint, FieldCard, FieldRow, FieldRowLabel, FieldRowInput,
+  FieldRowValue, Select, SelectWrap, SelectChev, SetEyebrow,
+  BassCard, BassHead, BassName, BassVal, BassScale,
+} from '../molecules/Field';
+import { useI18n, LANGS } from '../../lib/i18n';
 import {
   getSettings, saveSettings, getVersion, startUpdate,
   findSpeakers, groupSpeaker, ungroupSpeaker,
-} from '../lib/api';
+} from '../../lib/api';
 
-const cx = (...a) => a.filter(Boolean).join(' ');
 const fmtBass = (v) => (v > 0 ? '+' + v : String(v));
 
-// Centre-origin bass slider over the speaker's real capability range (e.g. -9..0).
-// The "origin" tick + fill anchor at the default (or 0 if in range).
-function BassSlider({ value, min, max, origin, onChange }) {
-  const ref = useRef(null);
-  const [dragging, setDragging] = useState(false);
-  const span = max - min || 1;
-
-  const update = (clientX) => {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
-    onChange(Math.round(min + ratio * span));
-  };
-
-  useEffect(() => {
-    if (!dragging) return;
-    const move = (e) => update(e.touches ? e.touches[0].clientX : e.clientX);
-    const up = () => setDragging(false);
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
-    window.addEventListener('touchmove', move, { passive: false });
-    window.addEventListener('touchend', up);
-    return () => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
-      window.removeEventListener('touchmove', move);
-      window.removeEventListener('touchend', up);
-    };
-  }, [dragging]);
-
-  const pct = ((value - min) / span) * 100;
-  const originPct = Math.max(0, Math.min(100, ((origin - min) / span) * 100));
-  const fillLeft = Math.min(originPct, pct);
-  const fillWidth = Math.abs(pct - originPct);
-
-  return (
-    <div
-      ref={ref}
-      className="slider bass-slider"
-      role="slider"
-      aria-valuemin={min}
-      aria-valuemax={max}
-      aria-valuenow={value}
-      tabIndex={0}
-      onMouseDown={(e) => { setDragging(true); update(e.clientX); }}
-      onTouchStart={(e) => { setDragging(true); update(e.touches[0].clientX); }}
-      onKeyDown={(e) => {
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { e.preventDefault(); onChange(Math.max(min, value - 1)); }
-        if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { e.preventDefault(); onChange(Math.min(max, value + 1)); }
-      }}
-    >
-      <div className="slider-track" />
-      <div className="bass-center" style={{ left: `${originPct}%` }} />
-      <div className="slider-fill" style={{ left: `${fillLeft}%`, width: `${fillWidth}%` }} />
-      <div className="slider-thumb" style={{ left: `${pct}%` }} />
-    </div>
-  );
-}
+// .spk-scan — multiroom scan button: the dark variant of .update-btn.
+const ScanButton = styled(Button).attrs({ $variant: 'update' })`
+  background: var(--ink);
+  &:hover { background: var(--ink-2); }
+`;
 
 // Multiroom: group other SoundTouch speakers on the network with this one (this
 // radio is the zone master; the rest follow it via Bose's native zone API). The
@@ -105,39 +63,27 @@ function MultiroomSection() {
 
   return (
     <>
-      <div className="form-section" style={{ marginTop: 22 }}>{t('multiroom')}</div>
-      <div className="field-hint" style={{ marginTop: 0, marginBottom: 8 }}>{t('multiroomHint')}</div>
+      <FormSection style={{ marginTop: 22 }}>{t('multiroom')}</FormSection>
+      <FieldHint style={{ marginTop: 0, marginBottom: 8 }}>{t('multiroomHint')}</FieldHint>
       {speakers && speakers.length > 0 && (
-        <div className="field-card">
+        <FieldCard>
           {speakers.map((sp) => (
-            <div className="field-row spk-row" key={sp.deviceId || sp.ip}>
-              <span className="spk-icon"><Icon.speaker width="20" height="20" /></span>
-              <span className="spk-text">
-                <span className="spk-name">{sp.name || 'SoundTouch'}</span>
-                {sp.model && <span className="spk-model">{sp.model}</span>}
-              </span>
-              <button
-                type="button"
-                className={cx('spk-toggle', sp.grouped && 'is-on')}
-                role="switch"
-                aria-checked={sp.grouped}
-                aria-label={sp.name || sp.ip}
-                disabled={!!busy[sp.ip]}
-                onClick={() => toggle(sp)}
-              >
-                <span className="spk-knob" />
-              </button>
-            </div>
+            <SpeakerRow
+              key={sp.deviceId || sp.ip}
+              speaker={sp}
+              disabled={!!busy[sp.ip]}
+              onToggle={() => toggle(sp)}
+            />
           ))}
-        </div>
+        </FieldCard>
       )}
       {speakers && speakers.length === 0 && !scanning && (
-        <div className="field-hint">{t('noSpeakers')}</div>
+        <FieldHint>{t('noSpeakers')}</FieldHint>
       )}
-      <button className="update-btn spk-scan" onClick={scan} disabled={scanning}>
-        {scanning ? <span className="mp-spinner" /> : <Icon.search width="18" height="18" />}
+      <ScanButton onClick={scan} disabled={scanning}>
+        {scanning ? <Spinner $scan /> : <Icon.search width="18" height="18" />}
         <span>{t('findSpeakers')}</span>
-      </button>
+      </ScanButton>
     </>
   );
 }
@@ -234,27 +180,20 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
 
   return (
     <>
-      <div className={cx('sheet-scrim', open && 'is-open')} onClick={onClose} />
-      <div className={cx('sheet', open && 'is-open')} role="dialog" aria-modal="true">
-        <div className="sheet-handle" />
-        <header className="sheet-hdr">
-          <button className="sheet-back" onClick={onClose} aria-label={t('close')}>
-            <Icon.back width="22" height="22" />
-          </button>
-          <div className="sheet-title">
-            <div className="set-eyebrow">{t('thisRadio')}</div>
-            <div className="sheet-headline">{t('settings')}</div>
-          </div>
-        </header>
-        <div className="sheet-body">
-          <div className="form">
-            <div className="form-section">{t('name')}</div>
-            <div className="field-card">
-              <div className="field-row">
-                <label className="field-row-label" htmlFor="set-name">{t('name')}</label>
-                <input
+      <SheetScrim $open={open} onClick={onClose} />
+      <SheetEl $open={open} role="dialog" aria-modal="true">
+        <SheetHandle />
+        <SheetHeader onClose={onClose} closeLabel={t('close')} headline={t('settings')}>
+          <SetEyebrow>{t('thisRadio')}</SetEyebrow>
+        </SheetHeader>
+        <SheetBody>
+          <Form>
+            <FormSection>{t('name')}</FormSection>
+            <FieldCard>
+              <FieldRow>
+                <FieldRowLabel htmlFor="set-name">{t('name')}</FieldRowLabel>
+                <FieldRowInput
                   id="set-name"
-                  className="field-row-input"
                   type="text"
                   value={name}
                   onChange={(e) => onNameInput(e.target.value)}
@@ -262,75 +201,76 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
                   maxLength={28}
                   autoComplete="off"
                 />
-              </div>
-            </div>
+              </FieldRow>
+            </FieldCard>
             {host && (
-              <div className="field-hint">{t('reachableAt')} <b>{host}</b></div>
+              <FieldHint>{t('reachableAt')} <b>{host}</b></FieldHint>
             )}
 
-            <div className="form-section" style={{ marginTop: 22 }}>{t('sound')}</div>
-            <div className="bass-card">
-              <div className="bass-head">
-                <span className="bass-name">{t('bass')}</span>
-                <span className={cx('bass-val', bass !== caps.default && 'is-set')}>{fmtBass(bass)}</span>
-              </div>
+            <FormSection style={{ marginTop: 22 }}>{t('sound')}</FormSection>
+            <BassCard>
+              <BassHead>
+                <BassName>{t('bass')}</BassName>
+                <BassVal $set={bass !== caps.default}>{fmtBass(bass)}</BassVal>
+              </BassHead>
               <BassSlider value={bass} min={caps.min} max={caps.max} origin={caps.default} onChange={onBass} />
-              <div className="bass-scale">
+              <BassScale>
                 <span>{fmtBass(caps.min)}</span>
                 <span>{fmtBass(caps.max)}</span>
-              </div>
-            </div>
-            <div className="field-hint">{t('bassHint')}</div>
+              </BassScale>
+            </BassCard>
+            <FieldHint>{t('bassHint')}</FieldHint>
 
-            <div className="form-section" style={{ marginTop: 22 }}>{t('language')}</div>
-            <div className="select-wrap">
-              <select
-                className="field select"
+            <FormSection style={{ marginTop: 22 }}>{t('language')}</FormSection>
+            <SelectWrap>
+              <Select
                 value={lang}
                 onChange={(e) => onSetLang(e.target.value)}
                 aria-label={t('language')}
               >
                 {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
-              </select>
-              <span className="select-chev" aria-hidden="true"><Icon.chevron width="18" height="18" /></span>
-            </div>
+              </Select>
+              <SelectChev aria-hidden="true"><Icon.chevron width="18" height="18" /></SelectChev>
+            </SelectWrap>
 
             <MultiroomSection />
 
             {ver && (
               <>
-                <div className="form-section" style={{ marginTop: 22 }}>{t('software')}</div>
-                <div className="field-card">
-                  <div className="field-row">
-                    <span className="field-row-label">{t('version')}</span>
-                    <span className="field-row-value">{ver.version}</span>
-                  </div>
-                </div>
+                <FormSection style={{ marginTop: 22 }}>{t('software')}</FormSection>
+                <FieldCard>
+                  <FieldRow>
+                    <FieldRowLabel as="span">{t('version')}</FieldRowLabel>
+                    <FieldRowValue>{ver.version}</FieldRowValue>
+                  </FieldRow>
+                </FieldCard>
                 {ver.updatable ? (
                   <>
                     {upd.phase === 'updated' ? (
-                      <button className="update-btn" onClick={() => window.location.reload()}>
+                      <Button $variant="update" onClick={() => window.location.reload()}>
                         <Icon.refresh width="18" height="18" />
                         <span>{t('reloadNow')}</span>
-                      </button>
+                      </Button>
                     ) : (
-                      <button className="update-btn" onClick={onUpdate} disabled={upd.phase === 'busy'}>
+                      <Button $variant="update" onClick={onUpdate} disabled={upd.phase === 'busy'}>
                         <Icon.download width="18" height="18" />
                         <span>{t('updateNow')}</span>
-                      </button>
+                      </Button>
                     )}
                     {upd.text && (
-                      <div className={cx('field-hint', upd.phase === 'error' && 'is-error')}>{upd.text}</div>
+                      <FieldHint $error={upd.phase === 'error'}>{upd.text}</FieldHint>
                     )}
                   </>
                 ) : (
-                  <div className="field-hint">{t('updatesOnSpeaker')}</div>
+                  <FieldHint>{t('updatesOnSpeaker')}</FieldHint>
                 )}
               </>
             )}
-          </div>
-        </div>
-      </div>
+          </Form>
+        </SheetBody>
+      </SheetEl>
     </>
   );
 }
+
+export default SettingsSheet;

@@ -1,31 +1,72 @@
 import { useState, useEffect, useRef } from 'react';
-import { StationLogo } from './StationLogo';
-import { Icon } from './Icons';
-import { searchTuneIn } from '../lib/api';
-import { useI18n } from '../lib/i18n';
+import styled from 'styled-components';
+import { Icon } from '../atoms/Icon';
+import { StationRow } from '../molecules/StationRow';
+import {
+  SheetScrim, SheetEl, SheetHandle, SheetBody, SheetHeader, Eyebrow,
+} from '../molecules/Sheet';
+import { searchTuneIn } from '../../lib/api';
+import { useI18n } from '../../lib/i18n';
 
-const cx = (...a) => a.filter(Boolean).join(' ');
 const clean = (value) => (typeof value === 'string' ? value.trim() : '');
 
-function StationRow({ station, onPick }) {
-  const id = station.id || null;
-  return (
-    <button className="row" onClick={onPick}>
-      <div className="row-art">
-        <StationLogo id={id} name={station.name} tuneInId={station.tuneInId} logo={station.logo} />
-      </div>
-      <div className="row-text">
-        <div className="row-name">{station.name}</div>
-        <div className="row-sub">
-          <span>{station.genre}</span>
-          {station.tagline && <><span className="row-dot">·</span><span className="row-tagline">{station.tagline}</span></>}
-          {station.country && <><span className="row-dot">·</span><span>{station.country}</span></>}
-        </div>
-      </div>
-      <div className="row-play"><Icon.play width="12" height="12" /></div>
-    </button>
-  );
-}
+const SheetSearch = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 20px 10px;
+  padding: 14px 16px;
+  background: #fff;
+  border-radius: 16px;
+  color: var(--ink-2);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 200ms ease;
+
+  &:focus-within { box-shadow: var(--shadow); }
+
+  input {
+    flex: 1;
+    background: transparent;
+    border: 0;
+    outline: none;
+    color: var(--ink);
+    font-size: 15px;
+    font-weight: 500;
+  }
+  input::placeholder { color: var(--ink-3); font-weight: 400; }
+`;
+
+const SheetClear = styled.button`
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--ink-2);
+  background: var(--surface-3);
+
+  &:hover { background: var(--ink); color: #fff; }
+`;
+
+const SheetRows = styled.div`
+  display: flex;
+  flex-direction: column;
+`;
+
+const SheetEmpty = styled.div`
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+`;
+
+const SheetEmptyQ = styled.div`
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 8px;
+`;
 
 export function SearchSheet({ open, mode, speakerName, onClose, onPick }) {
   const { t } = useI18n();
@@ -72,20 +113,14 @@ export function SearchSheet({ open, mode, speakerName, onClose, onPick }) {
 
   return (
     <>
-      <div className={cx('sheet-scrim', open && 'is-open')} onClick={onClose} />
-      <div className={cx('sheet', open && 'is-open')} role="dialog" aria-modal="true">
-        <div className="sheet-handle" />
-        <header className="sheet-hdr">
-          <button className="sheet-back" onClick={onClose} aria-label={t('close')}>
-            <Icon.back width="22" height="22" />
-          </button>
-          <div className="sheet-title">
-            <div className="eyebrow">{sub}</div>
-            <div className="sheet-headline">{heading}</div>
-          </div>
-        </header>
+      <SheetScrim $open={open} onClick={onClose} />
+      <SheetEl $open={open} role="dialog" aria-modal="true">
+        <SheetHandle />
+        <SheetHeader onClose={onClose} closeLabel={t('close')} headline={heading}>
+          <Eyebrow>{sub}</Eyebrow>
+        </SheetHeader>
 
-        <div className="sheet-search">
+        <SheetSearch>
           <Icon.search width="18" height="18" />
           <input
             ref={inputRef}
@@ -95,34 +130,36 @@ export function SearchSheet({ open, mode, speakerName, onClose, onPick }) {
             inputMode="search"
           />
           {query && (
-            <button className="sheet-clear" onClick={() => setQuery('')} aria-label={t('clear')}>
+            <SheetClear onClick={() => setQuery('')} aria-label={t('clear')}>
               <Icon.close width="16" height="16" />
-            </button>
+            </SheetClear>
           )}
-        </div>
+        </SheetSearch>
 
-        <div className="sheet-body">
+        <SheetBody>
           {!query.trim() ? (
-            <div className="sheet-empty">
-              <div className="sheet-empty-icon" aria-hidden="true">
+            <SheetEmpty>
+              <div aria-hidden="true">
                 <Icon.search width="26" height="26" />
               </div>
               <div>{t('searchPrompt')}</div>
-            </div>
+            </SheetEmpty>
           ) : allResults.length === 0 ? (
-            <div className="sheet-empty">
-              <div className="sheet-empty-q">"{query}"</div>
+            <SheetEmpty>
+              <SheetEmptyQ>"{query}"</SheetEmptyQ>
               <div>{searching ? t('searching') : t('noStations')}</div>
-            </div>
+            </SheetEmpty>
           ) : (
-            <div className="sheet-rows">
+            <SheetRows>
               {allResults.map((s, i) => (
                 <StationRow key={s.tuneInId || s.id || i} station={s} onPick={() => onPick(s)} />
               ))}
-            </div>
+            </SheetRows>
           )}
-        </div>
-      </div>
+        </SheetBody>
+      </SheetEl>
     </>
   );
 }
+
+export default SearchSheet;

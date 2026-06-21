@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from 'react';
+import { SliderRoot, SliderTrack, SliderFill, SliderThumb } from '../atoms/Slider';
 
 export function VolumeSlider({ value, onChange }) {
   const ref = useRef(null);
@@ -29,15 +30,16 @@ export function VolumeSlider({ value, onChange }) {
   }, [dragging]);
 
   return (
-    <div
+    <SliderRoot
       ref={ref}
-      className="slider"
       onMouseDown={(e) => { setDragging(true); update(e.clientX); }}
       onTouchStart={(e) => { setDragging(true); update(e.touches[0].clientX); }}
     >
-      <div className="slider-track" />
-      <div className="slider-fill" style={{ width: `${value}%` }} />
-      <div className="slider-thumb" style={{ left: `${value}%` }} />
-    </div>
+      <SliderTrack />
+      <SliderFill style={{ width: `${value}%` }} />
+      <SliderThumb style={{ left: `${value}%` }} />
+    </SliderRoot>
   );
 }
+
+export default VolumeSlider;
