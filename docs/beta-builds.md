@@ -1,20 +1,24 @@
 # Beta builds
 
-Every pull request automatically gets an installable beta you can try **from the
-app on the speaker — no computer needed.**
+Any pull request can be built into an installable beta you can try **from the
+app on the speaker — no computer needed.** A beta is never built automatically;
+a maintainer asks for one with a comment.
 
 ## How it works
 
-When a PR is opened (or pushed to) by a trusted author, the **Beta Build**
-workflow (`.github/workflows/beta.yml`) builds that PR's code — web UI first, then
+Comment **`/beta`** on a pull request. The **Beta Build** workflow
+(`.github/workflows/beta.yml`) then builds that PR's code — web UI first, then
 the ARMv7 speaker binary — and publishes it as a GitHub *prerelease* tagged
 `beta-pr-<number>`. The assets match a normal release (`retouch-armv7l` +
 `SHA256SUMS`), so the speaker can fetch and verify it exactly like a stable
-update. The beta refreshes on every push and is deleted when the PR closes.
+update. Comment `/beta` again to rebuild after new pushes; the beta is deleted
+when the PR closes.
 
-The workflow runs as `pull_request_target` so a fork PR still gets a write token
-to publish the release; for that reason it only builds PRs from an **owner,
-member, or collaborator** and checks out the PR head commit explicitly.
+The build runs via `issue_comment` so a fork PR still gets a write token to
+publish the release; for that reason it only acts on a `/beta` comment from an
+**owner, member, or collaborator** and checks out the PR head ref explicitly.
+This means betas are only ever produced on an explicit maintainer request —
+opening or pushing to a PR never publishes anything on its own.
 
 ## Installing a beta from the app
 

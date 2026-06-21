@@ -1,37 +1,58 @@
 name: Beta Build
 
-# Every PR from a trusted author automatically gets an installable beta. We build
-# the PR's code into a prerelease tagged `beta-pr-<n>` whose assets match a normal
-# release, so the running app can fetch and install it over the air — no computer
-# needed. Pick it in the app under Settings → Updates.
+# A beta is built ON DEMAND, never automatically. A maintainer comments `/beta`
+# on a pull request and this builds that PR's code into an installable
+# prerelease tagged `beta-pr-<n>`, whose assets match a normal release so the
+# running app can fetch and install it over the air — no computer needed. Pick
+# it in the app under Settings → Updates.
 #
-# This uses `pull_request_target`, which runs in the BASE repo with a write token
-# so fork PRs can still publish a release (a plain `pull_request` token is
-# read-only for forks). Because that token is privileged, we only build code from
-# OWNER / MEMBER / COLLABORATOR PRs — never an untrusted fork. The checkout below
-# is pinned to the PR head SHA so we build exactly what the PR proposes.
+# The build runs via `issue_comment`, which executes in the BASE repo with a
+# write token, so even a fork PR can publish a release. Because that token is
+# privileged we require TWO things: the comment must be `/beta`, and its author
+# must be an OWNER / MEMBER / COLLABORATOR. We then check out the PR head ref so
+# we build exactly what the PR proposes — and only when a maintainer asks.
 on:
+  issue_comment:
+    types: [created]
   pull_request_target:
-    types: [opened, synchronize, reopened, closed]
+    types: [closed]
 
 permissions:
   contents: write       # publish / delete the prerelease + tag
   pull-requests: write  # leave the install hint comment
+  issues: write         # react to the triggering comment
 
 jobs:
-  # Build + publish the beta on open / push / reopen, for trusted authors only.
+  # Build + publish the beta only when a trusted maintainer comments `/beta`.
   build:
     if: >-
-      github.event.action != 'closed' &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/beta') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     env:
-      TAG: beta-pr-${{ github.event.number }}
+      PR: ${{ github.event.issue.number }}
+      TAG: beta-pr-${{ github.event.issue.number }}
+      GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Acknowledge the request
+        run: |
+          gh api -X POST \
+            "repos/$GITHUB_REPOSITORY/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content=rocket --silent || true
+
       - name: Check out the PR head
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          # The PR's head ref always exists in the base repo, including for forks.
+          ref: refs/pull/${{ github.event.issue.number }}/head
+
+      - name: Resolve PR metadata
+        id: pr
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "title=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .title)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v6
         with:
@@ -64,13 +85,13 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.TAG }}
-          target_commitish: ${{ github.event.pull_request.head.sha }}
-          name: "PR #${{ github.event.number }}: ${{ github.event.pull_request.title }}"
+          target_commitish: ${{ steps.pr.outputs.sha }}
+          name: "PR #${{ env.PR }}: ${{ steps.pr.outputs.title }}"
           body: |
-            Automatic beta of PR #${{ github.event.number }}
-            (${{ github.event.pull_request.title }}) at ${{ github.event.pull_request.head.sha }}.
+            Beta of PR #${{ env.PR }} (${{ steps.pr.outputs.title }})
+            built from ${{ steps.pr.outputs.sha }} on a maintainer's `/beta` request.
 
-            Install it from the app: **Settings → Updates → PR #${{ github.event.number }}**.
+            Install it from the app: **Settings → Updates → PR #${{ env.PR }}**.
           prerelease: true
           make_latest: false
           fail_on_unmatched_files: true
@@ -78,17 +99,13 @@ jobs:
             retouch-armv7l
             SHA256SUMS
 
-      - name: Comment install hint (first build only)
-        if: github.event.action == 'opened' || github.event.action == 'reopened'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.number }}
+      - name: Comment install hint
         run: |
-          gh pr comment "$PR" --body "🧪 This PR builds an installable beta. On a speaker already running ReTouch, open the app → **Settings → Updates**, pick **PR #${PR}**, and update — no computer needed. The beta refreshes on every push and is removed when the PR closes."
+          gh pr comment "$PR" --body "🧪 Beta built for this PR. On a speaker already running ReTouch, open the app → **Settings → Updates**, pick **PR #${PR}**, and update — no computer needed. Comment \`/beta\` again to rebuild after new pushes; the beta is removed when the PR closes."
 
   # Tear down the beta when the PR closes so stale prereleases don't pile up.
   cleanup:
-    if: github.event.action == 'closed'
+    if: github.event_name == 'pull_request_target' && github.event.action == 'closed'
     runs-on: ubuntu-latest
     steps:
       - name: Delete the beta prerelease + tag
