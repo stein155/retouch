@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -50,7 +51,24 @@ const (
 )
 
 type releaseInfo struct {
-	TagName string `json:"tag_name"`
+	TagName    string `json:"tag_name"`
+	Name       string `json:"name"`
+	Prerelease bool   `json:"prerelease"`
+	Draft      bool   `json:"draft"`
+}
+
+// betaPRRe matches the per-PR beta tag the Beta Build workflow publishes
+// (beta-pr-<number>), so the app can show "PR #<n>" and accept it as a target.
+var betaPRRe = regexp.MustCompile(`^beta-pr-(\d+)$`)
+
+// betaPR extracts the PR number from a beta-pr-<n> tag.
+func betaPR(tag string) (int, bool) {
+	m := betaPRRe.FindStringSubmatch(tag)
+	if m == nil {
+		return 0, false
+	}
+	n, _ := strconv.Atoi(m[1])
+	return n, true
 }
 
 // Server wires the UI to the speaker and TuneIn search.
@@ -61,6 +79,7 @@ type Server struct {
 	settings  *settings.Store
 	mirror    PresetMirror
 	homekit   *HomeKitInfo // set when the HomeKit bridge is enabled; nil otherwise
+	mdns      Hostnamer
 	log       *slog.Logger
 	version   string
 	homeDir   string
@@ -89,6 +108,13 @@ const npTTL = 15 * time.Second
 type PresetMirror interface {
 	MirrorPreset(slot int, name, location, art string)
 	RemovePreset(slot int)
+}
+
+// Hostnamer is the mDNS responder: it reports the advertised name (e.g.
+// "keuken.local") and re-advertises when the speaker is renamed.
+type Hostnamer interface {
+	Hostname() string
+	SetName(name string)
 }
 
 // New builds a Server.
@@ -130,6 +156,12 @@ func (s *Server) SetHomeKit(hk *HomeKitInfo) {
 	s.homekit = hk
 }
 
+// SetMDNS attaches the mDNS responder so settings can show the .local address and
+// renames re-advertise it.
+func (s *Server) SetMDNS(h Hostnamer) {
+	s.mdns = h
+}
+
 // Handler returns the HTTP mux.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -153,6 +185,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/multiroom/ungroup", s.multiroomUngroup)
 	mux.HandleFunc("GET /api/homekit", s.homeKitInfo)
 	mux.HandleFunc("GET /api/version", s.versionInfo)
+	mux.HandleFunc("GET /api/releases", s.releases)
 	mux.HandleFunc("GET /api/debug", s.debugBundle)
 	mux.HandleFunc("POST /api/update", s.updateApp)
 	// Everything else is the embedded single-page UI. More specific /api/...
@@ -318,6 +351,44 @@ func (s *Server) versionInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"version": s.version, "updatable": s.updatable()})
 }
 
+// releases lists what the app can update to: the latest stable release plus every
+// open-PR beta the Beta Build workflow has published. The frontend turns this into
+// the version picker so a beta can be installed over the air, no computer needed.
+func (s *Server) releases(w http.ResponseWriter, r *http.Request) {
+	all, err := s.listReleases(r.Context())
+	if err != nil {
+		s.fail(w, "release list failed", err)
+		return
+	}
+	var stable map[string]any
+	betas := []map[string]any{}
+	for _, rel := range all {
+		tag := strings.TrimSpace(rel.TagName)
+		if rel.Draft || tag == "" {
+			continue
+		}
+		if n, ok := betaPR(tag); ok && rel.Prerelease {
+			name := strings.TrimSpace(rel.Name)
+			if name == "" {
+				name = "PR #" + strconv.Itoa(n)
+			}
+			betas = append(betas, map[string]any{"tag": tag, "pr": n, "name": name})
+			continue
+		}
+		// First non-prerelease wins: the GitHub list is newest-first, so this is
+		// the current stable release.
+		if !rel.Prerelease && stable == nil {
+			stable = map[string]any{"tag": tag, "name": strings.TrimSpace(rel.Name)}
+		}
+	}
+	writeJSON(w, 200, map[string]any{
+		"current":   s.version,
+		"updatable": s.updatable(),
+		"stable":    stable,
+		"betas":     betas,
+	})
+}
+
 // debugBundle returns a plain-text snapshot of the agent version, runtime, the
 // PERSISTENT installer state, and the tails of the install/start/agent logs. It is
 // meant to be opened in a browser (http://<speaker>:8080/api/debug) and pasted into a
@@ -435,22 +506,51 @@ func (s *Server) updateApp(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "updates are only available on an installed speaker"})
 		return
 	}
+	// An optional {"tag": "..."} body targets a specific release (e.g. a beta);
+	// an empty body means "latest stable", the default Update button.
+	var body struct {
+		Tag string `json:"tag"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&body)
+	}
+	target := strings.TrimSpace(body.Tag)
+
 	if !s.updateMu.TryLock() {
 		writeJSON(w, http.StatusConflict, map[string]string{"status": "updating"})
 		return
 	}
-	latest, err := s.latestRelease(r.Context())
-	if err != nil {
-		s.updateMu.Unlock()
-		s.fail(w, "latest release check failed", err)
-		return
+
+	if target == "" {
+		latest, err := s.latestRelease(r.Context())
+		if err != nil {
+			s.updateMu.Unlock()
+			s.fail(w, "latest release check failed", err)
+			return
+		}
+		if latest == "" {
+			s.updateMu.Unlock()
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "latest release missing tag"})
+			return
+		}
+		target = latest
+	} else {
+		// Only ever install a tag we actually publish — never an arbitrary ref —
+		// so a crafted request can't point the speaker at a foreign download.
+		ok, err := s.isOfferedTag(r.Context(), target)
+		if err != nil {
+			s.updateMu.Unlock()
+			s.fail(w, "release check failed", err)
+			return
+		}
+		if !ok {
+			s.updateMu.Unlock()
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown release " + target})
+			return
+		}
 	}
-	if latest == "" {
-		s.updateMu.Unlock()
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "latest release missing tag"})
-		return
-	}
-	if latest == s.version {
+
+	if target == s.version {
 		s.updateMu.Unlock()
 		writeJSON(w, 200, map[string]string{"status": "current", "version": s.version})
 		return
@@ -464,9 +564,9 @@ func (s *Server) updateApp(w http.ResponseWriter, r *http.Request) {
 		}
 		s.log.Info("self-update installed; restarting", "from", from, "to", to)
 		s.restartAfterUpdate()
-	}(s.version, latest)
+	}(s.version, target)
 
-	writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": latest})
+	writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": target})
 }
 
 func (s *Server) latestRelease(ctx context.Context) (string, error) {
@@ -475,6 +575,29 @@ func (s *Server) latestRelease(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(rel.TagName), nil
+}
+
+// listReleases returns the repo's releases, newest first (GitHub's order).
+func (s *Server) listReleases(ctx context.Context) ([]releaseInfo, error) {
+	var rels []releaseInfo
+	if err := s.getJSON(ctx, "https://api.github.com/repos/"+repo+"/releases?per_page=100", &rels); err != nil {
+		return nil, err
+	}
+	return rels, nil
+}
+
+// isOfferedTag reports whether tag is a real, non-draft release of this repo.
+func (s *Server) isOfferedTag(ctx context.Context, tag string) (bool, error) {
+	rels, err := s.listReleases(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, rel := range rels {
+		if !rel.Draft && strings.TrimSpace(rel.TagName) == tag {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Server) installRelease(ctx context.Context, tag string) error {
@@ -524,7 +647,7 @@ func (s *Server) getJSON(ctx context.Context, target string, out any) error {
 	if resp.StatusCode != http.StatusOK {
 		return errHTTPStatus{url: target, status: resp.StatusCode}
 	}
-	return json.NewDecoder(io.LimitReader(resp.Body, 256*1024)).Decode(out)
+	return json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(out)
 }
 
 func (s *Server) downloadFile(ctx context.Context, target, path string, mode fs.FileMode) error {
@@ -917,6 +1040,9 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	if b, err := s.speaker.Bass(ctx); err == nil {
 		out["bass"] = b
 	}
+	if s.mdns != nil {
+		out["host"] = s.mdns.Hostname() // friendly .local address, e.g. "keuken.local"
+	}
 	writeJSON(w, 200, out)
 }
 
@@ -938,6 +1064,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		if err := s.speaker.SetName(ctx, *body.Name); err != nil {
 			s.fail(w, "set name failed", err)
 			return
+		}
+		if s.mdns != nil {
+			s.mdns.SetName(*body.Name) // re-advertise <name>.local
 		}
 	}
 	if body.Bass != nil {

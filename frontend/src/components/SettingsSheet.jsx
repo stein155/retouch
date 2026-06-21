@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon } from './Icons';
 import { useI18n, LANGS } from '../lib/i18n';
 import {
-  getSettings, saveSettings, getVersion, startUpdate,
+  getSettings, saveSettings, getVersion, getReleases, startUpdate,
   findSpeakers, groupSpeaker, ungroupSpeaker,
 } from '../lib/api';
 
@@ -135,9 +135,8 @@ function MultiroomSection() {
         <div className="field-hint">{t('noSpeakers')}</div>
       )}
       <button className="update-btn spk-scan" onClick={scan} disabled={scanning}>
-        {scanning
-          ? <><span className="mp-spinner" /><span>{t('scanning')}</span></>
-          : <><Icon.search width="18" height="18" /><span>{t('findSpeakers')}</span></>}
+        {scanning ? <span className="mp-spinner" /> : <Icon.search width="18" height="18" />}
+        <span>{t('findSpeakers')}</span>
       </button>
     </>
   );
@@ -150,7 +149,10 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
   const [name, setName] = useState('');
   const [bass, setBass] = useState(0);
   const [caps, setCaps] = useState({ min: -9, max: 0, default: 0 });
+  const [host, setHost] = useState('');                  // friendly .local address
   const [ver, setVer] = useState(null);                  // { version, updatable }
+  const [betas, setBetas] = useState([]);                // open-PR beta builds
+  const [selTag, setSelTag] = useState('');              // '' = latest stable
   const [upd, setUpd] = useState({ phase: 'idle', text: '' }); // idle | busy | done | error
   const nameTimer = useRef(null);
   const pollRef = useRef(null);
@@ -160,12 +162,14 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     getSettings().then((s) => {
       if (!s) return;
       if (typeof s.name === 'string') setName(s.name);
+      if (typeof s.host === 'string') setHost(s.host);
       if (s.bass) {
         setBass(s.bass.actual ?? 0);
         setCaps({ min: s.bass.min ?? -9, max: s.bass.max ?? 0, default: s.bass.default ?? 0 });
       }
     });
     getVersion().then((v) => v && setVer(v));
+    getReleases().then((r) => { if (r) setBetas(r.betas || []); });
   }, [open]);
 
   // Stop any version poll when the sheet closes or unmounts.
@@ -186,7 +190,9 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
       const v = await getVersion();
       if (v?.version && (target ? v.version === target : v.version !== startV)) {
         setVer(v);
-        setUpd({ phase: 'done', text: `${t('updateDone')} ${v.version}` });
+        // The new build is now being served, but this page still runs the old
+        // bundle — surface a reload so the user picks up the update.
+        setUpd({ phase: 'updated', text: `${t('updateDone')} ${v.version}` });
         return;
       }
       if (n >= 45) { setUpd({ phase: 'error', text: t('updateError') }); return; }
@@ -199,7 +205,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     if (upd.phase === 'busy') return;
     setUpd({ phase: 'busy', text: t('updating') });
     let res;
-    try { res = await startUpdate(); } catch { setUpd({ phase: 'error', text: t('updateError') }); return; }
+    try { res = await startUpdate(selTag || undefined); } catch { setUpd({ phase: 'error', text: t('updateError') }); return; }
     if (res.status === 200 && res.body.status === 'current') {
       setUpd({ phase: 'done', text: t('upToDate') });
       return;
@@ -261,6 +267,9 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
                 />
               </div>
             </div>
+            {host && (
+              <div className="field-hint">{t('reachableAt')} <b>{host}</b></div>
+            )}
 
             <div className="form-section" style={{ marginTop: 22 }}>{t('sound')}</div>
             <div className="bass-card">
@@ -302,10 +311,38 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
                 </div>
                 {ver.updatable ? (
                   <>
-                    <button className="update-btn" onClick={onUpdate} disabled={upd.phase === 'busy'}>
-                      <Icon.download width="18" height="18" />
-                      <span>{t('updateNow')}</span>
-                    </button>
+                    {upd.phase === 'updated' ? (
+                      <button className="update-btn" onClick={() => window.location.reload()}>
+                        <Icon.refresh width="18" height="18" />
+                        <span>{t('reloadNow')}</span>
+                      </button>
+                    ) : (
+                      <>
+                        {betas.length > 0 && (
+                          <div className="select-wrap" style={{ marginBottom: 8 }}>
+                            <select
+                              className="field select"
+                              value={selTag}
+                              onChange={(e) => setSelTag(e.target.value)}
+                              disabled={upd.phase === 'busy'}
+                              aria-label={t('chooseVersion')}
+                            >
+                              <option value="">{t('latestStable')}</option>
+                              <optgroup label={t('betaBuilds')}>
+                                {betas.map((b) => (
+                                  <option key={b.tag} value={b.tag}>{b.name}</option>
+                                ))}
+                              </optgroup>
+                            </select>
+                            <span className="select-chev" aria-hidden="true"><Icon.chevron width="18" height="18" /></span>
+                          </div>
+                        )}
+                        <button className="update-btn" onClick={onUpdate} disabled={upd.phase === 'busy'}>
+                          <Icon.download width="18" height="18" />
+                          <span>{selTag ? t('installSelected') : t('updateNow')}</span>
+                        </button>
+                      </>
+                    )}
                     {upd.text && (
                       <div className={cx('field-hint', upd.phase === 'error' && 'is-error')}>{upd.text}</div>
                     )}

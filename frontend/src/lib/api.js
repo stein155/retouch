@@ -198,11 +198,24 @@ export async function getVersion() {
   try { return await getJSON('/api/version'); } catch { return null; }
 }
 
-// startUpdate asks the speaker to fetch the latest release and replace itself.
-// Returns the server's JSON. On a real update the speaker restarts, so the next
+// getReleases returns what the speaker can update to:
+// { current, updatable, stable: {tag,name}|null, betas: [{tag,pr,name}] }.
+// betas are the open-PR builds published by the Beta Build workflow. Returns null
+// if unreachable (e.g. offline) so the UI can fall back to the plain Update button.
+export async function getReleases() {
+  try { return await getJSON('/api/releases'); } catch { return null; }
+}
+
+// startUpdate asks the speaker to fetch a release and replace itself. With no tag
+// it installs the latest stable; pass a beta tag (e.g. "beta-pr-12") to install
+// that one instead. On a real update the speaker restarts, so the next
 // /api/version may briefly fail until it comes back — the caller polls for that.
-export async function startUpdate() {
-  const r = await fetch('/api/update', { method: 'POST', headers: { Accept: 'application/json' } });
+export async function startUpdate(tag) {
+  const r = await fetch('/api/update', {
+    method: 'POST',
+    headers: { Accept: 'application/json', ...(tag ? { 'Content-Type': 'application/json' } : {}) },
+    body: tag ? JSON.stringify({ tag }) : undefined,
+  });
   let body = null;
   try { body = await r.json(); } catch { /* ignore */ }
   return { ok: r.ok, status: r.status, body: body || {} };

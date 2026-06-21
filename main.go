@@ -24,6 +24,7 @@ import (
 	"github.com/stein155/retouch/internal/autopair"
 	"github.com/stein155/retouch/internal/homekit"
 	"github.com/stein155/retouch/internal/marge"
+	"github.com/stein155/retouch/internal/mdns"
 	"github.com/stein155/retouch/internal/settings"
 	"github.com/stein155/retouch/internal/speaker"
 	"github.com/stein155/retouch/internal/store"
@@ -138,6 +139,17 @@ func main() {
 		go func() {
 			if err := homekit.Run(ctx, bc, info, hkCfg, logger.With("comp", "homekit")); err != nil {
 				logger.Error("homekit bridge stopped", "err", err)
+			}
+		}()
+	}
+
+	// Advertise a friendly <name>.local so the UI is reachable without the IP.
+	if info.IP != "" {
+		resp := mdns.New(info.IP, info.Name, logger.With("comp", "mdns"))
+		webSrv.SetMDNS(resp)
+		go func() {
+			if err := resp.Run(ctx); err != nil {
+				logger.Warn("mdns responder stopped", "err", err)
 			}
 		}()
 	}
