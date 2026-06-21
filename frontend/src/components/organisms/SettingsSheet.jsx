@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import { Icon } from '../atoms/Icon';
 import { Spinner } from '../atoms/Spinner';
 import { Button } from '../atoms/Button';
+import { Toggle } from '../atoms/Toggle';
 import { BassSlider } from '../molecules/BassSlider';
 import { SpeakerRow } from '../molecules/SpeakerRow';
 import {
@@ -20,6 +21,12 @@ import {
 } from '../../lib/api';
 
 const fmtBass = (v) => (v > 0 ? '+' + v : String(v));
+
+// Map the speaker's signal token to a localised label.
+const sigLabel = (t, sig) => {
+  const key = { excellent: 'sigExcellent', good: 'sigGood', fair: 'sigFair', poor: 'sigPoor' }[sig];
+  return key ? t(key) : sig;
+};
 
 // .spk-scan — multiroom scan button: the dark variant of .update-btn.
 const ScanButton = styled(Button).attrs({ $variant: 'update' })`
@@ -88,13 +95,21 @@ function MultiroomSection() {
   );
 }
 
-// Settings sheet: speaker name + bass (native, via the box) and UI language
-// (persisted in STLocal). Live-applies each field. Wifi is intentionally omitted.
+// Settings sheet: speaker name + sound (bass, and treble where the speaker has
+// tone controls), UI language (persisted locally), and device-specific network
+// settings (Wi-Fi/streaming optimization + a read-only connection summary). Each
+// device setting only appears when the speaker actually reports it. Live-applies
+// every field.
 export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) {
   const { t } = useI18n();
   const [name, setName] = useState('');
   const [bass, setBass] = useState(0);
   const [caps, setCaps] = useState({ min: -9, max: 0, default: 0 });
+  // Device-specific settings, only shown when the speaker reports them.
+  const [treble, setTreble] = useState(null);            // null = unsupported/hidden
+  const [trebleCaps, setTrebleCaps] = useState({ min: -100, max: 100, step: 10 });
+  const [wifiOpt, setWifiOpt] = useState(null);          // null = unsupported/hidden
+  const [network, setNetwork] = useState(null);          // { type, ssid, signal, ip }
   const [host, setHost] = useState('');                  // friendly .local address
   const [ver, setVer] = useState(null);                  // { version, updatable }
   const [upd, setUpd] = useState({ phase: 'idle', text: '' }); // idle | busy | done | error
@@ -111,6 +126,12 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
         setBass(s.bass.actual ?? 0);
         setCaps({ min: s.bass.min ?? -9, max: s.bass.max ?? 0, default: s.bass.default ?? 0 });
       }
+      if (s.treble) {
+        setTreble(s.treble.value ?? 0);
+        setTrebleCaps({ min: s.treble.min ?? -100, max: s.treble.max ?? 100, step: s.treble.step || 1 });
+      } else setTreble(null);
+      setWifiOpt(typeof s.wifiOptimization === 'boolean' ? s.wifiOptimization : null);
+      setNetwork(s.network || null);
     });
     getVersion().then((v) => v && setVer(v));
   }, [open]);
@@ -178,6 +199,20 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
 
   const onBass = (v) => { setBass(v); saveSettings({ bass: v }); };
 
+  // Treble snaps to the step the speaker accepts.
+  const onTreble = (v) => {
+    const step = trebleCaps.step || 1;
+    const snapped = Math.round(v / step) * step;
+    setTreble(snapped);
+    saveSettings({ treble: snapped });
+  };
+
+  const onWifiOpt = () => {
+    const next = !wifiOpt;
+    setWifiOpt(next);
+    saveSettings({ wifiOptimization: next });
+  };
+
   return (
     <>
       <SheetScrim $open={open} onClick={onClose} />
@@ -221,6 +256,23 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
             </BassCard>
             <FieldHint>{t('bassHint')}</FieldHint>
 
+            {treble !== null && (
+              <>
+                <BassCard style={{ marginTop: 12 }}>
+                  <BassHead>
+                    <BassName>{t('treble')}</BassName>
+                    <BassVal $set={treble !== 0}>{fmtBass(treble)}</BassVal>
+                  </BassHead>
+                  <BassSlider value={treble} min={trebleCaps.min} max={trebleCaps.max} origin={0} onChange={onTreble} />
+                  <BassScale>
+                    <span>{fmtBass(trebleCaps.min)}</span>
+                    <span>{fmtBass(trebleCaps.max)}</span>
+                  </BassScale>
+                </BassCard>
+                <FieldHint>{t('trebleHint')}</FieldHint>
+              </>
+            )}
+
             <FormSection style={{ marginTop: 22 }}>{t('language')}</FormSection>
             <SelectWrap>
               <Select
@@ -232,6 +284,50 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
               </Select>
               <SelectChev aria-hidden="true"><Icon.chevron width="18" height="18" /></SelectChev>
             </SelectWrap>
+
+            {(wifiOpt !== null || network) && (
+              <>
+                <FormSection style={{ marginTop: 22 }}>{t('network')}</FormSection>
+                {wifiOpt !== null && (
+                  <>
+                    <FieldCard>
+                      <FieldRow>
+                        <FieldRowLabel as="span">{t('wifiOptimization')}</FieldRowLabel>
+                        <Toggle
+                          on={wifiOpt}
+                          onClick={onWifiOpt}
+                          aria-label={t('wifiOptimization')}
+                          style={{ marginLeft: 'auto' }}
+                        />
+                      </FieldRow>
+                    </FieldCard>
+                    <FieldHint>{t('wifiOptimizationHint')}</FieldHint>
+                  </>
+                )}
+                {network && (
+                  <FieldCard style={{ marginTop: wifiOpt !== null ? 12 : 0 }}>
+                    {network.ssid && (
+                      <FieldRow>
+                        <FieldRowLabel as="span">{t('wifiNetwork')}</FieldRowLabel>
+                        <FieldRowValue>{network.ssid}</FieldRowValue>
+                      </FieldRow>
+                    )}
+                    {network.signal && (
+                      <FieldRow>
+                        <FieldRowLabel as="span">{t('signal')}</FieldRowLabel>
+                        <FieldRowValue>{sigLabel(t, network.signal)}</FieldRowValue>
+                      </FieldRow>
+                    )}
+                    {network.ip && (
+                      <FieldRow>
+                        <FieldRowLabel as="span">{t('ipAddress')}</FieldRowLabel>
+                        <FieldRowValue>{network.ip}</FieldRowValue>
+                      </FieldRow>
+                    )}
+                  </FieldCard>
+                )}
+              </>
+            )}
 
             <MultiroomSection />
 
