@@ -1,0 +1,129 @@
+name: Beta Build
+
+# A beta is built ON DEMAND, never automatically. A maintainer comments `/beta`
+# on a pull request and this builds that PR's code into an installable
+# prerelease tagged `beta-pr-<n>`, whose assets match a normal release so the
+# running app can fetch and install it over the air — no computer needed. Pick
+# it in the app under Settings → Updates.
+#
+# The build runs via `issue_comment`, which executes in the BASE repo with a
+# write token, so even a fork PR can publish a release. Because that token is
+# privileged we require TWO things: the comment must be `/beta`, and its author
+# must be an OWNER / MEMBER / COLLABORATOR. We then check out the PR head ref so
+# we build exactly what the PR proposes — and only when a maintainer asks.
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: write       # publish / delete the prerelease + tag
+  pull-requests: write  # leave the install hint comment
+  issues: write         # react to the triggering comment
+
+jobs:
+  # Build + publish the beta only when a trusted maintainer comments `/beta`.
+  build:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/beta') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    env:
+      PR: ${{ github.event.issue.number }}
+      TAG: beta-pr-${{ github.event.issue.number }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Acknowledge the request
+        run: |
+          gh api -X POST \
+            "repos/$GITHUB_REPOSITORY/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content=rocket --silent || true
+
+      - name: Check out the PR head
+        uses: actions/checkout@v7
+        with:
+          # The PR's head ref always exists in the base repo, including for forks.
+          ref: refs/pull/${{ github.event.issue.number }}/head
+
+      - name: Resolve PR metadata
+        id: pr
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "title=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .title)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build web UI
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build   # outputs to ../internal/web/dist (embedded by go:embed)
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.22'
+
+      - name: Cross-compile agent (armv7l)
+        env:
+          GOOS: linux
+          GOARCH: arm
+          GOARM: '7'
+          CGO_ENABLED: '0'
+        run: go build -ldflags "-s -w -X main.version=${TAG}" -o retouch-armv7l .
+
+      - name: Checksums
+        run: sha256sum retouch-armv7l > SHA256SUMS
+
+      # GitHub's Releases API returns 403 when asked to create a new tag that
+      # targets a bare fork-PR commit (the SHA only exists via refs/pull/N/head,
+      # not in any branch). Pushing the commit to a short-lived branch first
+      # gives the API a proper branch ref to target; we delete the branch once
+      # the release (and its tag) has been created.
+      - name: Push PR commit to temp branch for release targeting
+        run: git push origin "HEAD:refs/heads/${TAG}-build"
+
+      - name: Publish beta prerelease
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ env.TAG }}-build
+          name: "PR #${{ env.PR }}: ${{ steps.pr.outputs.title }}"
+          body: |
+            Beta of PR #${{ env.PR }} (${{ steps.pr.outputs.title }})
+            built from ${{ steps.pr.outputs.sha }} on a maintainer's `/beta` request.
+
+            Install it from the app: **Settings → Updates → PR #${{ env.PR }}**.
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: |
+            retouch-armv7l
+            SHA256SUMS
+
+      - name: Delete temp branch
+        if: always()
+        run: git push origin --delete "refs/heads/${TAG}-build" || true
+
+      - name: Comment install hint
+        run: |
+          gh pr comment "$PR" --body "🧪 Beta built for this PR. On a speaker already running ReTouch, open the app → **Settings → Updates**, pick **PR #${PR}**, and update — no computer needed. Comment \`/beta\` again to rebuild after new pushes; the beta is removed when the PR closes."
+
+  # Tear down the beta when the PR closes so stale prereleases don't pile up.
+  cleanup:
+    if: github.event_name == 'pull_request_target' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the beta prerelease + tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: beta-pr-${{ github.event.number }}
+        run: |
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || \
+            echo "no beta release for $TAG (nothing to clean up)"
