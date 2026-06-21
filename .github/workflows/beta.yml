@@ -1,0 +1,100 @@
+name: Beta Build
+
+# Every PR from a trusted author automatically gets an installable beta. We build
+# the PR's code into a prerelease tagged `beta-pr-<n>` whose assets match a normal
+# release, so the running app can fetch and install it over the air — no computer
+# needed. Pick it in the app under Settings → Updates.
+#
+# This uses `pull_request_target`, which runs in the BASE repo with a write token
+# so fork PRs can still publish a release (a plain `pull_request` token is
+# read-only for forks). Because that token is privileged, we only build code from
+# OWNER / MEMBER / COLLABORATOR PRs — never an untrusted fork. The checkout below
+# is pinned to the PR head SHA so we build exactly what the PR proposes.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: write       # publish / delete the prerelease + tag
+  pull-requests: write  # leave the install hint comment
+
+jobs:
+  # Build + publish the beta on open / push / reopen, for trusted authors only.
+  build:
+    if: >-
+      github.event.action != 'closed' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+    runs-on: ubuntu-latest
+    env:
+      TAG: beta-pr-${{ github.event.number }}
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build web UI
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build   # outputs to ../internal/web/dist (embedded by go:embed)
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.22'
+
+      - name: Cross-compile agent (armv7l)
+        env:
+          GOOS: linux
+          GOARCH: arm
+          GOARM: '7'
+          CGO_ENABLED: '0'
+        run: go build -ldflags "-s -w -X main.version=${TAG}" -o retouch-armv7l .
+
+      - name: Checksums
+        run: sha256sum retouch-armv7l > SHA256SUMS
+
+      - name: Publish beta prerelease
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.event.pull_request.head.sha }}
+          name: "PR #${{ github.event.number }}: ${{ github.event.pull_request.title }}"
+          body: |
+            Automatic beta of PR #${{ github.event.number }}
+            (${{ github.event.pull_request.title }}) at ${{ github.event.pull_request.head.sha }}.
+
+            Install it from the app: **Settings → Updates → PR #${{ github.event.number }}**.
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: |
+            retouch-armv7l
+            SHA256SUMS
+
+      - name: Comment install hint (first build only)
+        if: github.event.action == 'opened' || github.event.action == 'reopened'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.number }}
+        run: |
+          gh pr comment "$PR" --body "🧪 This PR builds an installable beta. On a speaker already running ReTouch, open the app → **Settings → Updates**, pick **PR #${PR}**, and update — no computer needed. The beta refreshes on every push and is removed when the PR closes."
+
+  # Tear down the beta when the PR closes so stale prereleases don't pile up.
+  cleanup:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the beta prerelease + tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: beta-pr-${{ github.event.number }}
+        run: |
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || \
+            echo "no beta release for $TAG (nothing to clean up)"

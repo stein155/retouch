@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon } from './Icons';
 import { useI18n, LANGS } from '../lib/i18n';
 import {
-  getSettings, saveSettings, getVersion, startUpdate,
+  getSettings, saveSettings, getVersion, getReleases, startUpdate,
   findSpeakers, groupSpeaker, ungroupSpeaker,
 } from '../lib/api';
 
@@ -151,6 +151,8 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
   const [caps, setCaps] = useState({ min: -9, max: 0, default: 0 });
   const [host, setHost] = useState('');                  // friendly .local address
   const [ver, setVer] = useState(null);                  // { version, updatable }
+  const [betas, setBetas] = useState([]);                // open-PR beta builds
+  const [selTag, setSelTag] = useState('');              // '' = latest stable
   const [upd, setUpd] = useState({ phase: 'idle', text: '' }); // idle | busy | done | error
   const nameTimer = useRef(null);
   const pollRef = useRef(null);
@@ -167,6 +169,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
       }
     });
     getVersion().then((v) => v && setVer(v));
+    getReleases().then((r) => { if (r) setBetas(r.betas || []); });
   }, [open]);
 
   // Stop any version poll when the sheet closes or unmounts.
@@ -202,7 +205,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     if (upd.phase === 'busy') return;
     setUpd({ phase: 'busy', text: t('updating') });
     let res;
-    try { res = await startUpdate(); } catch { setUpd({ phase: 'error', text: t('updateError') }); return; }
+    try { res = await startUpdate(selTag || undefined); } catch { setUpd({ phase: 'error', text: t('updateError') }); return; }
     if (res.status === 200 && res.body.status === 'current') {
       setUpd({ phase: 'done', text: t('upToDate') });
       return;
@@ -314,10 +317,31 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
                         <span>{t('reloadNow')}</span>
                       </button>
                     ) : (
-                      <button className="update-btn" onClick={onUpdate} disabled={upd.phase === 'busy'}>
-                        <Icon.download width="18" height="18" />
-                        <span>{t('updateNow')}</span>
-                      </button>
+                      <>
+                        {betas.length > 0 && (
+                          <div className="select-wrap" style={{ marginBottom: 8 }}>
+                            <select
+                              className="field select"
+                              value={selTag}
+                              onChange={(e) => setSelTag(e.target.value)}
+                              disabled={upd.phase === 'busy'}
+                              aria-label={t('chooseVersion')}
+                            >
+                              <option value="">{t('latestStable')}</option>
+                              <optgroup label={t('betaBuilds')}>
+                                {betas.map((b) => (
+                                  <option key={b.tag} value={b.tag}>{b.name}</option>
+                                ))}
+                              </optgroup>
+                            </select>
+                            <span className="select-chev" aria-hidden="true"><Icon.chevron width="18" height="18" /></span>
+                          </div>
+                        )}
+                        <button className="update-btn" onClick={onUpdate} disabled={upd.phase === 'busy'}>
+                          <Icon.download width="18" height="18" />
+                          <span>{selTag ? t('installSelected') : t('updateNow')}</span>
+                        </button>
+                      </>
                     )}
                     {upd.text && (
                       <div className={cx('field-hint', upd.phase === 'error' && 'is-error')}>{upd.text}</div>
