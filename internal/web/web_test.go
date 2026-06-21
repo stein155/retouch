@@ -300,9 +300,9 @@ func TestMultiroomUngrouped(t *testing.T) {
 			Name     string `json:"name"`
 			IP       string `json:"ip"`
 		} `json:"self"`
-		IsMaster bool              `json:"isMaster"`
-		Members  []speaker.Member  `json:"members"`
-		Master   string            `json:"master"`
+		IsMaster bool             `json:"isMaster"`
+		Members  []speaker.Member `json:"members"`
+		Master   string           `json:"master"`
 	}
 	decodeBody(t, rec, &got)
 	if got.Self.DeviceID != "F4E11E3B013F" || got.Self.Name != "Keuken" {

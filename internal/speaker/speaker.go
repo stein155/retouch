@@ -192,7 +192,7 @@ func (c *Client) Presets(ctx context.Context) ([]Preset, error) {
 		out = append(out, Preset{
 			Slot:      p.ID,
 			Name:      p.CI.Name,
-			StationID: p.CI.Location[strings.LastIndex(p.CI.Location, "/")+1:],
+			StationID: stationIDFromLocation(p.CI.Location),
 			Location:  p.CI.Location,
 			Logo:      p.CI.Art,
 		})
