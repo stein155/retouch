@@ -26,8 +26,8 @@ presets, and control playback from your phone or browser.
 - ▶️ **Play / stop and volume**, with live now-playing (station name + logo)
 - 🔗 **Multiroom** — find your other ReTouch speakers and group them so they play
   in sync, using Bose's own native zones
-- 🏠 **Apple Home (HomeKit)** — the speaker shows up in the Home app and Siri, with
-  power, volume, mute, and the six presets as selectable inputs
+- 🏠 **Apple Home (HomeKit)** — the speaker shows up in the Home app and Siri as
+  tappable tiles: a button per preset, a power switch, and a volume control
 - ⚙️ **Settings** — speaker name, bass, and the app's language
 - ⬆️ **Over-the-air updates** — update straight from the app; the speaker fetches
   the latest release and restarts itself
@@ -52,8 +52,14 @@ multiroom did when the Bose app still worked.
 
 ReTouch can bridge the speaker into **Apple Home**, so you can control it from the
 Home app and Siri ("Hey Siri, turn on the kitchen speaker", "play preset 2"). It is
-enabled by the installer and appears as a **Television** accessory: power on/off,
-volume and mute, and your six presets shown as selectable inputs.
+enabled by the installer and appears as a **bridge** with plain, tappable tiles: a
+**switch per preset** (tap to play; the playing preset shows as on), a **power
+switch**, and a **volume** control (a dimmable "light" whose brightness is the volume
+— the Home app has no speaker-volume slider, so this is the idiomatic way to get one).
+
+> A *Television* accessory would be the obvious media type, but the stock Home app
+> shows "no controls available" for it and never renders preset "inputs" as buttons —
+> so ReTouch uses switches + a brightness slider, which actually work there.
 
 To pair it, open the **Home** app → **Add Accessory** → *More options*, pick the
 speaker, and enter the **setup code** shown in ReTouch's Settings (also available at
