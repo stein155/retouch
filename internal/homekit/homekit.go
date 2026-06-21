@@ -2,22 +2,28 @@
 // Accessory Protocol (HAP), so the speaker can be controlled from the Home app
 // and Siri alongside ReTouch's own web UI.
 //
-// The speaker is published as a HomeKit bridge with a handful of plain accessories
-// that the stock Home app renders as real, tappable tiles:
+// The speaker is published as a single HomeKit **Television** accessory — the
+// media type the Home app renders as a real radio you can turn on and off, with
+// a volume control and a list of sources:
 //
-//   - one switch per preset  -> tap to play that preset; the playing preset shows on
-//   - a power switch         -> wake the speaker / put it on standby
-//   - a "volume" lightbulb   -> brightness 0..100 maps to the speaker volume (the
-//     Home app has no speaker-volume slider, so a dimmable
-//     light is the idiomatic way to get one; off = mute)
+//   - Television service   -> on/off (Active) and the current station (ActiveIdentifier,
+//     which the Home app shows as "now playing")
+//   - a linked Speaker     -> volume slider + mute (and +/- for the remote's buttons)
+//   - one linked InputSource per preset -> the six presets/stations; selecting one
+//     plays it, and the playing one is shown as the active source
 //
-// A Television accessory (the obvious media type) was deliberately NOT used: the
-// stock Home app shows "no controls available" for it and never renders its preset
-// "inputs" as buttons. Switches + a brightness slider are what actually work there.
+// An earlier version modelled this as a bridge of plain switches plus a
+// "volume" lightbulb. That is valid HAP, but it does not read as a radio and the
+// Home app could not present it as one. A Television accessory is the idiomatic
+// fit — provided it is wired completely: the volume characteristics live on a
+// linked Speaker service and every preset is a linked InputSource. Omitting
+// either is what makes the Home app say "no controls available"; both are wired
+// here.
 //
 // Everything maps onto the existing speaker control surface (internal/speaker);
 // HomeKit issues the same /key and /volume calls the web UI already uses, so the
-// speaker plays radio itself exactly as before. ReTouch only stands in as the bridge.
+// speaker plays radio itself exactly as before. ReTouch only stands in as the
+// HomeKit accessory.
 //
 // HAP needs SRP pairing, Curve25519/ChaCha20-Poly1305 transport crypto and its own
 // mDNS (Bonjour) advertisement — none of which is feasible on the Go stdlib — so
@@ -40,6 +46,7 @@ import (
 	"github.com/brutella/hap"
 	"github.com/brutella/hap/accessory"
 	"github.com/brutella/hap/characteristic"
+	"github.com/brutella/hap/service"
 
 	"github.com/stein155/retouch/internal/speaker"
 )
@@ -49,48 +56,53 @@ const (
 	numPresets = 6
 	// pollEvery is how often we read the speaker and mirror its state into HomeKit.
 	pollEvery = 3 * time.Second
-	// presetsEvery throttles the (rarer) refresh of preset names.
+	// presetsEvery throttles the (rarer) refresh of preset/station names.
 	presetsEvery = 30 * time.Second
 	// actionTimeout bounds a single speaker command kicked off by a Home request.
 	actionTimeout = 12 * time.Second
-	// defaultUnmuteVolume is the level used when the volume light is switched on while
-	// the speaker is muted and we have no remembered level.
+	// defaultUnmuteVolume is the level used when unmuting with no remembered level.
 	defaultUnmuteVolume = 20
+	// volumeStep is how much the remote's +/- buttons (relative volume) move by.
+	volumeStep = 5
 )
 
-// Config controls the HomeKit bridge.
+// Config controls the HomeKit accessory.
 type Config struct {
 	Pin        string // 8-digit setup code; derived from the device id when empty
-	Name       string // bridge name shown in the Home app
+	Name       string // accessory name shown in the Home app
 	Addr       string // TCP listen address for the HAP server (e.g. ":51827")
 	StorageDir string // directory for HAP pairing state (persisted across reboots)
 }
 
-// presetSwitch is one preset exposed as a HomeKit switch.
-type presetSwitch struct {
+// presetInput is one preset exposed as a HomeKit TV input source. Its identifier
+// is the preset slot, so the Television's ActiveIdentifier doubles as "which
+// preset is playing".
+type presetInput struct {
 	slot int
-	on   *characteristic.On
-	name *characteristic.Name // the accessory's display name (best-effort live rename)
+	name *characteristic.ConfiguredName // user-facing label (the station name)
+	disp *characteristic.Name           // accessory-defined name (kept in sync too)
 }
 
-// bridge holds the live accessories and the speaker client they drive.
-type bridge struct {
+// radio holds the live characteristics of the Television accessory and the speaker
+// client they drive.
+type radio struct {
 	bc   *speaker.Client
 	log  *slog.Logger
 	base context.Context
 
-	power   *characteristic.On
-	presets []*presetSwitch
-	volOn   *characteristic.On
-	bright  *characteristic.Brightness
+	power  *characteristic.Active           // TV on/off
+	source *characteristic.ActiveIdentifier // playing preset slot (0 = none)
+	volume *characteristic.Volume
+	mute   *characteristic.Mute
+	inputs []*presetInput
 
 	mu        sync.Mutex
 	byStation map[string]int // TuneIn station id -> preset slot
 	lastVol   int            // last non-zero volume, for un-muting
 }
 
-// Run builds the bridge, starts the HAP server and mirrors speaker state into
-// HomeKit until ctx is cancelled. It blocks; run it in its own goroutine.
+// Run builds the Television accessory, starts the HAP server and mirrors speaker
+// state into HomeKit until ctx is cancelled. It blocks; run it in its own goroutine.
 func Run(ctx context.Context, bc *speaker.Client, info *speaker.Info, cfg Config, logger *slog.Logger) error {
 	name := strings.TrimSpace(cfg.Name)
 	if name == "" {
@@ -107,11 +119,11 @@ func Run(ctx context.Context, bc *speaker.Client, info *speaker.Info, cfg Config
 		}
 	}
 
-	b := &bridge{bc: bc, log: logger, base: ctx, byStation: map[string]int{}, lastVol: defaultUnmuteVolume}
-	root, children := b.build(name, info)
+	r := &radio{bc: bc, log: logger, base: ctx, byStation: map[string]int{}, lastVol: defaultUnmuteVolume}
+	a := r.build(name, info)
 
 	store := hap.NewFsStore(cfg.StorageDir)
-	srv, err := hap.NewServer(store, root, children...)
+	srv, err := hap.NewServer(store, a) // a single, non-bridged Television accessory
 	if err != nil {
 		return err
 	}
@@ -120,17 +132,18 @@ func Run(ctx context.Context, bc *speaker.Client, info *speaker.Info, cfg Config
 		srv.Addr = cfg.Addr
 	}
 
-	logger.Info("homekit ready — add the bridge in the Apple Home app",
+	logger.Info("homekit ready — add the accessory in the Apple Home app",
 		"name", name, "code", fmtPin(pin), "addr", cfg.Addr, "paired", srv.IsPaired())
 
-	go b.syncLoop(ctx)
+	go r.syncLoop(ctx)
 
 	return srv.ListenAndServe(ctx)
 }
 
-// build assembles the bridge accessory and its children: a power switch, one switch
-// per preset, and a "volume" lightbulb. Returns the bridge and the child accessories.
-func (b *bridge) build(name string, info *speaker.Info) (*accessory.A, []*accessory.A) {
+// build assembles the Television accessory: the Television service (on/off + current
+// source), a linked Speaker service (volume + mute), and one linked InputSource per
+// preset. Returns the accessory ready to publish.
+func (r *radio) build(name string, info *speaker.Info) *accessory.A {
 	model := strings.TrimSpace(info.Type)
 	if model == "" {
 		model = "SoundTouch"
@@ -143,66 +156,100 @@ func (b *bridge) build(name string, info *speaker.Info) (*accessory.A, []*access
 	if fw == "" {
 		fw = "1.0"
 	}
-	mk := func(suffix string) accessory.Info {
-		n := name
-		if suffix != "" {
-			n = name + " " + suffix
-		}
-		return accessory.Info{Name: n, Manufacturer: "Bose (ReTouch)", Model: model, SerialNumber: serial + suffix, Firmware: fw}
-	}
 
-	root := accessory.NewBridge(mk("")).A
+	a := accessory.New(accessory.Info{
+		Name:         name,
+		Manufacturer: "Bose (ReTouch)",
+		Model:        model,
+		SerialNumber: serial,
+		Firmware:     fw,
+	}, accessory.TypeTelevision)
 
-	var children []*accessory.A
+	// The Television itself: power + the active source.
+	tv := service.NewTelevision()
+	tv.S.Primary = true
+	tv.ConfiguredName.SetValue(name)
+	tv.SleepDiscoveryMode.SetValue(characteristic.SleepDiscoveryModeAlwaysDiscoverable)
+	tv.Active.OnValueRemoteUpdate(func(v int) { r.setPower(v == characteristic.ActiveActive) })
+	tv.ActiveIdentifier.OnValueRemoteUpdate(func(id int) { r.selectInput(id) })
+	r.power = tv.Active
+	r.source = tv.ActiveIdentifier
+	a.AddS(tv.S)
 
-	// Power: on = playing/awake, off = standby.
-	pwr := accessory.NewSwitch(mk("aan/uit"))
-	pwr.Switch.On.OnValueRemoteUpdate(func(on bool) { b.setPower(on) })
-	b.power = pwr.Switch.On
-	children = append(children, pwr.A)
-
-	// One switch per preset. The switch reflects which preset is playing; turning the
-	// active preset off pauses, turning another on plays it.
-	b.presets = make([]*presetSwitch, 0, numPresets)
+	// One input source per preset, each linked to the Television so the Home app
+	// lists it as a selectable source. The identifier is the preset slot.
+	r.inputs = make([]*presetInput, 0, numPresets)
 	for slot := 1; slot <= numPresets; slot++ {
-		sw := accessory.NewSwitch(mk("preset " + strconv.Itoa(slot)))
-		s := slot
-		on := sw.Switch.On
-		on.OnValueRemoteUpdate(func(v bool) {
-			if v {
-				b.playPreset(s)
-			} else {
-				b.key("PAUSE")
-			}
-		})
-		b.presets = append(b.presets, &presetSwitch{slot: slot, on: on, name: sw.Info.Name})
-		children = append(children, sw.A)
+		in := service.NewInputSource()
+
+		id := characteristic.NewIdentifier() // required so ActiveIdentifier can point here
+		id.SetValue(slot)
+		in.AddC(id.C)
+
+		disp := characteristic.NewName()
+		label := "Preset " + strconv.Itoa(slot)
+		disp.SetValue(label)
+		in.AddC(disp.C)
+
+		in.ConfiguredName.SetValue(label)
+		in.InputSourceType.SetValue(characteristic.InputSourceTypeTuner) // a radio tuner
+		in.IsConfigured.SetValue(characteristic.IsConfiguredConfigured)
+		in.CurrentVisibilityState.SetValue(characteristic.CurrentVisibilityStateShown)
+
+		a.AddS(in.S)
+		tv.AddS(in.S) // link the source to the Television
+
+		r.inputs = append(r.inputs, &presetInput{slot: slot, name: in.ConfiguredName, disp: disp})
 	}
 
-	// Volume as a dimmable light: brightness 0..100 = volume, off = mute.
-	vol := accessory.NewLightbulb(mk("volume"))
-	bright := characteristic.NewBrightness()
-	vol.Lightbulb.AddC(bright.C)
-	bright.OnValueRemoteUpdate(func(v int) { b.setVolume(v) })
-	vol.Lightbulb.On.OnValueRemoteUpdate(func(on bool) { b.setVolumeOn(on) })
-	b.volOn, b.bright = vol.Lightbulb.On, bright
-	children = append(children, vol.A)
+	// A Speaker service carrying the volume controls, linked to the Television. The
+	// stock NewSpeaker() only has Mute, so we add Active + an absolute Volume slider
+	// + a relative selector (for the remote's hardware +/- buttons).
+	spk := service.New(service.TypeSpeaker)
 
-	return root, children
+	spkActive := characteristic.NewActive()
+	spkActive.SetValue(characteristic.ActiveActive)
+	spk.AddC(spkActive.C)
+
+	spkName := characteristic.NewName()
+	spkName.SetValue(name + " volume")
+	spk.AddC(spkName.C)
+
+	vct := characteristic.NewVolumeControlType()
+	vct.SetValue(characteristic.VolumeControlTypeAbsolute)
+	spk.AddC(vct.C)
+
+	mute := characteristic.NewMute()
+	mute.OnValueRemoteUpdate(func(on bool) { r.setMute(on) })
+	spk.AddC(mute.C)
+
+	vol := characteristic.NewVolume()
+	vol.OnValueRemoteUpdate(func(v int) { r.setVolume(v) })
+	spk.AddC(vol.C)
+
+	sel := characteristic.NewVolumeSelector()
+	sel.OnValueRemoteUpdate(func(dir int) { r.nudgeVolume(dir) })
+	spk.AddC(sel.C)
+
+	r.volume, r.mute = vol, mute
+	a.AddS(spk)
+	tv.AddS(spk) // link the speaker to the Television
+
+	return a
 }
 
 // syncLoop mirrors the speaker's live state into the HomeKit characteristics so the
 // Home app reflects what the speaker is actually doing — whoever changed it.
-func (b *bridge) syncLoop(ctx context.Context) {
-	b.refreshPresetNames(ctx)
+func (r *radio) syncLoop(ctx context.Context) {
+	r.refreshPresetNames(ctx)
 	tick := time.NewTicker(pollEvery)
 	defer tick.Stop()
 	lastNames := time.Now()
 
 	for {
-		b.syncOnce(ctx)
+		r.syncOnce(ctx)
 		if time.Since(lastNames) >= presetsEvery {
-			b.refreshPresetNames(ctx)
+			r.refreshPresetNames(ctx)
 			lastNames = time.Now()
 		}
 		select {
@@ -213,38 +260,40 @@ func (b *bridge) syncLoop(ctx context.Context) {
 	}
 }
 
-func (b *bridge) syncOnce(ctx context.Context) {
+func (r *radio) syncOnce(ctx context.Context) {
 	c, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 
-	if np, err := b.bc.NowPlaying(c); err == nil {
+	if np, err := r.bc.NowPlaying(c); err == nil {
 		on := np.Source != "" && np.Source != "STANDBY"
-		b.power.SetValue(on)
-		active := 0
-		if on && np.StationID != "" {
-			active = b.slotForStation(np.StationID)
+		if on {
+			r.power.SetValue(characteristic.ActiveActive)
+		} else {
+			r.power.SetValue(characteristic.ActiveInactive)
 		}
-		for _, p := range b.presets {
-			p.on.SetValue(p.slot == active)
+		if on && np.StationID != "" {
+			if slot := r.slotForStation(np.StationID); slot != 0 {
+				_ = r.source.SetValue(slot)
+			}
 		}
 	}
-	if vol, err := b.bc.Volume(c); err == nil {
-		_ = b.bright.SetValue(vol)
-		b.volOn.SetValue(vol > 0)
+	if vol, err := r.bc.Volume(c); err == nil {
+		_ = r.volume.SetValue(vol)
+		r.mute.SetValue(vol == 0)
 		if vol > 0 {
-			b.mu.Lock()
-			b.lastVol = vol
-			b.mu.Unlock()
+			r.mu.Lock()
+			r.lastVol = vol
+			r.mu.Unlock()
 		}
 	}
 }
 
-// refreshPresetNames names each preset switch after the station on that slot and
-// keeps the station -> slot map current (used to light the playing preset).
-func (b *bridge) refreshPresetNames(ctx context.Context) {
+// refreshPresetNames names each input source after the station on that slot and
+// keeps the station -> slot map current (used to show the playing source).
+func (r *radio) refreshPresetNames(ctx context.Context) {
 	c, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
-	presets, err := b.bc.Presets(c)
+	presets, err := r.bc.Presets(c)
 	if err != nil {
 		return
 	}
@@ -256,91 +305,123 @@ func (b *bridge) refreshPresetNames(ctx context.Context) {
 			byStation[p.StationID] = p.Slot
 		}
 	}
-	for _, p := range b.presets {
-		if pr, ok := byslot[p.slot]; ok && strings.TrimSpace(pr.Name) != "" {
-			p.name.SetValue(strings.TrimSpace(pr.Name))
+	for _, in := range r.inputs {
+		if pr, ok := byslot[in.slot]; ok && strings.TrimSpace(pr.Name) != "" {
+			name := strings.TrimSpace(pr.Name)
+			in.name.SetValue(name)
+			in.disp.SetValue(name)
 		}
 	}
-	b.mu.Lock()
-	b.byStation = byStation
-	b.mu.Unlock()
+	r.mu.Lock()
+	r.byStation = byStation
+	r.mu.Unlock()
 }
 
 // slotForStation maps the now-playing station to a preset slot (0 = not a preset).
-func (b *bridge) slotForStation(stationID string) int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.byStation[stationID]
+func (r *radio) slotForStation(stationID string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.byStation[stationID]
 }
 
 // --- speaker actions (run async so HAP request handlers stay responsive) ---
 
-func (b *bridge) do(fn func(ctx context.Context)) {
+func (r *radio) do(fn func(ctx context.Context)) {
 	go func() {
-		ctx, cancel := context.WithTimeout(b.base, actionTimeout)
+		ctx, cancel := context.WithTimeout(r.base, actionTimeout)
 		defer cancel()
 		fn(ctx)
 	}()
 }
 
-func (b *bridge) key(name string) {
-	b.do(func(ctx context.Context) {
-		if err := b.bc.Key(ctx, name); err != nil {
-			b.log.Warn("homekit key", "key", name, "err", err)
+func (r *radio) setVolume(level int) {
+	if level < 0 {
+		level = 0
+	}
+	if level > 100 {
+		level = 100
+	}
+	r.do(func(ctx context.Context) {
+		if err := r.bc.SetVolume(ctx, level); err != nil {
+			r.log.Warn("homekit volume", "level", level, "err", err)
 		}
 	})
 }
 
-func (b *bridge) setVolume(level int) {
-	b.do(func(ctx context.Context) {
-		if err := b.bc.SetVolume(ctx, level); err != nil {
-			b.log.Warn("homekit volume", "level", level, "err", err)
+// nudgeVolume moves the volume by volumeStep in the requested direction. Used by the
+// Home remote's hardware +/- buttons, which send a relative VolumeSelector.
+func (r *radio) nudgeVolume(dir int) {
+	r.do(func(ctx context.Context) {
+		cur, err := r.bc.Volume(ctx)
+		if err != nil {
+			r.log.Warn("homekit volume read", "err", err)
+			return
+		}
+		next := cur + volumeStep
+		if dir == characteristic.VolumeSelectorDecrement {
+			next = cur - volumeStep
+		}
+		if next < 0 {
+			next = 0
+		}
+		if next > 100 {
+			next = 100
+		}
+		if err := r.bc.SetVolume(ctx, next); err != nil {
+			r.log.Warn("homekit volume", "level", next, "err", err)
 		}
 	})
 }
 
-// setVolumeOn handles the volume light's on/off: off mutes (volume 0), on restores the
-// current brightness, or the last non-zero volume when brightness is 0.
-func (b *bridge) setVolumeOn(on bool) {
-	if !on {
-		b.setVolume(0)
+// setMute silences the speaker (remembering the level to restore) or unmutes back to
+// the last non-zero level.
+func (r *radio) setMute(on bool) {
+	if on {
+		r.do(func(ctx context.Context) {
+			if cur, err := r.bc.Volume(ctx); err == nil && cur > 0 {
+				r.mu.Lock()
+				r.lastVol = cur
+				r.mu.Unlock()
+			}
+			if err := r.bc.SetVolume(ctx, 0); err != nil {
+				r.log.Warn("homekit mute", "err", err)
+			}
+		})
 		return
 	}
-	level := b.bright.Value()
+	r.mu.Lock()
+	level := r.lastVol
+	r.mu.Unlock()
 	if level <= 0 {
-		b.mu.Lock()
-		level = b.lastVol
-		b.mu.Unlock()
-		if level <= 0 {
-			level = defaultUnmuteVolume
-		}
+		level = defaultUnmuteVolume
 	}
-	b.setVolume(level)
+	r.setVolume(level)
 }
 
-func (b *bridge) playPreset(slot int) {
-	if slot < 1 || slot > numPresets {
+// selectInput plays the preset whose slot matches the chosen input identifier.
+func (r *radio) selectInput(id int) {
+	if id < 1 || id > numPresets {
 		return
 	}
-	b.do(func(ctx context.Context) {
-		b.bc.Wake(ctx)
-		if err := b.bc.Key(ctx, "PRESET_"+strconv.Itoa(slot)); err != nil {
-			b.log.Warn("homekit preset", "slot", slot, "err", err)
+	r.do(func(ctx context.Context) {
+		r.bc.Wake(ctx)
+		if err := r.bc.Key(ctx, "PRESET_"+strconv.Itoa(id)); err != nil {
+			r.log.Warn("homekit preset", "slot", id, "err", err)
 		}
 	})
 }
 
 // setPower wakes the speaker (on) or puts it on standby (off). POWER toggles, so we
 // only send it when the current state actually needs to change.
-func (b *bridge) setPower(on bool) {
-	b.do(func(ctx context.Context) {
+func (r *radio) setPower(on bool) {
+	r.do(func(ctx context.Context) {
 		if on {
-			b.bc.Wake(ctx)
+			r.bc.Wake(ctx)
 			return
 		}
-		if np, err := b.bc.NowPlaying(ctx); err == nil && np.Source != "STANDBY" {
-			if err := b.bc.Key(ctx, "POWER"); err != nil {
-				b.log.Warn("homekit standby", "err", err)
+		if np, err := r.bc.NowPlaying(ctx); err == nil && np.Source != "STANDBY" {
+			if err := r.bc.Key(ctx, "POWER"); err != nil {
+				r.log.Warn("homekit standby", "err", err)
 			}
 		}
 	})

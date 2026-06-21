@@ -25,7 +25,7 @@ internal/tunein/     TuneIn directory client (search / resolve / describe)
 internal/speaker/    speaker control (play, presets, volume, name, bass, multiroom zones)
 internal/discover/   finds other ReTouch speakers on the LAN (for multiroom)
 internal/marge/      local emulation of the Bose cloud API the firmware expects
-internal/homekit/    HomeKit (HAP) bridge — exposes the speaker to Apple Home
+internal/homekit/    HomeKit (HAP) — exposes the speaker to Apple Home as a Television
 internal/autopair/   keeps the speaker's sources enabled
 internal/settings/   persisted app settings (name, bass, language)
 internal/store/      small on-disk state (presets, etc.)
@@ -75,9 +75,11 @@ is self-contained. Rebuild the frontend whenever you change anything under
   configuration is backed up first so it can be fully restored.
 - An autostart entry relaunches ReTouch on every boot; on boot it re-checks in so the
   native radio sources come back automatically.
-- When enabled (the installer enables it), the HomeKit bridge listens on its own LAN
+- When enabled (the installer enables it), the HomeKit server listens on its own LAN
   port (`:51827`) — separate from the `:8080` web UI and not affected by the `:8000`
   redirect/hide rules — and advertises an Apple Home accessory via its own mDNS. The
+  speaker is published as a single HomeKit **Television** accessory (on/off, a linked
+  Speaker service for volume/mute, and the six presets as linked input sources). The
   setup code is derived from the speaker's device id (stable across reboots) and shown
   in the UI / at `GET /api/homekit`. Pairing state lives under the install dir, so
   `uninstall.sh` removes it with everything else.
