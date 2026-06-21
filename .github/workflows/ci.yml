@@ -32,6 +32,11 @@ jobs:
         with:
           go-version: '1.22'
 
+      - name: Vet & test (host arch)
+        run: |
+          go vet ./...
+          go test ./...
+
       - name: Build agent (armv7l, embeds the web UI)
         env:
           GOOS: linux

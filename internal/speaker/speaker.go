@@ -16,13 +16,22 @@ import (
 
 // Client controls one speaker.
 type Client struct {
-	host string
-	http *http.Client
+	host    string
+	apiPort string // SoundTouch REST API port (8090 on a real speaker)
+	cliPort string // diagnostic CLI port (17000 on a real speaker)
+	http    *http.Client
 }
 
-// New returns a Client for the given host (speaker IP, or 127.0.0.1 on-speaker).
+// New returns a Client for the given host. host is the speaker IP (or 127.0.0.1
+// on-speaker); it may include a REST API port ("127.0.0.1:9090") for off-speaker
+// testing, otherwise the firmware's default 8090 is used. The diagnostic CLI port
+// is always 17000 on real hardware.
 func New(host string) *Client {
-	return &Client{host: host, http: &http.Client{Timeout: 4 * time.Second}}
+	apiPort := "8090"
+	if h, p, err := net.SplitHostPort(host); err == nil {
+		host, apiPort = h, p
+	}
+	return &Client{host: host, apiPort: apiPort, cliPort: "17000", http: &http.Client{Timeout: 4 * time.Second}}
 }
 
 // Info is a trimmed view of /info: the speaker's identity. Used to fill the
@@ -447,13 +456,13 @@ func (c *Client) post(ctx context.Context, path, body string) error {
 }
 
 func (c *Client) urlFor(path string) string {
-	return fmt.Sprintf("http://%s:8090%s", c.host, path)
+	return fmt.Sprintf("http://%s:%s%s", c.host, c.apiPort, path)
 }
 
 // cli sends one command to the :17000 diagnostic CLI and discards the reply.
 func (c *Client) cli(ctx context.Context, cmd string) error {
 	d := net.Dialer{Timeout: 3 * time.Second}
-	conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort(c.host, "17000"))
+	conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort(c.host, c.cliPort))
 	if err != nil {
 		return err
 	}

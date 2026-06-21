@@ -29,9 +29,25 @@ internal/autopair/   keeps the speaker's sources enabled
 internal/settings/   persisted app settings (name, bass, language)
 internal/store/      small on-disk state (presets, etc.)
 internal/web/        JSON API + the embedded web app (built from frontend/)
+internal/sim/        SoundTouch speaker simulator (REST :8090 + CLI :17000) for tests
+cmd/soundtouch-sim/  runs the simulator standalone on the real ports for manual use
 frontend/            web app source (React + Vite, embedded via go:embed)
 install/             wireless install: install.sh / netinstall.sh / uninstall.sh
 .github/             CI: build + publish releases, Release Drafter
+```
+
+## Testing without a speaker
+
+`internal/sim` simulates a real SoundTouch speaker: it answers the firmware's local
+REST API (`:8090`) and diagnostic CLI (`:17000`) with the same wire format the
+hardware produces, and tracks the matching state. Tests mount `sp.Handler()` on an
+`httptest` server and point a `speaker.Client` at it (`speaker.New("host:port")`), so
+the speaker layer, the web JSON API, marge, and autopair are all exercised end-to-end
+without hardware. To drive the firmware against it by hand:
+
+```sh
+go run ./cmd/soundtouch-sim        # listens on :8090 + :17000
+go run . -speaker-host 127.0.0.1   # point the agent at the simulator
 ```
 
 ## Build & test

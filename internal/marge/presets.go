@@ -158,8 +158,19 @@ func (p *presets) render() ([]byte, string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	out := []byte(p.renderLocked(true))
-	return out, fmt.Sprintf("p%d", p.seq)
+	return out, p.tagLocked()
 }
+
+// tag is the content tag for the current preset state; it changes only when a preset
+// changes (seq is bumped), so it is stable across identical renders and drives the
+// conditional-GET ETag.
+func (p *presets) tag() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.tagLocked()
+}
+
+func (p *presets) tagLocked() string { return fmt.Sprintf("p%d", p.seq) }
 
 func (p *presets) renderInner() string {
 	p.mu.Lock()
