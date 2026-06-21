@@ -218,3 +218,63 @@ func TestWakeFromStandby(t *testing.T) {
 		t.Errorf("Wake did not leave standby: %+v", np)
 	}
 }
+
+func TestTrebleRoundTrip(t *testing.T) {
+	_, c := newSim(t)
+	tr, err := c.Treble(ctx())
+	if err != nil {
+		t.Fatalf("Treble: %v", err)
+	}
+	if tr.Min != -100 || tr.Max != 100 || tr.Step != 10 || tr.Value != 0 {
+		t.Errorf("treble caps = %+v, want value 0 range -100..100 step 10", tr)
+	}
+	if err := c.SetTreble(ctx(), 30); err != nil {
+		t.Fatal(err)
+	}
+	if tr, _ := c.Treble(ctx()); tr.Value != 30 {
+		t.Errorf("treble after set = %d, want 30", tr.Value)
+	}
+}
+
+func TestWifiOptimizedRoundTrip(t *testing.T) {
+	_, c := newSim(t)
+	// Fresh sim has power-saving off, so Wi-Fi is "optimized" (stays awake).
+	if opt, err := c.WifiOptimized(ctx()); err != nil || !opt {
+		t.Fatalf("initial WifiOptimized = %v, err %v; want true", opt, err)
+	}
+	if err := c.SetWifiOptimized(ctx(), false); err != nil {
+		t.Fatal(err)
+	}
+	if opt, _ := c.WifiOptimized(ctx()); opt {
+		t.Errorf("after disabling optimization, WifiOptimized = true; want false")
+	}
+}
+
+func TestNetworkInfoRoundTrip(t *testing.T) {
+	_, c := newSim(t)
+	n, err := c.NetworkInfo(ctx())
+	if err != nil {
+		t.Fatalf("NetworkInfo: %v", err)
+	}
+	if n.Type != "wifi" || n.SSID != "HomeWiFi" || n.Signal != "good" || n.IP != "192.168.1.42" {
+		t.Errorf("network = %+v", n)
+	}
+}
+
+func TestPresetPlayback(t *testing.T) {
+	_, c := newSim(t)
+	if err := c.StorePreset(ctx(), 2, "TUNEIN", "stationurl", "/v1/playback/station/s1", "Jazz FM", ""); err != nil {
+		t.Fatal(err)
+	}
+	// Pressing the preset key plays the stored station, like the hardware button.
+	if err := c.Key(ctx(), "PRESET_2"); err != nil {
+		t.Fatal(err)
+	}
+	np, err := c.NowPlaying(ctx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if np.Source != "TUNEIN" || np.Station != "Jazz FM" || np.PlayStatus != "PLAY_STATE" {
+		t.Errorf("now playing after preset = %+v, want TUNEIN/Jazz FM/PLAY_STATE", np)
+	}
+}

@@ -152,7 +152,11 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     const tick = async () => {
       n += 1;
       const v = await getVersion();
-      if (v?.version && (target ? v.version === target : v.version !== startV)) {
+      // Done when we reach the target tag, or — with no known target — when the
+      // version changes from a KNOWN baseline. Without a baseline we can't tell a
+      // change from a first read, so keep polling rather than declare success.
+      const changed = startV != null && v?.version && v.version !== startV;
+      if (v?.version && (target ? v.version === target : changed)) {
         setVer(v);
         // The new build is now being served, but this page still runs the old
         // bundle — surface a reload so the user picks up the update.

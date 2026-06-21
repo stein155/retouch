@@ -284,7 +284,7 @@ export function PresetTile({ preset, player, onPlay, onAssign }) {
         )}
       </TileMain>
       <TileMore
-        aria-label="Bewerken"
+        aria-label={t('replace')}
         onClick={(e) => { e.stopPropagation(); setMenu(m => !m); }}
       >
         <Icon.more width="16" height="16" />

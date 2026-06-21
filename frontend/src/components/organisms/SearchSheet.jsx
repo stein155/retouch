@@ -76,11 +76,11 @@ export function SearchSheet({ open, mode, speakerName, onClose, onPick }) {
   const inputRef = useRef(null);
 
   useEffect(() => {
-    if (open) {
-      setQuery('');
-      setTuneInResults([]);
-      setTimeout(() => inputRef.current?.focus(), 250);
-    }
+    if (!open) return undefined;
+    setQuery('');
+    setTuneInResults([]);
+    const focusT = setTimeout(() => inputRef.current?.focus(), 250);
+    return () => clearTimeout(focusT);
   }, [open]);
 
   // Esc to close
@@ -91,17 +91,21 @@ export function SearchSheet({ open, mode, speakerName, onClose, onPick }) {
     return () => window.removeEventListener('keydown', f);
   }, [open, onClose]);
 
-  // Search TuneIn when query changes (debounced)
+  // Search TuneIn when query changes (debounced). `alive` guards against a slow
+  // response landing after the query was cleared or changed, which would otherwise
+  // flash stale results or leave the spinner stuck on.
   useEffect(() => {
     const q = query.trim();
-    if (!q) { setTuneInResults([]); return; }
+    if (!q) { setTuneInResults([]); setSearching(false); return undefined; }
+    let alive = true;
     const t = setTimeout(async () => {
       setSearching(true);
       const results = await searchTuneIn(q);
+      if (!alive) return;
       setTuneInResults(results);
       setSearching(false);
     }, 400);
-    return () => clearTimeout(t);
+    return () => { alive = false; clearTimeout(t); };
   }, [query]);
 
   const heading = mode?.mode === 'assign' ? t('chooseStation') : t('discoverStations');

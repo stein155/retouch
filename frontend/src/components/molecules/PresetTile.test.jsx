@@ -63,7 +63,8 @@ describe('PresetTile', () => {
     renderWithTheme(
       <PresetTile preset={preset} player={idle} onPlay={() => {}} onAssign={onAssign} />,
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Bewerken' }));
+    // The more button is rendered in the test's default language (English).
+    await userEvent.click(screen.getByRole('button', { name: 'Replace' }));
     const replace = screen.getByText('Replace');
     expect(replace).toBeInTheDocument();
     await userEvent.click(replace);

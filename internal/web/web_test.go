@@ -286,6 +286,67 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDeviceSettingsRoundTrip(t *testing.T) {
+	h, _ := newServer(t)
+
+	rec := do(t, h, "GET", "/api/settings", "")
+	if rec.Code != 200 {
+		t.Fatalf("GET settings: %d", rec.Code)
+	}
+	var got map[string]any
+	decodeBody(t, rec, &got)
+
+	// The sim exposes tone controls, power-saving and a Wi-Fi connection, so all
+	// three device-specific settings must be present.
+	tr, ok := got["treble"].(map[string]any)
+	if !ok {
+		t.Fatalf("settings missing treble: %+v", got)
+	}
+	if tr["min"].(float64) != -100 || tr["max"].(float64) != 100 || tr["step"].(float64) != 10 {
+		t.Errorf("treble caps = %+v", tr)
+	}
+	// Fresh sim: power-saving off => optimized true.
+	if got["wifiOptimization"] != true {
+		t.Errorf("wifiOptimization = %v, want true", got["wifiOptimization"])
+	}
+	net, ok := got["network"].(map[string]any)
+	if !ok {
+		t.Fatalf("settings missing network: %+v", got)
+	}
+	if net["ssid"] != "HomeWiFi" || net["signal"] != "good" {
+		t.Errorf("network = %+v", net)
+	}
+
+	// Set treble and flip the Wi-Fi optimization off, then read them back.
+	rec = do(t, h, "PUT", "/api/settings", `{"treble":30,"wifiOptimization":false}`)
+	if rec.Code != 200 {
+		t.Fatalf("PUT settings: %d (%s)", rec.Code, rec.Body)
+	}
+	rec = do(t, h, "GET", "/api/settings", "")
+	decodeBody(t, rec, &got)
+	if tr = got["treble"].(map[string]any); tr["value"].(float64) != 30 {
+		t.Errorf("treble after set = %+v, want value 30", tr)
+	}
+	if got["wifiOptimization"] != false {
+		t.Errorf("wifiOptimization after disable = %v, want false", got["wifiOptimization"])
+	}
+}
+
+func TestSettingsBadBody(t *testing.T) {
+	h, _ := newServer(t)
+	rec := do(t, h, "PUT", "/api/settings", `not json`)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("PUT bad body: %d, want 502", rec.Code)
+	}
+	var got struct {
+		Error string `json:"error"`
+	}
+	decodeBody(t, rec, &got)
+	if got.Error == "" {
+		t.Errorf("expected error message, got %q", rec.Body.String())
+	}
+}
+
 func TestMultiroomUngrouped(t *testing.T) {
 	h, _ := newServer(t)
 	// Fresh sim has no zone, so multiroom reports the speaker's identity and an

@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -53,6 +54,15 @@ type Speaker struct {
 	bassMax     int
 	bassDefault int
 
+	trebleTarget int
+	trebleMin    int
+	trebleMax    int
+	trebleStep   int
+
+	powerSaving bool   // /systemtimeout: Wi-Fi sleeps in standby when true
+	wifiSSID    string // /networkInfo: connected Wi-Fi network
+	wifiSignal  string // /networkInfo: e.g. "GOOD_SIGNAL"
+
 	presets map[int]Preset
 
 	source     string // "STANDBY" when idle/off
@@ -73,24 +83,31 @@ type Speaker struct {
 // be overridden before serving.
 func New() *Speaker {
 	return &Speaker{
-		DeviceID:    "F4E11E3B013F",
-		Name:        "Keuken",
-		Type:        "SoundTouch 10",
-		Software:    "27.0.6.46330.5043500",
-		IP:          "192.168.1.42",
-		Account:     "1234567",
-		MargeURL:    "https://streaming.bose.com",
-		SerialSCM:   "07294150369404420AE",
-		SerialPkg:   "071624P70360032AE",
-		volume:      25,
-		bassTarget:  0,
-		bassActual:  0,
-		bassMin:     -9,
-		bassMax:     0,
-		bassDefault: 0,
-		presets:     map[int]Preset{},
-		source:      "STANDBY",
-		playStatus:  "STOP_STATE",
+		DeviceID:     "F4E11E3B013F",
+		Name:         "Keuken",
+		Type:         "SoundTouch 10",
+		Software:     "27.0.6.46330.5043500",
+		IP:           "192.168.1.42",
+		Account:      "1234567",
+		MargeURL:     "https://streaming.bose.com",
+		SerialSCM:    "07294150369404420AE",
+		SerialPkg:    "071624P70360032AE",
+		volume:       25,
+		bassTarget:   0,
+		bassActual:   0,
+		bassMin:      -9,
+		bassMax:      0,
+		bassDefault:  0,
+		trebleTarget: 0,
+		trebleMin:    -100,
+		trebleMax:    100,
+		trebleStep:   10,
+		powerSaving:  false,
+		wifiSSID:     "HomeWiFi",
+		wifiSignal:   "GOOD_SIGNAL",
+		presets:      map[int]Preset{},
+		source:       "STANDBY",
+		playStatus:   "STOP_STATE",
 	}
 }
 
@@ -104,17 +121,34 @@ func (s *Speaker) Handler() http.Handler {
 	mux.HandleFunc("/volume", s.volumeHandler)
 	mux.HandleFunc("/bass", s.bassHandler)
 	mux.HandleFunc("/bassCapabilities", s.getBassCaps)
+	mux.HandleFunc("/audioproducttonecontrols", s.toneHandler)
+	mux.HandleFunc("/systemtimeout", s.systemTimeoutHandler)
+	mux.HandleFunc("/networkInfo", s.getNetworkInfo)
 	mux.HandleFunc("/getZone", s.getZone)
-	mux.HandleFunc("/name", s.postName)
-	mux.HandleFunc("/key", s.postKey)
-	mux.HandleFunc("/select", s.postSelect)
-	mux.HandleFunc("/storePreset", s.postStorePreset)
-	mux.HandleFunc("/removePreset", s.postRemovePreset)
-	mux.HandleFunc("/setMargeAccount", s.postMargeAccount)
-	mux.HandleFunc("/setZone", s.postSetZone)
-	mux.HandleFunc("/addZoneSlave", s.postAddZoneSlave)
-	mux.HandleFunc("/removeZoneSlave", s.postRemoveZoneSlave)
+	// These endpoints mutate state; the real speaker only accepts them over POST and
+	// returns N/A for GET, so reject other methods to mirror that.
+	mux.HandleFunc("/name", postOnly(s.postName))
+	mux.HandleFunc("/key", postOnly(s.postKey))
+	mux.HandleFunc("/select", postOnly(s.postSelect))
+	mux.HandleFunc("/storePreset", postOnly(s.postStorePreset))
+	mux.HandleFunc("/removePreset", postOnly(s.postRemovePreset))
+	mux.HandleFunc("/setMargeAccount", postOnly(s.postMargeAccount))
+	mux.HandleFunc("/setZone", postOnly(s.postSetZone))
+	mux.HandleFunc("/addZoneSlave", postOnly(s.postAddZoneSlave))
+	mux.HandleFunc("/removeZoneSlave", postOnly(s.postRemoveZoneSlave))
 	return mux
+}
+
+// postOnly rejects non-POST requests with 405, as the real speaker does for its
+// state-changing endpoints.
+func postOnly(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h(w, r)
+	}
 }
 
 // ServeCLI runs the :17000 diagnostic CLI on ln until ln is closed. The only command
@@ -182,7 +216,8 @@ func (s *Speaker) getNowPlaying(w http.ResponseWriter, _ *http.Request) {
 	writeXML(w, fmt.Sprintf(`<nowPlaying deviceID="%s" source="%s">`+
 		`<ContentItem source="%s" type="stationurl" location="%s" sourceAccount="" isPresetable="true"><itemName>%s</itemName></ContentItem>`+
 		`<track>%s</track><artist>%s</artist><stationName>%s</stationName>`+
-		`<art artImageStatus="IMAGE_PRESENT">%s</art><playStatus>%s</playStatus></nowPlaying>`,
+		`<art artImageStatus="IMAGE_PRESENT">%s</art><playStatus>%s</playStatus>`+
+		`<streamType>RADIO_STREAMING</streamType></nowPlaying>`,
 		esc(s.DeviceID), esc(s.source), esc(s.source), esc(s.location), esc(s.station),
 		esc(s.track), esc(s.artist), esc(s.station), esc(s.art), esc(s.playStatus)))
 }
@@ -210,6 +245,75 @@ func (s *Speaker) getBassCaps(w http.ResponseWriter, _ *http.Request) {
 	defer s.mu.Unlock()
 	writeXML(w, fmt.Sprintf(`<bassCapabilities deviceID="%s"><bassAvailable>true</bassAvailable><bassMin>%d</bassMin><bassMax>%d</bassMax><bassDefault>%d</bassDefault></bassCapabilities>`,
 		esc(s.DeviceID), s.bassMin, s.bassMax, s.bassDefault))
+}
+
+// toneHandler serves /audioproducttonecontrols: GET reports bass + treble with their
+// ranges; POST applies any field present (the client only sends treble here).
+func (s *Speaker) toneHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var t struct {
+			Bass *struct {
+				Value int `xml:"value,attr"`
+			} `xml:"bass"`
+			Treble *struct {
+				Value int `xml:"value,attr"`
+			} `xml:"treble"`
+		}
+		if !decode(w, r, &t) {
+			return
+		}
+		s.mu.Lock()
+		if t.Bass != nil {
+			s.bassTarget, s.bassActual = clamp(t.Bass.Value, s.bassMin, s.bassMax), clamp(t.Bass.Value, s.bassMin, s.bassMax)
+		}
+		if t.Treble != nil {
+			s.trebleTarget = clamp(t.Treble.Value, s.trebleMin, s.trebleMax)
+		}
+		s.mu.Unlock()
+		writeXML(w, "<status>/audioproducttonecontrols</status>")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	writeXML(w, fmt.Sprintf(`<audioproducttonecontrols>`+
+		`<bass value="%d" minValue="%d" maxValue="%d" step="1"/>`+
+		`<treble value="%d" minValue="%d" maxValue="%d" step="%d"/>`+
+		`</audioproducttonecontrols>`,
+		s.bassTarget, s.bassMin, s.bassMax,
+		s.trebleTarget, s.trebleMin, s.trebleMax, s.trebleStep))
+}
+
+// systemTimeoutHandler serves /systemtimeout: GET reports the power-saving flag, POST
+// sets it. With power-saving off the Wi-Fi radio stays awake in standby.
+func (s *Speaker) systemTimeoutHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var t struct {
+			PowerSaving *bool `xml:"powersaving_enabled"`
+		}
+		if !decode(w, r, &t) {
+			return
+		}
+		if t.PowerSaving != nil {
+			s.mu.Lock()
+			s.powerSaving = *t.PowerSaving
+			s.mu.Unlock()
+		}
+		writeXML(w, "<status>/systemtimeout</status>")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	writeXML(w, fmt.Sprintf(`<systemtimeout><powersaving_enabled>%t</powersaving_enabled></systemtimeout>`, s.powerSaving))
+}
+
+// getNetworkInfo serves /networkInfo with a single connected Wi-Fi interface.
+func (s *Speaker) getNetworkInfo(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	writeXML(w, fmt.Sprintf(`<networkInfo wifiProfileCount="1"><interfaces>`+
+		`<interface type="WIFI_INTERFACE" name="wlan0" ssid="%s" signal="%s" ipAddress="%s" state="NETWORK_WIFI_CONNECTED"/>`+
+		`</interfaces></networkInfo>`,
+		esc(s.wifiSSID), esc(s.wifiSignal), esc(s.IP)))
 }
 
 func (s *Speaker) getZone(w http.ResponseWriter, _ *http.Request) {
@@ -328,7 +432,34 @@ func (s *Speaker) applyKey(key string) {
 			s.lastSource = s.source
 			s.source = "STANDBY"
 		}
+	default:
+		// PRESET_1..PRESET_6: play the station stored on that slot, like the
+		// firmware does when a preset button is pressed.
+		if slot, ok := presetSlot(key); ok {
+			if p, exists := s.presets[slot]; exists {
+				s.source = orDefault(p.Source, "TUNEIN")
+				s.lastSource = s.source
+				s.location = p.Location
+				s.station = p.Name
+				s.art = p.Art
+				s.track, s.artist = "", ""
+				s.playStatus = "PLAY_STATE"
+			}
+		}
 	}
+}
+
+// presetSlot parses a "PRESET_<n>" key into its 1..6 slot number.
+func presetSlot(key string) (int, bool) {
+	rest, ok := strings.CutPrefix(key, "PRESET_")
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil || n < 1 || n > 6 {
+		return 0, false
+	}
+	return n, true
 }
 
 func (s *Speaker) postSelect(w http.ResponseWriter, r *http.Request) {
@@ -413,7 +544,11 @@ func (s *Speaker) postAddZoneSlave(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	if s.zoneMaster == "" {
+		// Creating the zone fresh: seed it with the master first, as getZone and
+		// setZone both list the master ahead of the slaves.
 		s.zoneMaster = z.Master
+		s.zoneSenders = z.Sender
+		s.zoneMembers = append(s.zoneMembers, member{deviceID: z.Master, ip: z.Sender})
 	}
 	for _, m := range z.members() {
 		if !s.hasMember(m.deviceID) {

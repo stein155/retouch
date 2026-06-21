@@ -1,9 +1,11 @@
 package speaker
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -90,5 +92,88 @@ func TestNetworkInfoPrefersWifi(t *testing.T) {
 	}
 	if n.Type != "wifi" || n.SSID != "HomeNet" || n.Signal != "good" || n.IP != "192.168.2.7" {
 		t.Errorf("network parsed wrong: %+v", n)
+	}
+}
+
+// recordingServer captures the last POST path+body and answers 200, so write
+// methods can be checked for the exact body the speaker expects.
+func recordingServer(t *testing.T, lastPath, lastBody *string) *Client {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		*lastPath = r.URL.Path
+		*lastBody = string(b)
+		w.WriteHeader(200)
+	}))
+	t.Cleanup(ts.Close)
+	u, _ := url.Parse(ts.URL)
+	c := New(u.Hostname())
+	c.apiPort = u.Port()
+	return c
+}
+
+func TestSetWifiOptimizedInvertsPowerSaving(t *testing.T) {
+	var path, body string
+	c := recordingServer(t, &path, &body)
+	// Optimized => Wi-Fi awake => power-saving OFF.
+	if err := c.SetWifiOptimized(ctx(), true); err != nil {
+		t.Fatal(err)
+	}
+	if path != "/systemtimeout" || !strings.Contains(body, "<powersaving_enabled>false</powersaving_enabled>") {
+		t.Errorf("optimized=true sent path=%q body=%q; want powersaving false", path, body)
+	}
+	if err := c.SetWifiOptimized(ctx(), false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, "<powersaving_enabled>true</powersaving_enabled>") {
+		t.Errorf("optimized=false body=%q; want powersaving true", body)
+	}
+}
+
+func TestSetTrebleBody(t *testing.T) {
+	var path, body string
+	c := recordingServer(t, &path, &body)
+	if err := c.SetTreble(ctx(), 40); err != nil {
+		t.Fatal(err)
+	}
+	if path != "/audioproducttonecontrols" || !strings.Contains(body, `<treble value="40"/>`) {
+		t.Errorf("SetTreble sent path=%q body=%q", path, body)
+	}
+}
+
+func TestDeviceSettingsErrorOnBadStatus(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", 500)
+	}))
+	t.Cleanup(ts.Close)
+	u, _ := url.Parse(ts.URL)
+	c := New(u.Hostname())
+	c.apiPort = u.Port()
+
+	if _, err := c.Treble(ctx()); err == nil {
+		t.Error("Treble should error on 500")
+	}
+	if _, err := c.WifiOptimized(ctx()); err == nil {
+		t.Error("WifiOptimized should error on 500")
+	}
+	if _, err := c.NetworkInfo(ctx()); err == nil {
+		t.Error("NetworkInfo should error on 500")
+	}
+}
+
+func TestDeviceSettingsErrorOnMalformedXML(t *testing.T) {
+	c := stubClient(t, map[string]string{
+		"/audioproducttonecontrols": `}{ not xml`,
+		"/systemtimeout":            `}{ not xml`,
+		"/networkInfo":              `}{ not xml`,
+	})
+	if _, err := c.Treble(ctx()); err == nil {
+		t.Error("Treble should error on malformed XML")
+	}
+	if _, err := c.WifiOptimized(ctx()); err == nil {
+		t.Error("WifiOptimized should error on malformed XML")
+	}
+	if _, err := c.NetworkInfo(ctx()); err == nil {
+		t.Error("NetworkInfo should error on malformed XML")
 	}
 }
