@@ -81,27 +81,27 @@ jobs:
       - name: Checksums
         run: sha256sum retouch-armv7l > SHA256SUMS
 
-      # GitHub's Releases API returns 403 when asked to create a new tag that
-      # targets a bare fork-PR commit (the SHA only exists via refs/pull/N/head,
-      # not in any branch). We can't push the commit to a branch first either:
-      # GITHUB_TOKEN is a GitHub App token and is refused when a pushed branch
-      # would add/modify a `.github/workflows/*` file (it lacks the `workflows`
-      # scope, which App tokens can't be granted) — so any PR that touches a
-      # workflow breaks the push. Instead we create the tag ref directly via the
-      # Git Refs API, which points the tag at the existing PR-head commit without
-      # pushing to a branch. Create-or-update so re-running `/beta` re-tags the
-      # latest commit.
-      - name: Tag the PR commit for the release
-        run: |
-          gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
-            -f ref="refs/tags/$TAG" -f sha="${{ steps.pr.outputs.sha }}" \
-          || gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" \
-            -f sha="${{ steps.pr.outputs.sha }}" -F force=true
-
+      # The tag we create must NOT point at the PR-head commit. GITHUB_TOKEN is a
+      # GitHub App token, and GitHub refuses any ref it creates — branch OR tag,
+      # via push, the Releases API, or the Git Refs API — when that ref points at
+      # a commit which adds or modifies a `.github/workflows/*` file (App tokens
+      # can't hold the `workflows` scope). A PR that touches the beta workflow
+      # itself therefore can never be tagged at its head, which is exactly what
+      # broke every previous approach with a 403.
+      #
+      # The tag's target commit is irrelevant to installs: the app resolves a
+      # beta purely by its `beta-pr-<n>` tag name and downloads the attached
+      # assets (see internal/web/web.go). So we anchor the tag to the base repo's
+      # current default-branch commit (github.sha) — already on a branch and
+      # introducing no workflow change, hence always taggable — while the assets
+      # are built from the PR head checked out above. action-gh-release creates
+      # the tag at target_commitish on first run and just refreshes the assets on
+      # re-runs, so `/beta` stays idempotent.
       - name: Publish beta prerelease
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
           name: "PR #${{ env.PR }}: ${{ steps.pr.outputs.title }}"
           body: |
             Beta of PR #${{ env.PR }} (${{ steps.pr.outputs.title }})
