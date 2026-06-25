@@ -27,6 +27,8 @@ beforeEach(() => {
   // HomePage + SettingsSheet read settings.
   api.getSettings.mockResolvedValue({ name: 'Kitchen', model: 'ST20', language: 'en', host: 'kitchen.local', bass: { actual: 0, min: -9, max: 0, default: 0 } });
   api.getVersion.mockResolvedValue({ version: '1.2.3', updatable: false });
+  // SettingsSheet also fetches beta builds on open.
+  api.getReleases.mockResolvedValue({ current: '1.2.3', updatable: false, stable: null, betas: [] });
   api.findSpeakers.mockResolvedValue([]);
   api.saveSettings.mockResolvedValue(null);
   api.playPreset.mockResolvedValue(null);
