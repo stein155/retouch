@@ -28,9 +28,9 @@ PLACE="http://rt.invalid"
 MARGE_BASE="http://127.0.0.1:9080"  # on-speaker stub; where we repoint the cloud URLs
 
 API_PORT=8090                   # speakers answer here; used only to find them
-APP_PORT=8000                   # ReTouch's web app; also reachable on :80 via redirect
+APP_PORT=8000                   # ReTouch's web app; reachable on :80 and :8080 via redirect
 SETUP_PORT=17000                # where we hand the speaker its setup instructions
-APP_URL_PORT=8080               # where ReTouch is exposed after install
+APP_URL_PORT=80                 # the port we show + probe (:8080 stays up for discovery)
 
 # ---- pretty output ---------------------------------------------------------
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -461,7 +461,8 @@ say "  ${DIM}$(msg restart_once)${R}"
 say ""
 
 send() { printf '%s\n' "$1" | nc -w 3 "$IP" "$SETUP_PORT" >/dev/null 2>&1; }
-URL="http://$IP:$APP_URL_PORT"
+# Default HTTP port shows as a bare host (http://<ip>); any other port is appended.
+if [ "$APP_URL_PORT" = 80 ]; then URL="http://$IP"; else URL="http://$IP:$APP_URL_PORT"; fi
 was_up=0
 curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1 && was_up=1
 
@@ -591,8 +592,8 @@ fi
 step_clear
 
 # Step 2: wait for ReTouch to come back online on the target release. app_ready keys on
-# /api/version, so an old binary can never look updated. ReTouch is exposed on exactly
-# one uniform port — :8080 — on every speaker, so that is the only URL we wait for.
+# /api/version, so an old binary can never look updated. ReTouch is exposed on :80 (and
+# :8080), both redirecting to the app port, so http://<speaker> is the URL we wait for.
 step_start "$(msg waiting_online)" "$(msg waiting_online_hint)"
 wait_ready
 

@@ -77,13 +77,18 @@ is self-contained. Rebuild the frontend whenever you change anything under
 
 ## How it runs on the speaker
 
-- The web app listens on `:8000`, but is exposed on exactly one uniform port — `:8080` —
-  via a boot-time `iptables` redirect, while a `raw`-table rule hides direct LAN access to
-  `:8000` (loopback stays open for the agent). `:8080` is the only port that works on every
-  speaker: on the dual-processor SoundTouch 20/30 the LAN `:80` is owned by a second
-  processor (can't be redirected) and `:8000` is firewalled, but `:8080` is forwarded to the
-  main processor. Bose's own setup servers are left untouched. The cloud-API emulation
-  listens on a loopback port.
+- The web app listens on `:8000` and is exposed on the LAN via boot-time `iptables`
+  redirects: both `:80` (the default HTTP port, so the URL is just `http://<speaker>`) and
+  `:8080` (kept for backward-compat and for multiroom discovery, which probes `:8080`)
+  REDIRECT to `:8000`, while a `raw`-table rule hides direct LAN access to `:8000` (loopback
+  stays open for the agent). The `:80` redirect is scoped to non-loopback (`! -i lo`) so the
+  speaker's own BoseApp web server on `localhost:80` keeps working — an earlier version
+  redirected loopback `:80` too and broke BoseApp's internal calls, which is why the project
+  had wrongly concluded `:80` "couldn't be redirected" on the SoundTouch 20/30. (The 20/30 is
+  a single TI AM335x Linux host — its Wi-Fi is a WiLink8 SDIO chip and its LPM is an STM32F0
+  on a UART; neither is a second networked processor serving `:80`.) `:8000` itself stays
+  firewalled from the LAN. Bose's own setup servers are otherwise left untouched. The
+  cloud-API emulation listens on a loopback port.
 - The speaker's service URLs are pointed at the on-speaker emulation; the factory
   configuration is backed up first so it can be fully restored.
 - An autostart entry relaunches ReTouch on every boot; on boot it re-checks in so the

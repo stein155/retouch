@@ -65,7 +65,7 @@ curl -fsSL https://raw.githubusercontent.com/stein155/retouch/main/install/insta
 
 It finds the Bose speakers on your network, lets you pick one (or type the address
 yourself), sets ReTouch up over the air, and prints a link like
-`http://192.168.1.42:8080`. The speaker restarts once and is back in a minute or two.
+`http://192.168.1.42`. The speaker restarts once and is back in a minute or two.
 
 > Already know the address? Skip the search:
 > `curl -fsSL .../install.sh | sh -s -- 192.168.1.42`

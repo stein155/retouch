@@ -53,7 +53,7 @@ restart_agent() {
 }
 
 # write_start_script writes the boot launcher. It binds the web UI on $WEB_LISTEN and
-# then makes a BEST-EFFORT attempt to expose it on exactly one uniform port, :8080,
+# then makes a BEST-EFFORT attempt to expose it on :80 (and :8080) via iptables redirects,
 # while hiding the raw $WEB_LISTEN port from the LAN — WITHOUT touching Bose's own setup
 # servers. If the rules can't be installed, the UI is still served on $WEB_LISTEN, so it
 # is never lost. iptables is volatile, so this re-applies on every boot.
@@ -66,18 +66,28 @@ APP_PORT=${WEB_LISTEN#:}
 
 log() { echo "[retouch-start] \$*" >>"\$LOG" 2>&1; }
 
-# expose_8080 makes ReTouch reachable on EXACTLY ONE port: :8080 (the uniform port that
-# works on every speaker — including the dual-processor SoundTouch 20/30, where LAN :80
-# is owned by a second processor and can't be redirected, and :8000 is firewalled). It
-# redirects inbound :8080 to the app port, and then DROPS direct LAN access to the app
-# port itself so the UI is NOT also exposed on :8000. Loopback access to the app port is
-# preserved (the speaker/agent use it locally). The raw table runs before nat, so the
-# drop only hits direct :8000 traffic, never the :8080-redirected flow. Best-effort and
+# expose_8080 makes ReTouch reachable on the LAN. It REDIRECTs both :80 (the default HTTP
+# port, so the URL is just http://<speaker>) and :8080 (kept for backward-compat and for
+# multiroom discovery, which probes :8080) to the app port, then DROPs direct LAN access to
+# the app port so the UI is NOT also exposed on :8000. The :80 redirect is scoped to
+# non-loopback (! -i lo) so the speaker's own BoseApp web server on localhost:80 keeps
+# working — an earlier version redirected loopback :80 too and broke BoseApp's internal
+# calls, which is why :80 had wrongly been deemed un-redirectable on the SoundTouch 20/30
+# (a single TI AM335x Linux host, not a dual-processor design). Loopback access to the app
+# port is preserved (the speaker/agent use it locally). The raw table runs before nat, so
+# the drop only hits direct :8000 traffic, never a redirected flow. Best-effort and
 # reversible (flushes on reboot; if the rules can't be set, the UI stays on :APP_PORT).
 expose_8080() {
 	command -v iptables >/dev/null 2>&1 || { log "no iptables; UI on :\$APP_PORT only"; return 0; }
-	# clear any :80 redirect left by an older version (we expose ONLY :8080 now)
+	# :80 -> app port, non-loopback only (keep BoseApp's own localhost:80 intact)
+	while iptables -t nat -D PREROUTING ! -i lo -p tcp --dport 80 -j REDIRECT --to-ports "\$APP_PORT" 2>/dev/null; do :; done
+	# also drop the older loopback-inclusive :80 rule from earlier versions, if present
 	while iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports "\$APP_PORT" 2>/dev/null; do :; done
+	if iptables -t nat -I PREROUTING 1 ! -i lo -p tcp --dport 80 -j REDIRECT --to-ports "\$APP_PORT" 2>>"\$LOG"; then
+		log "redirected :80 -> :\$APP_PORT (non-loopback)"
+	else
+		log "could not redirect :80 (UI still on :8080/:\$APP_PORT)"
+	fi
 	iptables -t nat -D PREROUTING -p tcp --dport 8080 -j REDIRECT --to-ports "\$APP_PORT" 2>/dev/null
 	if iptables -t nat -I PREROUTING 1 -p tcp --dport 8080 -j REDIRECT --to-ports "\$APP_PORT" 2>>"\$LOG"; then
 		log "redirected :8080 -> :\$APP_PORT"
