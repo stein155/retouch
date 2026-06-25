@@ -52,6 +52,7 @@ export const I18N = {
     homekitCode: 'Setup code',
     homekitCodeHint: 'In the Home app, tap Add Accessory and enter this code.',
     homekitCopyCode: 'Copy setup code',
+    homekitReset: "Can't find it? Reset pairing",
     copy: 'Copy', copied: 'Copied',
   },
   nl: {
@@ -89,6 +90,7 @@ export const I18N = {
     homekitCode: 'Koppelcode',
     homekitCodeHint: 'Tik in de Home-app op Accessoire toevoegen en voer deze code in.',
     homekitCopyCode: 'Koppelcode kopiëren',
+    homekitReset: 'Kun je hem niet vinden? Koppeling resetten',
     copy: 'Kopiëren', copied: 'Gekopieerd',
   },
   de: {
@@ -126,6 +128,7 @@ export const I18N = {
     homekitCode: 'Code',
     homekitCodeHint: 'Tippe in der Home-App auf „Gerät hinzufügen“ und gib diesen Code ein.',
     homekitCopyCode: 'Code kopieren',
+    homekitReset: 'Nicht auffindbar? Kopplung zurücksetzen',
     copy: 'Kopieren', copied: 'Kopiert',
   },
   fr: {
@@ -163,6 +166,7 @@ export const I18N = {
     homekitCode: 'Code',
     homekitCodeHint: 'Dans l’app Maison, touchez « Ajouter un accessoire » et saisissez ce code.',
     homekitCopyCode: 'Copier le code',
+    homekitReset: 'Introuvable ? Réinitialiser l’association',
     copy: 'Copier', copied: 'Copié',
   },
   es: {
@@ -200,6 +204,7 @@ export const I18N = {
     homekitCode: 'Código',
     homekitCodeHint: 'En la app Casa, toca «Añadir accesorio» e introduce este código.',
     homekitCopyCode: 'Copiar código',
+    homekitReset: '¿No lo encuentras? Restablecer emparejamiento',
     copy: 'Copiar', copied: 'Copiado',
   },
   af: {
@@ -237,6 +242,7 @@ export const I18N = {
     homekitCode: 'Kode',
     homekitCodeHint: 'Tik in die Home-app op „Voeg toebehoorsel by“ en voer hierdie kode in.',
     homekitCopyCode: 'Kopieer kode',
+    homekitReset: 'Kry jy dit nie? Stel koppeling terug',
     copy: 'Kopieer', copied: 'Gekopieer',
   },
 };

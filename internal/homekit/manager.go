@@ -2,6 +2,7 @@ package homekit
 
 import (
 	"context"
+	"os"
 	"sync"
 
 	"log/slog"
@@ -22,6 +23,7 @@ type Manager struct {
 
 	mu      sync.Mutex
 	cancel  context.CancelFunc // non-nil while the bridge is running
+	done    chan struct{}      // closed when the running bridge's goroutine exits
 	running bool
 }
 
@@ -41,34 +43,54 @@ func (m *Manager) Start() {
 		return
 	}
 	ctx, cancel := context.WithCancel(m.parent)
+	done := make(chan struct{})
 	m.cancel = cancel
+	m.done = done
 	m.running = true
 	go func() {
+		defer close(done)
 		if err := Run(ctx, m.bc, m.info, m.cfg, m.log); err != nil && ctx.Err() == nil {
 			m.log.Error("homekit bridge stopped", "err", err)
 		}
-		m.mu.Lock()
-		// Only clear state if this is still the active run (Stop may have already
-		// swapped in a newer one).
-		if m.cancel != nil {
-			m.running = false
-			m.cancel = nil
-		}
-		m.mu.Unlock()
 	}()
 }
 
-// Stop tears the bridge down if it's running. Pairing state persists on disk, so a
-// later Start re-publishes the same accessory without re-pairing.
+// Stop tears the bridge down if it's running and waits for the HAP server to
+// release its port. Pairing state persists on disk, so a later Start re-publishes
+// the same accessory without re-pairing.
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	cancel := m.cancel
+	done := m.done
 	m.cancel = nil
+	m.done = nil
 	m.running = false
 	m.mu.Unlock()
 	if cancel != nil {
 		cancel()
+		<-done // wait for ListenAndServe to return so the port is free
 	}
+}
+
+// Reset clears the HomeKit pairing state and re-publishes the accessory as
+// unpaired, so it becomes discoverable in the Home app again. Use it when a pairing
+// was removed on the controller side (or never completed) and the accessory is left
+// advertising as already-paired, which hides it from "Add Accessory".
+func (m *Manager) Reset() error {
+	m.mu.Lock()
+	wasRunning := m.running
+	m.mu.Unlock()
+
+	m.Stop() // waits for shutdown so the store files aren't in use
+	if m.cfg.StorageDir != "" {
+		if err := os.RemoveAll(m.cfg.StorageDir); err != nil {
+			return err
+		}
+	}
+	if wasRunning {
+		m.Start()
+	}
+	return nil
 }
 
 // Enabled reports whether the bridge is currently running.

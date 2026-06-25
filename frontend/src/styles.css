@@ -1066,6 +1066,11 @@ input  { font: inherit; color: inherit; user-select: text; -webkit-user-select: 
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .hk-code-copy { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--accent, #c0683c); min-width: 56px; text-align: right; }
+.hk-reset {
+  margin-top: 6px; background: none; border: none; cursor: pointer;
+  font-size: 13px; font-weight: 600; color: var(--ink-3); text-decoration: underline;
+}
+.hk-reset:disabled { opacity: 0.5; cursor: default; }
 .update-btn {
   margin-top: 12px; width: 100%;
   display: flex; align-items: center; justify-content: center; gap: 9px;

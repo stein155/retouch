@@ -159,6 +159,7 @@ type HomeKitController interface {
 	Code() string
 	Start()
 	Stop()
+	Reset() error
 }
 
 // SetHomeKit wires the HomeKit bridge so GET/POST /api/homekit can report and
@@ -196,6 +197,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/multiroom/ungroup", s.multiroomUngroup)
 	mux.HandleFunc("GET /api/homekit", s.homeKitInfo)
 	mux.HandleFunc("POST /api/homekit", s.setHomeKit)
+	mux.HandleFunc("POST /api/homekit/reset", s.resetHomeKit)
 	mux.HandleFunc("GET /api/version", s.versionInfo)
 	mux.HandleFunc("GET /api/releases", s.releases)
 	mux.HandleFunc("GET /api/debug", s.debugBundle)
@@ -977,6 +979,25 @@ func (s *Server) setHomeKit(w http.ResponseWriter, r *http.Request) {
 		s.homekit.Start()
 	} else {
 		s.homekit.Stop()
+	}
+	writeJSON(w, 200, map[string]any{
+		"enabled": s.homekit.Enabled(),
+		"name":    s.homekit.Name(),
+		"code":    s.homekit.Code(),
+	})
+}
+
+// resetHomeKit clears the HomeKit pairing state so the accessory becomes
+// discoverable again. Used when a pairing was removed in the Home app (or never
+// finished) and the accessory is left advertising as already-paired.
+func (s *Server) resetHomeKit(w http.ResponseWriter, r *http.Request) {
+	if s.homekit == nil {
+		http.Error(w, "homekit not supported", http.StatusNotImplemented)
+		return
+	}
+	if err := s.homekit.Reset(); err != nil {
+		s.fail(w, "reset homekit pairing failed", err)
+		return
 	}
 	writeJSON(w, 200, map[string]any{
 		"enabled": s.homekit.Enabled(),

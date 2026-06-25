@@ -201,8 +201,13 @@ export async function getHomeKit() {
 
 // setHomeKit turns the bridge on or off. Returns { enabled, name, code }.
 export async function setHomeKit(enabled) {
-  const r = await send('/api/homekit', 'POST', { enabled });
-  return r.body;
+  return send('/api/homekit', 'POST', { enabled });
+}
+
+// resetHomeKit clears the pairing so the accessory shows up again in the Home app.
+// Returns { enabled, name, code }.
+export async function resetHomeKit() {
+  return send('/api/homekit/reset', 'POST');
 }
 
 // getVersion returns { version, updatable }. updatable is true only on an installed

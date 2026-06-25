@@ -3,7 +3,7 @@ import { Icon } from './Icons';
 import { useI18n, LANGS } from '../lib/i18n';
 import {
   getSettings, saveSettings, getVersion, getReleases, startUpdate,
-  findSpeakers, groupSpeaker, ungroupSpeaker, getHomeKit, setHomeKit,
+  findSpeakers, groupSpeaker, ungroupSpeaker, getHomeKit, setHomeKit, resetHomeKit,
 } from '../lib/api';
 
 const cx = (...a) => a.filter(Boolean).join(' ');
@@ -160,6 +160,15 @@ function HomeKitSection() {
     try { await navigator.clipboard.writeText(hk.code); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard unavailable */ }
   };
 
+  const reset = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await resetHomeKit();
+      if (res) setHk((s) => ({ ...s, ...res }));
+    } catch { /* leave state as-is */ } finally { setBusy(false); }
+  };
+
   const toggle = async () => {
     if (busy) return;
     const want = !hk.enabled;
@@ -202,6 +211,9 @@ function HomeKitSection() {
             <span className="hk-code-copy">{copied ? t('copied') : t('copy')}</span>
           </button>
           <div className="field-hint">{t('homekitCodeHint')}</div>
+          <button type="button" className="hk-reset" onClick={reset} disabled={busy}>
+            {t('homekitReset')}
+          </button>
         </>
       ) : (
         <div className="field-hint">{t('homekitHint')}</div>
