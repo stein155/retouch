@@ -83,17 +83,25 @@ jobs:
 
       # GitHub's Releases API returns 403 when asked to create a new tag that
       # targets a bare fork-PR commit (the SHA only exists via refs/pull/N/head,
-      # not in any branch). Pushing the commit to a short-lived branch first
-      # gives the API a proper branch ref to target; we delete the branch once
-      # the release (and its tag) has been created.
-      - name: Push PR commit to temp branch for release targeting
-        run: git push origin "HEAD:refs/heads/${TAG}-build"
+      # not in any branch). We can't push the commit to a branch first either:
+      # GITHUB_TOKEN is a GitHub App token and is refused when a pushed branch
+      # would add/modify a `.github/workflows/*` file (it lacks the `workflows`
+      # scope, which App tokens can't be granted) — so any PR that touches a
+      # workflow breaks the push. Instead we create the tag ref directly via the
+      # Git Refs API, which points the tag at the existing PR-head commit without
+      # pushing to a branch. Create-or-update so re-running `/beta` re-tags the
+      # latest commit.
+      - name: Tag the PR commit for the release
+        run: |
+          gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/$TAG" -f sha="${{ steps.pr.outputs.sha }}" \
+          || gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" \
+            -f sha="${{ steps.pr.outputs.sha }}" -F force=true
 
       - name: Publish beta prerelease
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.TAG }}
-          target_commitish: ${{ env.TAG }}-build
           name: "PR #${{ env.PR }}: ${{ steps.pr.outputs.title }}"
           body: |
             Beta of PR #${{ env.PR }} (${{ steps.pr.outputs.title }})
@@ -106,10 +114,6 @@ jobs:
           files: |
             retouch-armv7l
             SHA256SUMS
-
-      - name: Delete temp branch
-        if: always()
-        run: git push origin --delete "refs/heads/${TAG}-build" || true
 
       - name: Comment install hint
         run: |
