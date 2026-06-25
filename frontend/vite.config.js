@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -12,6 +13,9 @@ const STLOCAL = process.env.STLOCAL_URL || 'http://localhost'
 export default defineConfig({
   plugins: [react()],
   base: './',
+  // Use the automatic JSX runtime everywhere (incl. Vitest's transform) so test
+  // files need not import React explicitly.
+  esbuild: { jsx: 'automatic' },
   build: {
     // Build straight into the Go embed dir (internal/web/dist) so `go build`
     // always bundles the latest UI.
@@ -23,5 +27,12 @@ export default defineConfig({
     proxy: {
       '/api': { target: STLOCAL, changeOrigin: true },
     },
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: './src/test/setup.js',
+    css: true,
+    testTimeout: 15000,
   },
 })

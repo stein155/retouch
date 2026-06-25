@@ -8,13 +8,13 @@ import (
 
 func TestSlug(t *testing.T) {
 	cases := map[string]string{
-		"Keuken":            "keuken",
-		"Living Room":       "living-room",
+		"Keuken":              "keuken",
+		"Living Room":         "living-room",
 		"  Bose  SoundTouch ": "bose-soundtouch",
-		"Café_2":            "caf-2",
-		"---":               "retouch",
-		"":                  "retouch",
-		"Bad/Chars!#":       "badchars",
+		"Café_2":              "caf-2",
+		"---":                 "retouch",
+		"":                    "retouch",
+		"Bad/Chars!#":         "badchars",
 	}
 	for in, want := range cases {
 		if got := slug(in); got != want {

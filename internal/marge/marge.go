@@ -245,8 +245,11 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveFull(w http.ResponseWriter, r *http.Request) {
 	body := splicePresets(s.accountFull.body, s.presets.renderInner())
-	sum := sha256.Sum256(body)
-	etag := fmt.Sprintf("%x", sum[:8])
+	// The spliced body carries per-render preset timestamps, so hashing it would
+	// churn the ETag every request and the firmware's conditional GET would never
+	// hit. The static /full doc is fixed at construction and the only varying part
+	// is the presets, so a stable tag = full-doc etag + presets seq.
+	etag := s.accountFull.etag + "-" + s.presets.tag()
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
 		return

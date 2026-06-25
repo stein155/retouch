@@ -16,13 +16,22 @@ import (
 
 // Client controls one speaker.
 type Client struct {
-	host string
-	http *http.Client
+	host    string
+	apiPort string // SoundTouch REST API port (8090 on a real speaker)
+	cliPort string // diagnostic CLI port (17000 on a real speaker)
+	http    *http.Client
 }
 
-// New returns a Client for the given host (speaker IP, or 127.0.0.1 on-speaker).
+// New returns a Client for the given host. host is the speaker IP (or 127.0.0.1
+// on-speaker); it may include a REST API port ("127.0.0.1:9090") for off-speaker
+// testing, otherwise the firmware's default 8090 is used. The diagnostic CLI port
+// is always 17000 on real hardware.
 func New(host string) *Client {
-	return &Client{host: host, http: &http.Client{Timeout: 4 * time.Second}}
+	apiPort := "8090"
+	if h, p, err := net.SplitHostPort(host); err == nil {
+		host, apiPort = h, p
+	}
+	return &Client{host: host, apiPort: apiPort, cliPort: "17000", http: &http.Client{Timeout: 4 * time.Second}}
 }
 
 // Info is a trimmed view of /info: the speaker's identity. Used to fill the
@@ -183,7 +192,7 @@ func (c *Client) Presets(ctx context.Context) ([]Preset, error) {
 		out = append(out, Preset{
 			Slot:      p.ID,
 			Name:      p.CI.Name,
-			StationID: p.CI.Location[strings.LastIndex(p.CI.Location, "/")+1:],
+			StationID: stationIDFromLocation(p.CI.Location),
 			Location:  p.CI.Location,
 			Logo:      p.CI.Art,
 		})
@@ -235,6 +244,150 @@ func (c *Client) Bass(ctx context.Context) (*Bass, error) {
 // SetBass sets the bass level via /bass (clamped to the capability range).
 func (c *Client) SetBass(ctx context.Context, level int) error {
 	return c.post(ctx, "/bass", fmt.Sprintf("<bass>%d</bass>", level))
+}
+
+// Tone is a tone control (treble) value and its capability range, read from
+// /audioproducttonecontrols. Step is the increment the speaker accepts.
+type Tone struct {
+	Value int `json:"value"`
+	Min   int `json:"min"`
+	Max   int `json:"max"`
+	Step  int `json:"step"`
+}
+
+// Treble reads the treble control via /audioproducttonecontrols. This endpoint is
+// capability-gated: speakers without tone controls (most SoundTouch models) do not
+// expose it, so the error here is the signal to hide the control in the UI.
+func (c *Client) Treble(ctx context.Context) (*Tone, error) {
+	body, err := c.get(ctx, "/audioproducttonecontrols")
+	if err != nil {
+		return nil, err
+	}
+	var x struct {
+		Treble struct {
+			Value int `xml:"value,attr"`
+			Min   int `xml:"minValue,attr"`
+			Max   int `xml:"maxValue,attr"`
+			Step  int `xml:"step,attr"`
+		} `xml:"treble"`
+	}
+	if err := xml.Unmarshal(body, &x); err != nil {
+		return nil, err
+	}
+	if x.Treble.Min == 0 && x.Treble.Max == 0 {
+		return nil, fmt.Errorf("speaker has no treble control")
+	}
+	t := &Tone{Value: x.Treble.Value, Min: x.Treble.Min, Max: x.Treble.Max, Step: x.Treble.Step}
+	if t.Step <= 0 {
+		t.Step = 1
+	}
+	return t, nil
+}
+
+// SetTreble sets the treble value via /audioproducttonecontrols (bass is left
+// untouched by omitting it from the request).
+func (c *Client) SetTreble(ctx context.Context, value int) error {
+	return c.post(ctx, "/audioproducttonecontrols",
+		fmt.Sprintf(`<audioproducttonecontrols><treble value="%d"/></audioproducttonecontrols>`, value))
+}
+
+// WifiOptimized reports whether the speaker keeps its Wi-Fi awake in standby
+// (power-saving disabled) via /systemtimeout. With Wi-Fi kept awake, AirPlay and
+// streaming wake the speaker instantly; with power-saving on, the radio sleeps to
+// save power and takes longer to respond. Returns an error when the speaker does
+// not expose the setting, which the UI uses to hide the toggle.
+func (c *Client) WifiOptimized(ctx context.Context) (bool, error) {
+	body, err := c.get(ctx, "/systemtimeout")
+	if err != nil {
+		return false, err
+	}
+	var x struct {
+		PowerSaving *bool `xml:"powersaving_enabled"`
+	}
+	if err := xml.Unmarshal(body, &x); err != nil {
+		return false, err
+	}
+	if x.PowerSaving == nil {
+		return false, fmt.Errorf("speaker has no power-saving setting")
+	}
+	// "Optimized" means power-saving is OFF, so the Wi-Fi radio stays awake.
+	return !*x.PowerSaving, nil
+}
+
+// SetWifiOptimized turns the streaming/AirPlay Wi-Fi optimization on or off by
+// toggling the speaker's power-saving the opposite way via /systemtimeout.
+func (c *Client) SetWifiOptimized(ctx context.Context, optimized bool) error {
+	return c.post(ctx, "/systemtimeout",
+		fmt.Sprintf("<systemtimeout><powersaving_enabled>%t</powersaving_enabled></systemtimeout>", !optimized))
+}
+
+// Network is a compact, read-only view of the speaker's active network connection,
+// read from /networkInfo (the connected interface — Wi-Fi preferred).
+type Network struct {
+	Type   string `json:"type"`             // "wifi" or "ethernet"
+	SSID   string `json:"ssid,omitempty"`   // Wi-Fi network name
+	Signal string `json:"signal,omitempty"` // "excellent" | "good" | "fair" | "poor"
+	IP     string `json:"ip,omitempty"`     // current LAN address
+}
+
+// NetworkInfo reads /networkInfo and returns the active connection. It prefers a
+// connected Wi-Fi interface, then any interface carrying an IP address.
+func (c *Client) NetworkInfo(ctx context.Context) (*Network, error) {
+	body, err := c.get(ctx, "/networkInfo")
+	if err != nil {
+		return nil, err
+	}
+	var x struct {
+		Interfaces []struct {
+			Type   string `xml:"type,attr"`
+			SSID   string `xml:"ssid,attr"`
+			IP     string `xml:"ipAddress,attr"`
+			Signal string `xml:"signal,attr"`
+		} `xml:"interfaces>interface"`
+	}
+	if err := xml.Unmarshal(body, &x); err != nil {
+		return nil, err
+	}
+	var fallback *Network
+	for _, in := range x.Interfaces {
+		wifi := strings.Contains(strings.ToUpper(in.Type), "WIFI")
+		n := &Network{IP: in.IP, SSID: in.SSID}
+		if wifi {
+			n.Type = "wifi"
+			n.Signal = prettySignal(in.Signal)
+		} else {
+			n.Type = "ethernet"
+		}
+		if wifi && in.IP != "" {
+			return n, nil // prefer a connected Wi-Fi interface
+		}
+		if fallback == nil && in.IP != "" {
+			fallback = n
+		}
+	}
+	if fallback == nil {
+		return nil, fmt.Errorf("no active network interface")
+	}
+	return fallback, nil
+}
+
+// prettySignal turns the speaker's EXCELLENT_SIGNAL-style enum into a short token
+// the UI can localise; unknown values pass through lower-cased.
+func prettySignal(s string) string {
+	switch strings.ToUpper(s) {
+	case "EXCELLENT_SIGNAL":
+		return "excellent"
+	case "GOOD_SIGNAL":
+		return "good"
+	case "FAIR_SIGNAL", "MARGINAL_SIGNAL":
+		return "fair"
+	case "POOR_SIGNAL", "BAD_SIGNAL":
+		return "poor"
+	case "":
+		return ""
+	default:
+		return strings.ToLower(strings.TrimSuffix(s, "_SIGNAL"))
+	}
 }
 
 // StorePreset writes a native preset on the speaker (slot 1..6) via /storePreset,
@@ -447,13 +600,13 @@ func (c *Client) post(ctx context.Context, path, body string) error {
 }
 
 func (c *Client) urlFor(path string) string {
-	return fmt.Sprintf("http://%s:8090%s", c.host, path)
+	return fmt.Sprintf("http://%s:%s%s", c.host, c.apiPort, path)
 }
 
 // cli sends one command to the :17000 diagnostic CLI and discards the reply.
 func (c *Client) cli(ctx context.Context, cmd string) error {
 	d := net.Dialer{Timeout: 3 * time.Second}
-	conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort(c.host, "17000"))
+	conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort(c.host, c.cliPort))
 	if err != nil {
 		return err
 	}

@@ -1098,7 +1098,9 @@ func (s *Server) setVolume(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]int{"volume": body.Volume})
 }
 
-// getSettings returns the speaker name + bass (with range) + UI language.
+// getSettings returns the speaker name + bass (with range) + UI language, plus any
+// device-specific settings this speaker exposes (treble, Wi-Fi/streaming
+// optimization) and its current network connection.
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
@@ -1110,19 +1112,33 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	if b, err := s.speaker.Bass(ctx); err == nil {
 		out["bass"] = b
 	}
+	// Device-specific settings: included only when this speaker actually exposes
+	// them, so the UI can hide controls the hardware doesn't support.
+	if tr, err := s.speaker.Treble(ctx); err == nil {
+		out["treble"] = tr
+	}
+	if opt, err := s.speaker.WifiOptimized(ctx); err == nil {
+		out["wifiOptimization"] = opt
+	}
+	if net, err := s.speaker.NetworkInfo(ctx); err == nil {
+		out["network"] = net
+	}
 	if s.mdns != nil {
 		out["host"] = s.mdns.Hostname() // friendly .local address, e.g. "keuken.local"
 	}
 	writeJSON(w, 200, out)
 }
 
-// putSettings applies any provided fields: name + bass on the speaker, language in
-// the local store. Fields are optional so the UI can live-apply one at a time.
+// putSettings applies any provided fields: name + bass + treble + Wi-Fi
+// optimization on the speaker, language in the local store. Fields are optional so
+// the UI can live-apply one at a time.
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name     *string `json:"name"`
-		Bass     *int    `json:"bass"`
-		Language *string `json:"language"`
+		Name             *string `json:"name"`
+		Bass             *int    `json:"bass"`
+		Treble           *int    `json:"treble"`
+		WifiOptimization *bool   `json:"wifiOptimization"`
+		Language         *string `json:"language"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.fail(w, "bad body", err)
@@ -1142,6 +1158,18 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if body.Bass != nil {
 		if err := s.speaker.SetBass(ctx, *body.Bass); err != nil {
 			s.fail(w, "set bass failed", err)
+			return
+		}
+	}
+	if body.Treble != nil {
+		if err := s.speaker.SetTreble(ctx, *body.Treble); err != nil {
+			s.fail(w, "set treble failed", err)
+			return
+		}
+	}
+	if body.WifiOptimization != nil {
+		if err := s.speaker.SetWifiOptimized(ctx, *body.WifiOptimization); err != nil {
+			s.fail(w, "set wifi optimization failed", err)
 			return
 		}
 	}
