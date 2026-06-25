@@ -36,12 +36,13 @@ log() { echo "[retouch] $*" >>"$LOG" 2>&1; }
 # run can tell "gave up on this exact release" from "a newer release is out, retry".
 giveup() { echo "${TAG:-}" >"$GAVEUP"; log "$*; giving up (target ${TAG:-?})"; exit 0; }
 
-# HomeKit bridge: expose the speaker to Apple Home. The HAP server listens on its own
-# LAN port (separate from the :8080 web UI) and keeps its pairing state under $HOME_DIR
-# so it survives reboots. The setup code is derived from the speaker's device id and
-# shown in ReTouch's settings (GET /api/homekit).
+# HomeKit bridge: expose the speaker to Apple Home. It is turned on/off from the
+# settings page (persisted, so it survives reboots and OTA updates) — these flags
+# only configure where it listens (a LAN port separate from the :8080 web UI) and
+# where its pairing state lives ($HOME_DIR, so pairings survive reboots). The setup
+# code is derived from the speaker's device id and shown in ReTouch's settings.
 HOMEKIT_ADDR=:51827
-LAUNCH="$BIN -speaker-host 127.0.0.1 -listen $WEB_LISTEN -listen-marge $MARGE_LISTEN -marge-base $MARGE_BASE -presets $HOME_DIR/presets.json -homekit -homekit-addr $HOMEKIT_ADDR -homekit-store $HOME_DIR/homekit"
+LAUNCH="$BIN -speaker-host 127.0.0.1 -listen $WEB_LISTEN -listen-marge $MARGE_LISTEN -marge-base $MARGE_BASE -presets $HOME_DIR/presets.json -homekit-addr $HOMEKIT_ADDR -homekit-store $HOME_DIR/homekit"
 
 start_agent() {
 	if pidof retouch >/dev/null 2>&1; then

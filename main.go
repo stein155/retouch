@@ -119,28 +119,20 @@ func main() {
 	// Keep the speaker paired to our marge account so native sources stay enabled.
 	go autopair.New(bc, info.Account, autopair.DefaultAuthToken, *pairEvery, logger.With("comp", "autopair")).Run(ctx)
 
-	// Bridge the speaker into Apple Home (opt-in). Runs independently of the web/marge
+	// Bridge the speaker into Apple Home. The bridge is toggled at runtime from the
+	// settings page (persisted in STLocal), so an OTA binary swap is enough to enable
+	// it — no relaunch or rewritten autostart command needed. The -homekit flag only
+	// seeds the default for a fresh install. It runs independently of the web/marge
 	// servers; a failure here never takes ReTouch's core functionality down.
-	if *homeKit {
-		hkStore := *homeKitStore
-		if hkStore == "" {
-			hkStore = filepath.Join(filepath.Dir(*presets), "homekit")
-		}
-		hkCfg := homekit.Config{Pin: *homeKitPin, Name: *homeKitName, Addr: *homeKitAddr, StorageDir: hkStore}
-		hkName := *homeKitName
-		if hkName == "" {
-			hkName = info.Name
-		}
-		webSrv.SetHomeKit(&web.HomeKitInfo{
-			Enabled: true,
-			Name:    hkName,
-			Code:    homekit.FmtPin(homekit.PinFor(*homeKitPin, info.DeviceID)),
-		})
-		go func() {
-			if err := homekit.Run(ctx, bc, info, hkCfg, logger.With("comp", "homekit")); err != nil {
-				logger.Error("homekit bridge stopped", "err", err)
-			}
-		}()
+	hkStore := *homeKitStore
+	if hkStore == "" {
+		hkStore = filepath.Join(filepath.Dir(*presets), "homekit")
+	}
+	hkCfg := homekit.Config{Pin: *homeKitPin, Name: *homeKitName, Addr: *homeKitAddr, StorageDir: hkStore}
+	hkMgr := homekit.NewManager(ctx, bc, info, hkCfg, logger.With("comp", "homekit"))
+	webSrv.SetHomeKit(hkMgr)
+	if set.Get().HomeKit || *homeKit {
+		hkMgr.Start()
 	}
 
 	// Advertise a friendly <name>.local so the UI is reachable without the IP.

@@ -192,6 +192,19 @@ export async function ungroupSpeaker(ip) {
   return send('/api/multiroom/ungroup', 'POST', { ip });
 }
 
+// HomeKit (Apple Home) bridge. getHomeKit returns
+// { enabled, supported, name, code }; code is the XXX-XX-XXX setup code. Returns
+// null if unreachable.
+export async function getHomeKit() {
+  try { return await getJSON('/api/homekit'); } catch { return null; }
+}
+
+// setHomeKit turns the bridge on or off. Returns { enabled, name, code }.
+export async function setHomeKit(enabled) {
+  const r = await send('/api/homekit', 'POST', { enabled });
+  return r.body;
+}
+
 // getVersion returns { version, updatable }. updatable is true only on an installed
 // speaker (where ReTouch can replace its own binary). Returns null if unreachable.
 export async function getVersion() {

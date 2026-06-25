@@ -46,6 +46,10 @@ export const I18N = {
     multiroomHint: 'Play in sync on your other radios running ReTouch. This one leads; the rest follow.',
     findSpeakers: 'Search again', scanning: 'Looking for speakers…',
     noSpeakers: 'No other speakers found.',
+    homekit: 'Apple Home',
+    homekitEnable: 'Show in Apple Home',
+    homekitHint: 'Turn on to add this radio to the Apple Home app and control it with Siri.',
+    homekitCodeHint: 'Add the accessory in the Home app with this code:',
   },
   nl: {
     appTitle: 'Radio', settings: 'Instellingen', thisRadio: 'Deze radio',
@@ -76,6 +80,10 @@ export const I18N = {
     multiroomHint: 'Speel gelijk af op je andere ReTouch-speakers. Deze is de baas; de rest volgt.',
     findSpeakers: 'Opnieuw zoeken', scanning: 'Speakers zoeken…',
     noSpeakers: 'Geen andere speakers gevonden.',
+    homekit: 'Apple Home',
+    homekitEnable: 'Tonen in Apple Home',
+    homekitHint: 'Zet aan om deze radio aan de Apple Home-app toe te voegen en met Siri te bedienen.',
+    homekitCodeHint: 'Voeg het accessoire toe in de Home-app met deze code:',
   },
   de: {
     appTitle: 'Radio', settings: 'Einstellungen', thisRadio: 'Dieses Radio',
@@ -106,6 +114,10 @@ export const I18N = {
     multiroomHint: 'Synchron auf deinen anderen Radios mit ReTouch abspielen. Dieses führt, die anderen folgen.',
     findSpeakers: 'Erneut suchen', scanning: 'Suche Lautsprecher…',
     noSpeakers: 'Keine weiteren Lautsprecher gefunden.',
+    homekit: 'Apple Home',
+    homekitEnable: 'In Apple Home anzeigen',
+    homekitHint: 'Einschalten, um dieses Radio zur Apple-Home-App hinzuzufügen und mit Siri zu steuern.',
+    homekitCodeHint: 'Füge das Gerät in der Home-App mit diesem Code hinzu:',
   },
   fr: {
     appTitle: 'Radio', settings: 'Réglages', thisRadio: 'Cette radio',
@@ -136,6 +148,10 @@ export const I18N = {
     multiroomHint: "Diffusez en synchro sur vos autres radios avec ReTouch. Celle-ci mène, les autres suivent.",
     findSpeakers: 'Rechercher à nouveau', scanning: "Recherche d'enceintes…",
     noSpeakers: 'Aucune autre enceinte trouvée.',
+    homekit: 'Apple Home',
+    homekitEnable: 'Afficher dans Apple Home',
+    homekitHint: 'Activez pour ajouter cette radio à l’app Maison et la commander avec Siri.',
+    homekitCodeHint: 'Ajoutez l’accessoire dans l’app Maison avec ce code :',
   },
   es: {
     appTitle: 'Radio', settings: 'Ajustes', thisRadio: 'Esta radio',
@@ -166,6 +182,10 @@ export const I18N = {
     multiroomHint: 'Reproduce en sincronía en tus otras radios con ReTouch. Esta manda; las demás siguen.',
     findSpeakers: 'Buscar de nuevo', scanning: 'Buscando altavoces…',
     noSpeakers: 'No se encontraron otros altavoces.',
+    homekit: 'Apple Home',
+    homekitEnable: 'Mostrar en Apple Home',
+    homekitHint: 'Actívalo para añadir esta radio a la app Casa y controlarla con Siri.',
+    homekitCodeHint: 'Añade el accesorio en la app Casa con este código:',
   },
   af: {
     appTitle: 'Radio', settings: 'Instellings', thisRadio: 'Hierdie radio',
@@ -196,6 +216,10 @@ export const I18N = {
     multiroomHint: 'Speel gelyktydig op jou ander ReTouch-luidsprekers. Hierdie lei; die ander volg.',
     findSpeakers: 'Soek weer', scanning: 'Soek luidsprekers…',
     noSpeakers: 'Geen ander luidsprekers gevind nie.',
+    homekit: 'Apple Home',
+    homekitEnable: 'Wys in Apple Home',
+    homekitHint: 'Skakel aan om hierdie radio by die Apple Home-app te voeg en met Siri te beheer.',
+    homekitCodeHint: 'Voeg die toebehoorsel in die Home-app by met hierdie kode:',
   },
 };
 

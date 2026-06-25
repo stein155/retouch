@@ -1,6 +1,7 @@
 // Package settings persists small STLocal-level preferences that aren't speaker
-// state — currently just the UI language. (The speaker's own name and bass live on
-// the speaker; its sysLanguage is a separate voice-prompt setting we don't touch.)
+// state — the UI language and whether the HomeKit bridge is on. (The speaker's own
+// name and bass live on the speaker; its sysLanguage is a separate voice-prompt
+// setting we don't touch.)
 package settings
 
 import (
@@ -12,6 +13,7 @@ import (
 // Settings is the persisted preference set.
 type Settings struct {
 	Language string `json:"language"` // UI language code, e.g. "en", "nl"
+	HomeKit  bool   `json:"homekit"`  // whether the Apple Home (HomeKit) bridge is on
 }
 
 // Store is a JSON-file-backed settings store, safe for concurrent handlers.
@@ -44,6 +46,19 @@ func (s *Store) SetLanguage(code string) error {
 	if code != "" {
 		s.s.Language = code
 	}
+	return s.save()
+}
+
+// SetHomeKit records whether the HomeKit bridge is on and persists.
+func (s *Store) SetHomeKit(on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.s.HomeKit = on
+	return s.save()
+}
+
+// save writes the current settings atomically. Caller must hold s.mu.
+func (s *Store) save() error {
 	data, err := json.MarshalIndent(s.s, "", "  ")
 	if err != nil {
 		return err

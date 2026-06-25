@@ -3,7 +3,7 @@ import { Icon } from './Icons';
 import { useI18n, LANGS } from '../lib/i18n';
 import {
   getSettings, saveSettings, getVersion, getReleases, startUpdate,
-  findSpeakers, groupSpeaker, ungroupSpeaker,
+  findSpeakers, groupSpeaker, ungroupSpeaker, getHomeKit, setHomeKit,
 } from '../lib/api';
 
 const cx = (...a) => a.filter(Boolean).join(' ');
@@ -138,6 +138,61 @@ function MultiroomSection() {
         {scanning ? <span className="mp-spinner" /> : <Icon.search width="18" height="18" />}
         <span>{t('findSpeakers')}</span>
       </button>
+    </>
+  );
+}
+
+// HomeKit: expose this speaker to Apple Home. A single toggle turns the HAP bridge
+// on/off at runtime (persisted on the speaker); when on, it shows the setup code to
+// type into the Home app. Hidden entirely on builds without HomeKit support.
+function HomeKitSection() {
+  const { t } = useI18n();
+  const [hk, setHk] = useState(null); // { supported, enabled, name, code }
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { getHomeKit().then((d) => d && setHk(d)); }, []);
+
+  if (!hk || !hk.supported) return null;
+
+  const toggle = async () => {
+    if (busy) return;
+    const want = !hk.enabled;
+    setBusy(true);
+    setHk((s) => ({ ...s, enabled: want })); // optimistic
+    try {
+      const res = await setHomeKit(want);
+      if (res) setHk((s) => ({ ...s, ...res }));
+    } catch {
+      setHk((s) => ({ ...s, enabled: !want })); // revert
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="form-section" style={{ marginTop: 22 }}>{t('homekit')}</div>
+      <div className="field-card">
+        <div className="field-row">
+          <span className="field-row-label">{t('homekitEnable')}</span>
+          <button
+            type="button"
+            className={cx('spk-toggle', hk.enabled && 'is-on')}
+            role="switch"
+            aria-checked={hk.enabled}
+            aria-label={t('homekitEnable')}
+            disabled={busy}
+            onClick={toggle}
+          >
+            <span className="spk-knob" />
+          </button>
+        </div>
+      </div>
+      {hk.enabled && hk.code ? (
+        <div className="field-hint">{t('homekitCodeHint')} <b>{hk.code}</b></div>
+      ) : (
+        <div className="field-hint">{t('homekitHint')}</div>
+      )}
     </>
   );
 }
@@ -299,6 +354,8 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
             </div>
 
             <MultiroomSection />
+
+            <HomeKitSection />
 
             {ver && (
               <>
