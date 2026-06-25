@@ -144,6 +144,28 @@ func TestInputSources(t *testing.T) {
 	}
 }
 
+// TestHapFirmware checks the firmware string is coerced into the
+// major[.minor[.revision]] form HomeKit requires; a non-conforming value makes
+// iOS refuse the accessory as "out of compliance".
+func TestHapFirmware(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"27.0.6.46330.5043500", "27.0.6"},                           // Bose: 5 components -> 3
+		{"27.0.6.46330.5043500 epdbuild.trunk.2018-06-21", "27.0.6"}, // + build suffix
+		{"27", "27"},
+		{"27.0", "27.0"},
+		{"1.2.3", "1.2.3"},
+		{"07.0.6", "7.0.6"}, // normalise leading zero
+		{"", "1.0"},
+		{"   ", "1.0"},
+		{"v27.0", "1.0"}, // leading non-numeric -> fallback
+	}
+	for _, c := range cases {
+		if got := hapFirmware(c.in); got != c.want {
+			t.Errorf("hapFirmware(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestPinForIsStableAndValid(t *testing.T) {
 	a := PinFor("", "ABC123")
 	b := PinFor("", "ABC123")

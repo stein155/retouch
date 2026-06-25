@@ -152,10 +152,7 @@ func (r *radio) build(name string, info *speaker.Info) *accessory.A {
 	if serial == "" {
 		serial = "retouch"
 	}
-	fw := strings.TrimSpace(info.Software)
-	if fw == "" {
-		fw = "1.0"
-	}
+	fw := hapFirmware(info.Software)
 
 	a := accessory.New(accessory.Info{
 		Name:         name,
@@ -456,6 +453,39 @@ func fmtPin(pin string) string {
 		return pin
 	}
 	return pin[:3] + "-" + pin[3:5] + "-" + pin[5:]
+}
+
+// hapFirmware coerces a speaker firmware string into the FirmwareRevision format
+// HomeKit requires: major[.minor[.revision]], each a non-negative integer. Bose
+// reports something like "27.0.6.46330.5043500 epdbuild.trunk…" — five numeric
+// components plus a build suffix — which iOS rejects as "out of compliance",
+// blocking pairing. We keep only the leading numeric, dot-separated components and
+// cap them at three. Falls back to "1.0" when nothing usable remains.
+func hapFirmware(s string) string {
+	fields := strings.Fields(strings.TrimSpace(s)) // drop any build suffix after a space
+	if len(fields) == 0 {
+		return "1.0"
+	}
+	parts := make([]string, 0, 3)
+	for _, p := range strings.Split(fields[0], ".") {
+		if p == "" || keepDigits(p) != p { // stop at the first non-numeric component
+			break
+		}
+		parts = append(parts, strconv.Itoa(mustAtoi(p))) // normalise "07" -> "7"
+		if len(parts) == 3 {
+			break
+		}
+	}
+	if len(parts) == 0 {
+		return "1.0"
+	}
+	return strings.Join(parts, ".")
+}
+
+// mustAtoi parses an all-digit string; callers guarantee the input is numeric.
+func mustAtoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
 }
 
 func keepDigits(s string) string {
