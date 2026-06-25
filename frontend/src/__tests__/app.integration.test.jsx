@@ -29,6 +29,8 @@ beforeEach(() => {
   api.getVersion.mockResolvedValue({ version: '1.2.3', updatable: false });
   // SettingsSheet also fetches beta builds on open.
   api.getReleases.mockResolvedValue({ current: '1.2.3', updatable: false, stable: null, betas: [] });
+  // SettingsSheet checks HomeKit support on open; default to unsupported (section hidden).
+  api.getHomeKit.mockResolvedValue({ supported: false });
   api.findSpeakers.mockResolvedValue([]);
   api.saveSettings.mockResolvedValue(null);
   api.playPreset.mockResolvedValue(null);

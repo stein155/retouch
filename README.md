@@ -34,6 +34,8 @@ is nothing else to buy, run, or keep powered on:
 - ▶️ **Play / stop and volume**, with live now-playing (station name + logo)
 - 🔗 **Multiroom** — find your other ReTouch speakers and group them so they play
   in sync, using Bose's own native zones
+- 🏠 **Apple Home (HomeKit)** — the speaker shows up in the Home app and Siri as a
+  radio you can turn on/off, set the volume on, and pick a preset/station on
 - ⚙️ **Settings** — speaker name, bass, and the app's language
 - ⬆️ **Over-the-air updates** — one tap in the app; the speaker fetches the latest
   release and relaunches ReTouch in a few seconds (no reboot)
@@ -53,6 +55,31 @@ speaker adds the search, presets, and controls.
 finds your other ReTouch speakers on the network and uses Bose's own zone API to
 group them, so one speaker leads and the rest play in perfect sync, exactly like
 multiroom did when the Bose app still worked.
+
+## Apple Home (HomeKit)
+
+ReTouch adds the speaker to **Apple Home**, so you can control it from the Home app
+and Siri ("Hey Siri, turn on the kitchen speaker", "play preset 2"). It is enabled by
+the installer and appears as a single **media accessory** — a radio — with:
+
+- **on/off** (the speaker wakes or goes on standby),
+- a **volume** control with mute (drag the slider, or use the remote's volume buttons),
+- the **six presets as sources** — pick one to play it; the one that's playing is shown
+  as the current source ("now playing").
+
+Under the hood this is a HomeKit **Television** accessory: the media type the Home app
+renders as a real, controllable device. The trick the obvious first attempt misses is
+that the volume characteristics must live on a *linked Speaker service* and each preset
+must be a *linked input source* — leave either out and the Home app says "no controls
+available". ReTouch wires both, so the controls show up.
+
+To pair it, open the **Home** app → **Add Accessory** → *More options*, pick the
+speaker, and enter the **setup code** shown in ReTouch's Settings (also available at
+`http://<speaker>:8080/api/homekit`). The code is fixed per speaker.
+
+This only stands in for HomeKit — the speaker still plays radio itself, exactly as
+before. It uses one Go dependency (`github.com/brutella/hap`) for the HomeKit protocol;
+the rest of ReTouch stays dependency-free.
 
 ## Set it up once
 
@@ -104,6 +131,7 @@ internal/tunein/     TuneIn directory client (search / resolve / describe)
 internal/speaker/    speaker control (play, presets, volume, name, bass, multiroom zones)
 internal/discover/   finds other ReTouch speakers on the LAN (for multiroom)
 internal/marge/      local emulation of the Bose cloud API the firmware expects
+internal/homekit/    HomeKit (HAP) bridge — exposes the speaker to Apple Home
 internal/autopair/   keeps the speaker's sources enabled
 internal/settings/   persisted app settings (name, bass, language)
 internal/store/      small on-disk state (presets, etc.)

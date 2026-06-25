@@ -18,6 +18,7 @@ import { useI18n, LANGS } from '../../lib/i18n';
 import {
   getSettings, saveSettings, getVersion, getReleases, startUpdate,
   findSpeakers, groupSpeaker, ungroupSpeaker,
+  getHomeKit, setHomeKit, resetHomeKit,
 } from '../../lib/api';
 
 const fmtBass = (v) => (v > 0 ? '+' + v : String(v));
@@ -33,6 +34,124 @@ const ScanButton = styled(Button).attrs({ $variant: 'update' })`
   background: var(--ink);
   &:hover { background: var(--ink-2); }
 `;
+
+// HomeKit setup-code card — a tappable FieldCard variant that copies the code.
+const HkCodeCard = styled(FieldCard).attrs({ as: 'button', type: 'button' })`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 8px;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+`;
+
+const HkCode = styled.span`
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+`;
+
+const HkCodeCopy = styled.span`
+  flex-shrink: 0;
+  min-width: 56px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+`;
+
+const HkReset = styled.button`
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-3);
+  text-decoration: underline;
+
+  &:disabled { opacity: 0.5; cursor: default; }
+`;
+
+// HomeKit: expose this speaker to Apple Home. A single toggle turns the HAP bridge
+// on/off at runtime (persisted on the speaker); when on, it shows the setup code to
+// type into the Home app. Hidden entirely on builds without HomeKit support.
+function HomeKitSection() {
+  const { t } = useI18n();
+  const [hk, setHk] = useState(null); // { supported, enabled, name, code }
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => { getHomeKit().then((d) => d && setHk(d)); }, []);
+
+  if (!hk || !hk.supported) return null;
+
+  const copyCode = async () => {
+    if (!hk.code) return;
+    try { await navigator.clipboard.writeText(hk.code); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard unavailable */ }
+  };
+
+  const reset = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await resetHomeKit();
+      if (res) setHk((s) => ({ ...s, ...res }));
+    } catch { /* leave state as-is */ } finally { setBusy(false); }
+  };
+
+  const toggle = async () => {
+    if (busy) return;
+    const want = !hk.enabled;
+    setBusy(true);
+    setHk((s) => ({ ...s, enabled: want })); // optimistic
+    try {
+      const res = await setHomeKit(want);
+      if (res) setHk((s) => ({ ...s, ...res }));
+    } catch {
+      setHk((s) => ({ ...s, enabled: !want })); // revert
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <FormSection style={{ marginTop: 22 }}>{t('homekit')}</FormSection>
+      <FieldCard>
+        <FieldRow>
+          <FieldRowLabel as="span">{t('homekitEnable')}</FieldRowLabel>
+          <Toggle
+            on={hk.enabled}
+            onClick={toggle}
+            disabled={busy}
+            aria-label={t('homekitEnable')}
+            style={{ marginLeft: 'auto' }}
+          />
+        </FieldRow>
+      </FieldCard>
+      {hk.enabled && hk.code ? (
+        <>
+          <HkCodeCard onClick={copyCode} aria-label={t('homekitCopyCode')}>
+            <FieldRowLabel as="span">{t('homekitCode')}</FieldRowLabel>
+            <HkCode>{hk.code}</HkCode>
+            <HkCodeCopy>{copied ? t('copied') : t('copy')}</HkCodeCopy>
+          </HkCodeCard>
+          <FieldHint>{t('homekitCodeHint')}</FieldHint>
+          <HkReset type="button" onClick={reset} disabled={busy}>
+            {t('homekitReset')}
+          </HkReset>
+        </>
+      ) : (
+        <FieldHint>{t('homekitHint')}</FieldHint>
+      )}
+    </>
+  );
+}
 
 // Multiroom: group other SoundTouch speakers on the network with this one (this
 // radio is the zone master; the rest follow it via Bose's native zone API). The
@@ -337,6 +456,8 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
             )}
 
             <MultiroomSection />
+
+            <HomeKitSection />
 
             {ver && (
               <>

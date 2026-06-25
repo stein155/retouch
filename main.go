@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stein155/retouch/internal/autopair"
+	"github.com/stein155/retouch/internal/homekit"
 	"github.com/stein155/retouch/internal/marge"
 	"github.com/stein155/retouch/internal/mdns"
 	"github.com/stein155/retouch/internal/settings"
@@ -41,6 +42,11 @@ func main() {
 	presets := flag.String("presets", "presets.json", "path to the presets JSON file")
 	accountID := flag.String("account-id", "", "marge account UUID to keep the speaker paired to (default: whatever the speaker reports); enables autopair")
 	pairEvery := flag.Duration("pair-interval", 5*time.Minute, "how often autopair re-checks the speaker's association")
+	homeKit := flag.Bool("homekit", false, "expose the speaker to Apple Home over HomeKit (HAP)")
+	homeKitAddr := flag.String("homekit-addr", ":51827", "TCP listen address for the HomeKit/HAP server")
+	homeKitPin := flag.String("homekit-pin", "", "8-digit HomeKit setup code (default: derived from the speaker's device id)")
+	homeKitName := flag.String("homekit-name", "", "accessory name shown in the Home app (default: the speaker's name)")
+	homeKitStore := flag.String("homekit-store", "", "directory for HomeKit pairing state (default: <presets dir>/homekit)")
 	verbose := flag.Bool("v", false, "verbose: log every speaker request to the pairing stub")
 	flag.Parse()
 
@@ -112,6 +118,22 @@ func main() {
 
 	// Keep the speaker paired to our marge account so native sources stay enabled.
 	go autopair.New(bc, info.Account, autopair.DefaultAuthToken, *pairEvery, logger.With("comp", "autopair")).Run(ctx)
+
+	// Bridge the speaker into Apple Home. The bridge is toggled at runtime from the
+	// settings page (persisted in STLocal), so an OTA binary swap is enough to enable
+	// it — no relaunch or rewritten autostart command needed. The -homekit flag only
+	// seeds the default for a fresh install. It runs independently of the web/marge
+	// servers; a failure here never takes ReTouch's core functionality down.
+	hkStore := *homeKitStore
+	if hkStore == "" {
+		hkStore = filepath.Join(filepath.Dir(*presets), "homekit")
+	}
+	hkCfg := homekit.Config{Pin: *homeKitPin, Name: *homeKitName, Addr: *homeKitAddr, StorageDir: hkStore}
+	hkMgr := homekit.NewManager(ctx, bc, info, hkCfg, logger.With("comp", "homekit"))
+	webSrv.SetHomeKit(hkMgr)
+	if set.Get().HomeKit || *homeKit {
+		hkMgr.Start()
+	}
 
 	// Advertise a friendly <name>.local so the UI is reachable without the IP.
 	if info.IP != "" {
