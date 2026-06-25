@@ -97,9 +97,11 @@ func TestSpeakerWired(t *testing.T) {
 			t.Errorf("Speaker missing characteristic %s (volume would not work)", typ)
 		}
 	}
+	// Relative is what makes the Home app's Remote volume buttons work for a TV;
+	// Absolute leaves the volume uncontrollable (the slider is never shown).
 	if v := spk.C(characteristic.TypeVolumeControlType); v != nil {
-		if got := v.Value(); got != characteristic.VolumeControlTypeAbsolute {
-			t.Errorf("VolumeControlType = %v, want Absolute", got)
+		if got := v.Value(); got != characteristic.VolumeControlTypeRelative {
+			t.Errorf("VolumeControlType = %v, want Relative", got)
 		}
 	}
 }

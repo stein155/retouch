@@ -200,8 +200,8 @@ func (r *radio) build(name string, info *speaker.Info) *accessory.A {
 	}
 
 	// A Speaker service carrying the volume controls, linked to the Television. The
-	// stock NewSpeaker() only has Mute, so we add Active + an absolute Volume slider
-	// + a relative selector (for the remote's hardware +/- buttons).
+	// stock NewSpeaker() only has Mute, so we add Active + a Volume characteristic +
+	// a relative VolumeSelector (the remote's hardware +/- buttons).
 	spk := service.New(service.TypeSpeaker)
 
 	spkActive := characteristic.NewActive()
@@ -212,8 +212,13 @@ func (r *radio) build(name string, info *speaker.Info) *accessory.A {
 	spkName.SetValue(name + " volume")
 	spk.AddC(spkName.C)
 
+	// Relative, not Absolute: for a HomeKit Television the Home app never shows an
+	// absolute volume slider — volume is changed from the Remote widget, whose +/-
+	// (the iPhone's hardware volume buttons) send relative VolumeSelector events. With
+	// Absolute, iOS suppresses those buttons and nothing controls the volume. We still
+	// serve the absolute Volume characteristic below, but only to report the level.
 	vct := characteristic.NewVolumeControlType()
-	vct.SetValue(characteristic.VolumeControlTypeAbsolute)
+	vct.SetValue(characteristic.VolumeControlTypeRelative)
 	spk.AddC(vct.C)
 
 	mute := characteristic.NewMute()
@@ -346,24 +351,27 @@ func (r *radio) setVolume(level int) {
 }
 
 // nudgeVolume moves the volume by volumeStep in the requested direction. Used by the
-// Home remote's hardware +/- buttons, which send a relative VolumeSelector.
+// Home remote's hardware +/- buttons, which send a relative VolumeSelector. We step
+// from the cached characteristic value (no per-press network read) and update it
+// optimistically under r.mu, so rapid presses accumulate instead of racing; the next
+// syncOnce reconciles with the speaker's real level.
 func (r *radio) nudgeVolume(dir int) {
+	r.mu.Lock()
+	cur := r.volume.Value()
+	next := cur + volumeStep
+	if dir == characteristic.VolumeSelectorDecrement {
+		next = cur - volumeStep
+	}
+	if next < 0 {
+		next = 0
+	}
+	if next > 100 {
+		next = 100
+	}
+	_ = r.volume.SetValue(next)
+	r.mu.Unlock()
+
 	r.do(func(ctx context.Context) {
-		cur, err := r.bc.Volume(ctx)
-		if err != nil {
-			r.log.Warn("homekit volume read", "err", err)
-			return
-		}
-		next := cur + volumeStep
-		if dir == characteristic.VolumeSelectorDecrement {
-			next = cur - volumeStep
-		}
-		if next < 0 {
-			next = 0
-		}
-		if next > 100 {
-			next = 100
-		}
 		if err := r.bc.SetVolume(ctx, next); err != nil {
 			r.log.Warn("homekit volume", "level", next, "err", err)
 		}
