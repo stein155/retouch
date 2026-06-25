@@ -149,10 +149,16 @@ function HomeKitSection() {
   const { t } = useI18n();
   const [hk, setHk] = useState(null); // { supported, enabled, name, code }
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => { getHomeKit().then((d) => d && setHk(d)); }, []);
 
   if (!hk || !hk.supported) return null;
+
+  const copyCode = async () => {
+    if (!hk.code) return;
+    try { await navigator.clipboard.writeText(hk.code); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard unavailable */ }
+  };
 
   const toggle = async () => {
     if (busy) return;
@@ -189,7 +195,14 @@ function HomeKitSection() {
         </div>
       </div>
       {hk.enabled && hk.code ? (
-        <div className="field-hint">{t('homekitCodeHint')} <b>{hk.code}</b></div>
+        <>
+          <button type="button" className="field-card hk-code-card" onClick={copyCode} aria-label={t('homekitCopyCode')}>
+            <span className="field-row-label">{t('homekitCode')}</span>
+            <span className="hk-code">{hk.code}</span>
+            <span className="hk-code-copy">{copied ? t('copied') : t('copy')}</span>
+          </button>
+          <div className="field-hint">{t('homekitCodeHint')}</div>
+        </>
       ) : (
         <div className="field-hint">{t('homekitHint')}</div>
       )}
