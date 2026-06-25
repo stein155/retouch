@@ -42,8 +42,6 @@ const HkCodeCard = styled(FieldCard).attrs({ as: 'button', type: 'button' })`
   gap: 12px;
   width: 100%;
   margin-top: 8px;
-  border: none;
-  cursor: pointer;
   text-align: left;
   -webkit-tap-highlight-color: transparent;
 `;
@@ -66,14 +64,11 @@ const HkCodeCopy = styled.span`
   text-align: right;
   font-size: 13px;
   font-weight: 600;
-  color: var(--accent, #c0683c);
+  color: var(--accent);
 `;
 
 const HkReset = styled.button`
   margin-top: 6px;
-  background: none;
-  border: none;
-  cursor: pointer;
   font-size: 13px;
   font-weight: 600;
   color: var(--ink-3);
