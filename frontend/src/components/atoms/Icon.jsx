@@ -1,3 +1,5 @@
+// SVG icon set. Kept verbatim from the original Icons.jsx — pure presentational
+// atoms, no styling beyond the inline SVG attributes.
 export const Icon = {
   search: (p) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" {...p}>
@@ -82,3 +84,5 @@ export const Icon = {
     </svg>
   ),
 };
+
+export default Icon;

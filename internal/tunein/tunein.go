@@ -16,7 +16,9 @@ import (
 	"time"
 )
 
-const base = "https://opml.radiotime.com"
+// base is the TuneIn OPML API root. It is a var (not a const) only so in-package
+// tests can point the client at a local httptest server; production never sets it.
+var base = "https://opml.radiotime.com"
 
 // formats is the codec list we ask TuneIn for. The SoundTouch renderer cannot
 // parse HLS (.m3u8) playlists, so HLS is intentionally excluded.
