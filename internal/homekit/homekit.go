@@ -6,8 +6,9 @@
 // media type the Home app renders as a real radio you can turn on and off, with
 // a volume control and a list of sources:
 //
-//   - Television service   -> on/off (Active) and the current station (ActiveIdentifier,
-//     which the Home app shows as "now playing")
+//   - Television service   -> on/off (Active), the current station (ActiveIdentifier,
+//     which the Home app shows as "now playing") and play/pause (Current/TargetMediaState,
+//     so Home and Siri can pause and resume)
 //   - a linked Speaker     -> volume slider + mute (and +/- for the remote's buttons)
 //   - one linked InputSource per preset -> the six presets/stations; selecting one
 //     plays it, and the playing one is shown as the active source
@@ -94,6 +95,8 @@ type radio struct {
 	source *characteristic.ActiveIdentifier // playing preset slot (0 = none)
 	volume *characteristic.Volume
 	mute   *characteristic.Mute
+	media  *characteristic.CurrentMediaState // playing / paused / stopped (reported)
+	target *characteristic.TargetMediaState  // play / pause requested from Home
 	inputs []*presetInput
 
 	mu        sync.Mutex
@@ -171,6 +174,18 @@ func (r *radio) build(name string, info *speaker.Info) *accessory.A {
 	tv.ActiveIdentifier.OnValueRemoteUpdate(func(id int) { r.selectInput(id) })
 	r.power = tv.Active
 	r.source = tv.ActiveIdentifier
+
+	// Play/pause: CurrentMediaState reports what the speaker is doing (mirrored in
+	// syncOnce from PlayStatus); TargetMediaState is what Home/Siri asks for. The
+	// stock NewTelevision() omits both, so add them to the Television service.
+	media := characteristic.NewCurrentMediaState()
+	media.SetValue(characteristic.CurrentMediaStateStop)
+	tv.AddC(media.C)
+	target := characteristic.NewTargetMediaState()
+	target.OnValueRemoteUpdate(func(state int) { r.setMedia(state) })
+	tv.AddC(target.C)
+	r.media, r.target = media, target
+
 	a.AddS(tv.S)
 
 	// One input source per preset, each linked to the Television so the Home app
@@ -278,6 +293,7 @@ func (r *radio) syncOnce(ctx context.Context) {
 				_ = r.source.SetValue(slot)
 			}
 		}
+		r.setMediaState(on, np.PlayStatus)
 	}
 	if vol, err := r.bc.Volume(c); err == nil {
 		_ = r.volume.SetValue(vol)
@@ -287,6 +303,30 @@ func (r *radio) syncOnce(ctx context.Context) {
 			r.lastVol = vol
 			r.mu.Unlock()
 		}
+	}
+}
+
+// setMediaState mirrors the speaker's playback into CurrentMediaState and keeps
+// TargetMediaState consistent so Home/Siri report playing vs paused correctly.
+// On standby (or an unknown status) the speaker counts as stopped.
+func (r *radio) setMediaState(on bool, playStatus string) {
+	state := characteristic.CurrentMediaStateStop
+	if on {
+		switch playStatus {
+		case "PLAY_STATE", "BUFFERING_STATE":
+			state = characteristic.CurrentMediaStatePlay
+		case "PAUSE_STATE":
+			state = characteristic.CurrentMediaStatePause
+		}
+	}
+	_ = r.media.SetValue(state)
+	switch state {
+	case characteristic.CurrentMediaStatePlay:
+		_ = r.target.SetValue(characteristic.TargetMediaStatePlay)
+	case characteristic.CurrentMediaStatePause:
+		_ = r.target.SetValue(characteristic.TargetMediaStatePause)
+	default:
+		_ = r.target.SetValue(characteristic.TargetMediaStateStop)
 	}
 }
 
@@ -412,6 +452,20 @@ func (r *radio) selectInput(id int) {
 		r.bc.Wake(ctx)
 		if err := r.bc.Key(ctx, "PRESET_"+strconv.Itoa(id)); err != nil {
 			r.log.Warn("homekit preset", "slot", id, "err", err)
+		}
+	})
+}
+
+// setMedia plays or pauses the speaker in response to a Home/Siri media request.
+// Radio has no real "stop", so Stop is treated as Pause.
+func (r *radio) setMedia(state int) {
+	r.do(func(ctx context.Context) {
+		key := "PAUSE"
+		if state == characteristic.TargetMediaStatePlay {
+			key = "PLAY"
+		}
+		if err := r.bc.Key(ctx, key); err != nil {
+			r.log.Warn("homekit media", "state", state, "key", key, "err", err)
 		}
 	})
 }

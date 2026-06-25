@@ -66,6 +66,8 @@ func TestTelevisionWired(t *testing.T) {
 		characteristic.TypeActiveIdentifier,
 		characteristic.TypeConfiguredName,
 		characteristic.TypeSleepDiscoveryMode,
+		characteristic.TypeCurrentMediaState, // play/pause state
+		characteristic.TypeTargetMediaState,  // play/pause control
 	} {
 		if tv.C(typ) == nil {
 			t.Errorf("Television missing required characteristic %s", typ)
@@ -164,6 +166,30 @@ func TestHapFirmware(t *testing.T) {
 	for _, c := range cases {
 		if got := hapFirmware(c.in); got != c.want {
 			t.Errorf("hapFirmware(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestMediaStateMapping checks the speaker's PlayStatus maps onto the right
+// HomeKit media state, and that standby reads as stopped.
+func TestMediaStateMapping(t *testing.T) {
+	r, _ := newTestRadio(t)
+	cases := []struct {
+		on         bool
+		playStatus string
+		want       int
+	}{
+		{true, "PLAY_STATE", characteristic.CurrentMediaStatePlay},
+		{true, "BUFFERING_STATE", characteristic.CurrentMediaStatePlay},
+		{true, "PAUSE_STATE", characteristic.CurrentMediaStatePause},
+		{true, "STOP_STATE", characteristic.CurrentMediaStateStop},
+		{true, "", characteristic.CurrentMediaStateStop},
+		{false, "PLAY_STATE", characteristic.CurrentMediaStateStop}, // standby wins
+	}
+	for _, c := range cases {
+		r.setMediaState(c.on, c.playStatus)
+		if got := r.media.Value(); got != c.want {
+			t.Errorf("setMediaState(%v, %q) = %d, want %d", c.on, c.playStatus, got, c.want)
 		}
 	}
 }
