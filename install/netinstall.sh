@@ -106,6 +106,10 @@ close_telnet_later() {
 			log "telnet close disabled before timeout"
 			exit 0
 		fi
+		if ! pidof retouch >/dev/null 2>&1; then
+			log "retouch not running; telnet stays open"
+			exit 0
+		fi
 		while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 17000 -j DROP 2>/dev/null; do :; done
 		if iptables -t raw -I PREROUTING 1 ! -i lo -p tcp --dport 17000 -j DROP 2>>"\$LOG"; then
 			log "closed LAN telnet :17000 after 300s (loopback kept)"
