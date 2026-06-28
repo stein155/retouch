@@ -21,6 +21,7 @@ import {
 } from '../../lib/api';
 
 const fmtBass = (v) => (v > 0 ? '+' + v : String(v));
+const betaUpdatesKey = 'retouch-beta-updates';
 
 // Map the speaker's signal token to a localised label.
 const sigLabel = (t, sig) => {
@@ -109,10 +110,12 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
   const [treble, setTreble] = useState(null);            // null = unsupported/hidden
   const [trebleCaps, setTrebleCaps] = useState({ min: -100, max: 100, step: 10 });
   const [wifiOpt, setWifiOpt] = useState(null);          // null = unsupported/hidden
+  const [closeTelnet, setCloseTelnet] = useState(false);
   const [network, setNetwork] = useState(null);          // { type, ssid, signal, ip }
   const [host, setHost] = useState('');                  // friendly .local address
   const [ver, setVer] = useState(null);                  // { version, updatable }
   const [betas, setBetas] = useState([]);                // open-PR beta builds
+  const [showBetas, setShowBetas] = useState(() => localStorage.getItem(betaUpdatesKey) === '1');
   const [selTag, setSelTag] = useState('');              // '' = latest stable
   const [upd, setUpd] = useState({ phase: 'idle', text: '' }); // idle | busy | done | error
   const nameTimer = useRef(null);
@@ -133,6 +136,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
         setTrebleCaps({ min: s.treble.min ?? -100, max: s.treble.max ?? 100, step: s.treble.step || 1 });
       } else setTreble(null);
       setWifiOpt(typeof s.wifiOptimization === 'boolean' ? s.wifiOptimization : null);
+      setCloseTelnet(!!s.closeTelnet);
       setNetwork(s.network || null);
     });
     getVersion().then((v) => v && setVer(v));
@@ -188,6 +192,15 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     setUpd({ phase: 'error', text: t('updateError') });
   };
 
+  const onShowBetas = () => {
+    const next = !showBetas;
+    setShowBetas(next);
+    localStorage.setItem(betaUpdatesKey, next ? '1' : '0');
+    setSelTag(next ? (betas[0]?.tag || '') : '');
+  };
+
+  const updateLabel = selTag ? t('installSelected') : (ver?.version?.startsWith('beta-') ? t('installStable') : t('updateNow'));
+
   useEffect(() => {
     if (!open) return;
     const f = (e) => { if (e.key === 'Escape') onClose(); };
@@ -218,6 +231,12 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     const next = !wifiOpt;
     setWifiOpt(next);
     saveSettings({ wifiOptimization: next });
+  };
+
+  const onCloseTelnet = async () => {
+    const next = !closeTelnet;
+    setCloseTelnet(next);
+    try { await saveSettings({ closeTelnet: next }); } catch { setCloseTelnet(!next); }
   };
 
   return (
@@ -336,6 +355,20 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
               </>
             )}
 
+            <FormSection style={{ marginTop: 22 }}>{t('security')}</FormSection>
+            <FieldCard>
+              <FieldRow>
+                <FieldRowLabel as="span">{t('closeTelnet')}</FieldRowLabel>
+                <Toggle
+                  on={closeTelnet}
+                  onClick={onCloseTelnet}
+                  aria-label={t('closeTelnet')}
+                  style={{ marginLeft: 'auto' }}
+                />
+              </FieldRow>
+            </FieldCard>
+            <FieldHint>{t('closeTelnetHint')}</FieldHint>
+
             <MultiroomSection />
 
             {ver && (
@@ -357,26 +390,39 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
                     ) : (
                       <>
                         {betas.length > 0 && (
-                          <SelectWrap style={{ marginBottom: 8 }}>
-                            <Select
-                              value={selTag}
-                              onChange={(e) => setSelTag(e.target.value)}
-                              disabled={upd.phase === 'busy'}
-                              aria-label={t('chooseVersion')}
-                            >
-                              <option value="">{t('latestStable')}</option>
-                              <optgroup label={t('betaBuilds')}>
+                          <FieldCard style={{ marginTop: 8, marginBottom: 8 }}>
+                            <FieldRow>
+                              <FieldRowLabel as="span">{t('betaUpdates')}</FieldRowLabel>
+                              <Toggle
+                                on={showBetas}
+                                onClick={onShowBetas}
+                                aria-label={t('betaUpdates')}
+                                style={{ marginLeft: 'auto' }}
+                              />
+                            </FieldRow>
+                          </FieldCard>
+                        )}
+                        {showBetas && betas.length > 0 && (
+                          <>
+                            <SelectWrap style={{ marginBottom: 8 }}>
+                              <Select
+                                value={selTag}
+                                onChange={(e) => setSelTag(e.target.value)}
+                                disabled={upd.phase === 'busy'}
+                                aria-label={t('chooseBetaVersion')}
+                              >
                                 {betas.map((b) => (
                                   <option key={b.tag} value={b.tag}>{b.name}</option>
                                 ))}
-                              </optgroup>
-                            </Select>
-                            <SelectChev aria-hidden="true"><Icon.chevron width="18" height="18" /></SelectChev>
-                          </SelectWrap>
+                              </Select>
+                              <SelectChev aria-hidden="true"><Icon.chevron width="18" height="18" /></SelectChev>
+                            </SelectWrap>
+                            <FieldHint style={{ marginBottom: 8 }}>{t('betaUpdatesHint')}</FieldHint>
+                          </>
                         )}
                         <Button $variant="update" onClick={onUpdate} disabled={upd.phase === 'busy'}>
                           <Icon.download width="18" height="18" />
-                          <span>{selTag ? t('installSelected') : t('updateNow')}</span>
+                          <span>{updateLabel}</span>
                         </Button>
                       </>
                     )}

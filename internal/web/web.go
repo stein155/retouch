@@ -102,6 +102,8 @@ type npCacheEntry struct {
 // few minutes, so a short cache keeps the line current without per-poll fetches.
 const npTTL = 15 * time.Second
 
+const telnetCloseWindow = 5 * time.Minute
+
 // PresetMirror receives successful direct speaker preset writes so the local cloud
 // emulation cannot later sync stale presets back to the speaker.
 type PresetMirror interface {
@@ -123,7 +125,7 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		// dist is embedded at build time; this only fails if the build is broken.
 		panic("web: embedded dist missing: " + err.Error())
 	}
-	return &Server{
+	srv := &Server{
 		tunein:    tc,
 		speaker:   b,
 		store:     s,
@@ -136,6 +138,8 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		proxy:     &http.Client{Timeout: 12 * time.Second},
 		npCache:   map[string]npCacheEntry{},
 	}
+	srv.scheduleTelnetClose()
+	return srv
 }
 
 // SetPresetMirror attaches the local cloud preset store after both servers exist.
@@ -397,6 +401,7 @@ func (s *Server) debugBundle(w http.ResponseWriter, r *http.Request) {
 	b.WriteString("\n== installer state (persistent; survives reboots) ==\n")
 	fmt.Fprintf(&b, ".version   : %s\n", readFileLine(filepath.Join(s.homeDir, ".version")))
 	fmt.Fprintf(&b, ".attempts  : %s\n", readFileLine(filepath.Join(s.homeDir, ".attempts")))
+	fmt.Fprintf(&b, ".close-telnet: %v\n", fileExists(filepath.Join(s.homeDir, ".close-telnet")))
 	gaveUp := fileExists(filepath.Join(s.homeDir, ".gaveup"))
 	fmt.Fprintf(&b, ".gaveup    : %v", gaveUp)
 	if gaveUp {
@@ -1010,7 +1015,10 @@ func (s *Server) setVolume(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	out := map[string]any{"language": s.settings.Get().Language}
+	out := map[string]any{
+		"language":    s.settings.Get().Language,
+		"closeTelnet": fileExists(filepath.Join(s.homeDir, ".close-telnet")),
+	}
 	if info, err := s.speaker.Info(ctx); err == nil {
 		out["name"] = info.Name
 		out["model"] = info.Type // device model, e.g. "SoundTouch 10"
@@ -1045,6 +1053,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		Treble           *int    `json:"treble"`
 		WifiOptimization *bool   `json:"wifiOptimization"`
 		Language         *string `json:"language"`
+		CloseTelnet      *bool   `json:"closeTelnet"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.fail(w, "bad body", err)
@@ -1085,7 +1094,45 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if body.CloseTelnet != nil {
+		if err := s.setCloseTelnet(*body.CloseTelnet); err != nil {
+			s.fail(w, "set telnet close failed", err)
+			return
+		}
+	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+func (s *Server) setCloseTelnet(on bool) error {
+	path := filepath.Join(s.homeDir, ".close-telnet")
+	if on {
+		return os.WriteFile(path, []byte("1\n"), 0o644)
+	}
+	if time.Since(s.startedAt) > telnetCloseWindow {
+		return fmt.Errorf("telnet close can only be disabled within 5 minutes after ReTouch starts")
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func (s *Server) scheduleTelnetClose() {
+	go func() {
+		wait := time.Until(s.startedAt.Add(telnetCloseWindow))
+		if wait > 0 {
+			time.Sleep(wait)
+		}
+		if !fileExists(filepath.Join(s.homeDir, ".close-telnet")) {
+			return
+		}
+		cmd := exec.Command("sh", "-c", "while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 17000 -j DROP 2>/dev/null; do :; done; iptables -t raw -I PREROUTING 1 ! -i lo -p tcp --dport 17000 -j DROP")
+		if err := cmd.Run(); err != nil {
+			s.log.Warn("close telnet failed", "err", err)
+			return
+		}
+		s.log.Info("closed LAN telnet", "port", 17000, "after", telnetCloseWindow.String())
+	}()
 }
 
 func slotOf(w http.ResponseWriter, r *http.Request) (int, bool) {

@@ -20,6 +20,7 @@ BIN=$HOME_DIR/retouch
 VERSION=$HOME_DIR/.version      # installed release tag
 GAVEUP=$HOME_DIR/.gaveup
 ATTEMPTS=$HOME_DIR/.attempts
+TELNET_CLOSE=$HOME_DIR/.close-telnet
 LOCK=/tmp/retouch-install.lock
 LOG=/tmp/retouch-install.log
 MAX_ATTEMPTS=5
@@ -130,6 +131,11 @@ mkdir "$LOCK" 2>/dev/null || { log "locked"; exit 0; }
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
 mkdir -p "$HOME_DIR" 2>/dev/null
+
+case "${RETOUCH_CLOSE_TELNET:-}" in
+	1|true|yes|on) echo 1 >"$TELNET_CLOSE" ;;
+	0|false|no|off) rm -f "$TELNET_CLOSE" ;;
+esac
 
 # Resolve the target release tag (pinned, else the latest GitHub release). At boot
 # the injected run can fire BEFORE the network/DNS is ready, so the latest-release
