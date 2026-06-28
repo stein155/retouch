@@ -52,6 +52,8 @@ export const I18N = {
     wifiOptimizationHint: 'Keep Wi‑Fi awake in standby so AirPlay and streaming start instantly. Uses a little more power.',
     wifiNetwork: 'Wi‑Fi network', signal: 'Signal', ipAddress: 'IP address',
     sigExcellent: 'Excellent', sigGood: 'Good', sigFair: 'Fair', sigPoor: 'Poor',
+    security: 'Security', closeTelnet: 'Close telnet after boot',
+    closeTelnetHint: 'When enabled, telnet stays open for 5 minutes after reboot and then closes for LAN access.',
   },
   nl: {
     appTitle: 'Radio', settings: 'Instellingen', thisRadio: 'Deze radio',
@@ -88,6 +90,8 @@ export const I18N = {
     wifiOptimizationHint: 'Houd wifi wakker in stand‑by zodat AirPlay en streamen direct starten. Gebruikt iets meer stroom.',
     wifiNetwork: 'Wifi‑netwerk', signal: 'Signaal', ipAddress: 'IP‑adres',
     sigExcellent: 'Uitstekend', sigGood: 'Goed', sigFair: 'Matig', sigPoor: 'Zwak',
+    security: 'Beveiliging', closeTelnet: 'Telnet sluiten na opstarten',
+    closeTelnetHint: 'Als dit aan staat, blijft telnet 5 minuten na herstart open en sluit daarna voor toegang vanaf het netwerk.',
   },
   de: {
     appTitle: 'Radio', settings: 'Einstellungen', thisRadio: 'Dieses Radio',
@@ -124,6 +128,8 @@ export const I18N = {
     wifiOptimizationHint: 'Hält WLAN im Standby wach, damit AirPlay und Streaming sofort starten. Verbraucht etwas mehr Strom.',
     wifiNetwork: 'WLAN-Netzwerk', signal: 'Signal', ipAddress: 'IP-Adresse',
     sigExcellent: 'Ausgezeichnet', sigGood: 'Gut', sigFair: 'Mäßig', sigPoor: 'Schwach',
+    security: 'Sicherheit', closeTelnet: 'Telnet nach Start schließen',
+    closeTelnetHint: 'Wenn aktiv, bleibt Telnet nach Neustart 5 Minuten offen und wird dann im Netzwerk geschlossen.',
   },
   fr: {
     appTitle: 'Radio', settings: 'Réglages', thisRadio: 'Cette radio',
@@ -160,6 +166,8 @@ export const I18N = {
     wifiOptimizationHint: 'Garde le Wi‑Fi actif en veille pour qu’AirPlay et le streaming démarrent instantanément. Consomme un peu plus.',
     wifiNetwork: 'Réseau Wi‑Fi', signal: 'Signal', ipAddress: 'Adresse IP',
     sigExcellent: 'Excellent', sigGood: 'Bon', sigFair: 'Moyen', sigPoor: 'Faible',
+    security: 'Sécurité', closeTelnet: 'Fermer telnet après démarrage',
+    closeTelnetHint: 'Si activé, telnet reste ouvert 5 minutes après redémarrage puis se ferme pour le réseau local.',
   },
   es: {
     appTitle: 'Radio', settings: 'Ajustes', thisRadio: 'Esta radio',
@@ -196,6 +204,8 @@ export const I18N = {
     wifiOptimizationHint: 'Mantiene el Wi‑Fi activo en reposo para que AirPlay y el streaming empiecen al instante. Consume algo más.',
     wifiNetwork: 'Red Wi‑Fi', signal: 'Señal', ipAddress: 'Dirección IP',
     sigExcellent: 'Excelente', sigGood: 'Buena', sigFair: 'Regular', sigPoor: 'Débil',
+    security: 'Seguridad', closeTelnet: 'Cerrar telnet tras iniciar',
+    closeTelnetHint: 'Si está activo, telnet queda abierto 5 minutos tras reiniciar y luego se cierra para la red local.',
   },
   af: {
     appTitle: 'Radio', settings: 'Instellings', thisRadio: 'Hierdie radio',
@@ -232,6 +242,8 @@ export const I18N = {
     wifiOptimizationHint: 'Hou Wi‑Fi wakker in bystand sodat AirPlay en stroom dadelik begin. Gebruik ’n bietjie meer krag.',
     wifiNetwork: 'Wi‑Fi-netwerk', signal: 'Sein', ipAddress: 'IP-adres',
     sigExcellent: 'Uitstekend', sigGood: 'Goed', sigFair: 'Redelik', sigPoor: 'Swak',
+    security: 'Sekuriteit', closeTelnet: 'Maak telnet toe ná begin',
+    closeTelnetHint: 'Wanneer aan, bly telnet 5 minute ná herbegin oop en sluit dan vir LAN-toegang.',
   },
 };
 

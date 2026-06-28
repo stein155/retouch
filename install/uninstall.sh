@@ -22,9 +22,10 @@ pidof retouch >/dev/null 2>&1 && { kill "$(pidof retouch)" 2>/dev/null; log "sto
 if command -v iptables >/dev/null 2>&1; then
 	while iptables -t nat -D PREROUTING -p tcp --dport 8080 -j REDIRECT --to-ports 8000 2>/dev/null; do :; done
 	while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 8000 -j DROP 2>/dev/null; do :; done
+	while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 17000 -j DROP 2>/dev/null; do :; done
 	# also clear the older :80 redirect from earlier versions, if present
 	while iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports 8000 2>/dev/null; do :; done
-	log "removed :8080 redirect + :8000-hide (if present)"
+	log "removed :8080 redirect + :8000/:17000-hide (if present)"
 fi
 
 if [ -f "$CFG.original" ]; then

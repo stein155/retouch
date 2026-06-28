@@ -20,6 +20,7 @@ BIN=$HOME_DIR/retouch
 VERSION=$HOME_DIR/.version      # installed release tag
 GAVEUP=$HOME_DIR/.gaveup
 ATTEMPTS=$HOME_DIR/.attempts
+TELNET_CLOSE=$HOME_DIR/.close-telnet
 LOCK=/tmp/retouch-install.lock
 LOG=/tmp/retouch-install.log
 MAX_ATTEMPTS=5
@@ -92,7 +93,30 @@ expose_8080() {
 	fi
 }
 
+close_telnet_later() {
+	command -v iptables >/dev/null 2>&1 || { log "no iptables; telnet stays open"; return 0; }
+	while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 17000 -j DROP 2>/dev/null; do :; done
+	if [ ! -f "$TELNET_CLOSE" ]; then
+		log "telnet close disabled"
+		return 0
+	fi
+	(
+		sleep 300
+		if [ ! -f "$TELNET_CLOSE" ]; then
+			log "telnet close disabled before timeout"
+			exit 0
+		fi
+		while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 17000 -j DROP 2>/dev/null; do :; done
+		if iptables -t raw -I PREROUTING 1 ! -i lo -p tcp --dport 17000 -j DROP 2>>"\$LOG"; then
+			log "closed LAN telnet :17000 after 300s (loopback kept)"
+		else
+			log "could not close LAN telnet :17000"
+		fi
+	) &
+}
+
 expose_8080
+close_telnet_later
 $LAUNCH >>"\$LOG" 2>&1 &
 STARTSCRIPT
 	chmod 0755 "$START" 2>/dev/null
@@ -130,6 +154,11 @@ mkdir "$LOCK" 2>/dev/null || { log "locked"; exit 0; }
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
 mkdir -p "$HOME_DIR" 2>/dev/null
+
+case "${RETOUCH_CLOSE_TELNET:-}" in
+	1|true|yes|on) echo 1 >"$TELNET_CLOSE" ;;
+	0|false|no|off) rm -f "$TELNET_CLOSE" ;;
+esac
 
 # Resolve the target release tag (pinned, else the latest GitHub release). At boot
 # the injected run can fire BEFORE the network/DNS is ready, so the latest-release

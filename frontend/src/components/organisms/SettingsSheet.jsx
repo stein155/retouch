@@ -109,6 +109,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
   const [treble, setTreble] = useState(null);            // null = unsupported/hidden
   const [trebleCaps, setTrebleCaps] = useState({ min: -100, max: 100, step: 10 });
   const [wifiOpt, setWifiOpt] = useState(null);          // null = unsupported/hidden
+  const [closeTelnet, setCloseTelnet] = useState(false);
   const [network, setNetwork] = useState(null);          // { type, ssid, signal, ip }
   const [host, setHost] = useState('');                  // friendly .local address
   const [ver, setVer] = useState(null);                  // { version, updatable }
@@ -133,6 +134,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
         setTrebleCaps({ min: s.treble.min ?? -100, max: s.treble.max ?? 100, step: s.treble.step || 1 });
       } else setTreble(null);
       setWifiOpt(typeof s.wifiOptimization === 'boolean' ? s.wifiOptimization : null);
+      setCloseTelnet(!!s.closeTelnet);
       setNetwork(s.network || null);
     });
     getVersion().then((v) => v && setVer(v));
@@ -218,6 +220,12 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     const next = !wifiOpt;
     setWifiOpt(next);
     saveSettings({ wifiOptimization: next });
+  };
+
+  const onCloseTelnet = async () => {
+    const next = !closeTelnet;
+    setCloseTelnet(next);
+    try { await saveSettings({ closeTelnet: next }); } catch { setCloseTelnet(!next); }
   };
 
   return (
@@ -335,6 +343,20 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
                 )}
               </>
             )}
+
+            <FormSection style={{ marginTop: 22 }}>{t('security')}</FormSection>
+            <FieldCard>
+              <FieldRow>
+                <FieldRowLabel as="span">{t('closeTelnet')}</FieldRowLabel>
+                <Toggle
+                  on={closeTelnet}
+                  onClick={onCloseTelnet}
+                  aria-label={t('closeTelnet')}
+                  style={{ marginLeft: 'auto' }}
+                />
+              </FieldRow>
+            </FieldCard>
+            <FieldHint>{t('closeTelnetHint')}</FieldHint>
 
             <MultiroomSection />
 

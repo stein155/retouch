@@ -254,6 +254,9 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if got["language"] != "en" {
 		t.Errorf("language = %v, want en", got["language"])
 	}
+	if got["closeTelnet"] != false {
+		t.Errorf("closeTelnet = %v, want false", got["closeTelnet"])
+	}
 	// bass comes back as an object (target/actual/min/max).
 	if _, ok := got["bass"]; !ok {
 		t.Errorf("settings missing bass: %+v", got)
@@ -283,6 +286,20 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 	if bass["target"].(float64) != -4 || bass["actual"].(float64) != -4 {
 		t.Errorf("bass after set = %+v, want target/actual -4", bass)
+	}
+
+	rec = do(t, h, "PUT", "/api/settings", `{"closeTelnet":true}`)
+	if rec.Code != 200 {
+		t.Fatalf("PUT closeTelnet on: %d (%s)", rec.Code, rec.Body)
+	}
+	rec = do(t, h, "GET", "/api/settings", "")
+	decodeBody(t, rec, &got)
+	if got["closeTelnet"] != true {
+		t.Errorf("closeTelnet after on = %v, want true", got["closeTelnet"])
+	}
+	rec = do(t, h, "PUT", "/api/settings", `{"closeTelnet":false}`)
+	if rec.Code != 200 {
+		t.Fatalf("PUT closeTelnet off: %d (%s)", rec.Code, rec.Body)
 	}
 }
 

@@ -102,6 +102,8 @@ type npCacheEntry struct {
 // few minutes, so a short cache keeps the line current without per-poll fetches.
 const npTTL = 15 * time.Second
 
+const telnetCloseWindow = 5 * time.Minute
+
 // PresetMirror receives successful direct speaker preset writes so the local cloud
 // emulation cannot later sync stale presets back to the speaker.
 type PresetMirror interface {
@@ -1010,7 +1012,10 @@ func (s *Server) setVolume(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	out := map[string]any{"language": s.settings.Get().Language}
+	out := map[string]any{
+		"language":    s.settings.Get().Language,
+		"closeTelnet": fileExists(filepath.Join(s.homeDir, ".close-telnet")),
+	}
 	if info, err := s.speaker.Info(ctx); err == nil {
 		out["name"] = info.Name
 		out["model"] = info.Type // device model, e.g. "SoundTouch 10"
@@ -1045,6 +1050,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		Treble           *int    `json:"treble"`
 		WifiOptimization *bool   `json:"wifiOptimization"`
 		Language         *string `json:"language"`
+		CloseTelnet      *bool   `json:"closeTelnet"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.fail(w, "bad body", err)
@@ -1085,7 +1091,27 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if body.CloseTelnet != nil {
+		if err := s.setCloseTelnet(*body.CloseTelnet); err != nil {
+			s.fail(w, "set telnet close failed", err)
+			return
+		}
+	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+func (s *Server) setCloseTelnet(on bool) error {
+	path := filepath.Join(s.homeDir, ".close-telnet")
+	if on {
+		return os.WriteFile(path, []byte("1\n"), 0o644)
+	}
+	if time.Since(s.startedAt) > telnetCloseWindow {
+		return fmt.Errorf("telnet close can only be disabled within 5 minutes after ReTouch starts")
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func slotOf(w http.ResponseWriter, r *http.Request) (int, bool) {
