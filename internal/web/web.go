@@ -125,7 +125,7 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		// dist is embedded at build time; this only fails if the build is broken.
 		panic("web: embedded dist missing: " + err.Error())
 	}
-	return &Server{
+	srv := &Server{
 		tunein:    tc,
 		speaker:   b,
 		store:     s,
@@ -138,6 +138,8 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		proxy:     &http.Client{Timeout: 12 * time.Second},
 		npCache:   map[string]npCacheEntry{},
 	}
+	srv.scheduleTelnetClose()
+	return srv
 }
 
 // SetPresetMirror attaches the local cloud preset store after both servers exist.
@@ -399,6 +401,7 @@ func (s *Server) debugBundle(w http.ResponseWriter, r *http.Request) {
 	b.WriteString("\n== installer state (persistent; survives reboots) ==\n")
 	fmt.Fprintf(&b, ".version   : %s\n", readFileLine(filepath.Join(s.homeDir, ".version")))
 	fmt.Fprintf(&b, ".attempts  : %s\n", readFileLine(filepath.Join(s.homeDir, ".attempts")))
+	fmt.Fprintf(&b, ".close-telnet: %v\n", fileExists(filepath.Join(s.homeDir, ".close-telnet")))
 	gaveUp := fileExists(filepath.Join(s.homeDir, ".gaveup"))
 	fmt.Fprintf(&b, ".gaveup    : %v", gaveUp)
 	if gaveUp {
@@ -1112,6 +1115,24 @@ func (s *Server) setCloseTelnet(on bool) error {
 		return err
 	}
 	return nil
+}
+
+func (s *Server) scheduleTelnetClose() {
+	go func() {
+		wait := time.Until(s.startedAt.Add(telnetCloseWindow))
+		if wait > 0 {
+			time.Sleep(wait)
+		}
+		if !fileExists(filepath.Join(s.homeDir, ".close-telnet")) {
+			return
+		}
+		cmd := exec.Command("sh", "-c", "while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 17000 -j DROP 2>/dev/null; do :; done; iptables -t raw -I PREROUTING 1 ! -i lo -p tcp --dport 17000 -j DROP")
+		if err := cmd.Run(); err != nil {
+			s.log.Warn("close telnet failed", "err", err)
+			return
+		}
+		s.log.Info("closed LAN telnet", "port", 17000, "after", telnetCloseWindow.String())
+	}()
 }
 
 func slotOf(w http.ResponseWriter, r *http.Request) (int, bool) {
