@@ -114,6 +114,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
   const [host, setHost] = useState('');                  // friendly .local address
   const [ver, setVer] = useState(null);                  // { version, updatable }
   const [betas, setBetas] = useState([]);                // open-PR beta builds
+  const [showBetas, setShowBetas] = useState(false);
   const [selTag, setSelTag] = useState('');              // '' = latest stable
   const [upd, setUpd] = useState({ phase: 'idle', text: '' }); // idle | busy | done | error
   const nameTimer = useRef(null);
@@ -188,6 +189,12 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
       return;
     }
     setUpd({ phase: 'error', text: t('updateError') });
+  };
+
+  const onShowBetas = () => {
+    const next = !showBetas;
+    setShowBetas(next);
+    setSelTag(next ? (betas[0]?.tag || '') : '');
   };
 
   useEffect(() => {
@@ -379,22 +386,35 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
                     ) : (
                       <>
                         {betas.length > 0 && (
-                          <SelectWrap style={{ marginBottom: 8 }}>
-                            <Select
-                              value={selTag}
-                              onChange={(e) => setSelTag(e.target.value)}
-                              disabled={upd.phase === 'busy'}
-                              aria-label={t('chooseVersion')}
-                            >
-                              <option value="">{t('latestStable')}</option>
-                              <optgroup label={t('betaBuilds')}>
+                          <FieldCard style={{ marginBottom: 8 }}>
+                            <FieldRow>
+                              <FieldRowLabel as="span">{t('betaUpdates')}</FieldRowLabel>
+                              <Toggle
+                                on={showBetas}
+                                onClick={onShowBetas}
+                                aria-label={t('betaUpdates')}
+                                style={{ marginLeft: 'auto' }}
+                              />
+                            </FieldRow>
+                          </FieldCard>
+                        )}
+                        {showBetas && betas.length > 0 && (
+                          <>
+                            <SelectWrap style={{ marginBottom: 8 }}>
+                              <Select
+                                value={selTag}
+                                onChange={(e) => setSelTag(e.target.value)}
+                                disabled={upd.phase === 'busy'}
+                                aria-label={t('chooseBetaVersion')}
+                              >
                                 {betas.map((b) => (
                                   <option key={b.tag} value={b.tag}>{b.name}</option>
                                 ))}
-                              </optgroup>
-                            </Select>
-                            <SelectChev aria-hidden="true"><Icon.chevron width="18" height="18" /></SelectChev>
-                          </SelectWrap>
+                              </Select>
+                              <SelectChev aria-hidden="true"><Icon.chevron width="18" height="18" /></SelectChev>
+                            </SelectWrap>
+                            <FieldHint style={{ marginBottom: 8 }}>{t('betaUpdatesHint')}</FieldHint>
+                          </>
                         )}
                         <Button $variant="update" onClick={onUpdate} disabled={upd.phase === 'busy'}>
                           <Icon.download width="18" height="18" />
