@@ -116,8 +116,8 @@ close_telnet_later() {
 }
 
 expose_8080
-close_telnet_later
 $LAUNCH >>"\$LOG" 2>&1 &
+close_telnet_later
 STARTSCRIPT
 	chmod 0755 "$START" 2>/dev/null
 }
