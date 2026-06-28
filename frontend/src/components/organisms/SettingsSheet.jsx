@@ -21,6 +21,7 @@ import {
 } from '../../lib/api';
 
 const fmtBass = (v) => (v > 0 ? '+' + v : String(v));
+const betaUpdatesKey = 'retouch-beta-updates';
 
 // Map the speaker's signal token to a localised label.
 const sigLabel = (t, sig) => {
@@ -114,7 +115,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
   const [host, setHost] = useState('');                  // friendly .local address
   const [ver, setVer] = useState(null);                  // { version, updatable }
   const [betas, setBetas] = useState([]);                // open-PR beta builds
-  const [showBetas, setShowBetas] = useState(false);
+  const [showBetas, setShowBetas] = useState(() => localStorage.getItem(betaUpdatesKey) === '1');
   const [selTag, setSelTag] = useState('');              // '' = latest stable
   const [upd, setUpd] = useState({ phase: 'idle', text: '' }); // idle | busy | done | error
   const nameTimer = useRef(null);
@@ -194,8 +195,11 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
   const onShowBetas = () => {
     const next = !showBetas;
     setShowBetas(next);
+    localStorage.setItem(betaUpdatesKey, next ? '1' : '0');
     setSelTag(next ? (betas[0]?.tag || '') : '');
   };
+
+  const updateLabel = selTag ? t('installSelected') : (ver?.version?.startsWith('beta-') ? t('installStable') : t('updateNow'));
 
   useEffect(() => {
     if (!open) return;
@@ -386,7 +390,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
                     ) : (
                       <>
                         {betas.length > 0 && (
-                          <FieldCard style={{ marginBottom: 8 }}>
+                          <FieldCard style={{ marginTop: 8, marginBottom: 8 }}>
                             <FieldRow>
                               <FieldRowLabel as="span">{t('betaUpdates')}</FieldRowLabel>
                               <Toggle
@@ -418,7 +422,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
                         )}
                         <Button $variant="update" onClick={onUpdate} disabled={upd.phase === 'busy'}>
                           <Icon.download width="18" height="18" />
-                          <span>{selTag ? t('installSelected') : t('updateNow')}</span>
+                          <span>{updateLabel}</span>
                         </Button>
                       </>
                     )}
