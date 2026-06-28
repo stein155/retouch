@@ -64,6 +64,7 @@ write_start_script() {
 
 LOG=/tmp/retouch.log
 APP_PORT=${WEB_LISTEN#:}
+MARGE_PORT=${MARGE_LISTEN#:}
 
 log() { echo "[retouch-start] \$*" >>"\$LOG" 2>&1; }
 
@@ -93,7 +94,24 @@ expose_8080() {
 	fi
 }
 
+# /speaker notifications validate app_key by calling Bose's hardcoded audio
+# notification auth host on port 80. ReTouch already serves the auth stub on
+# marge (:9080); route that firmware call there on every boot.
+expose_speaker_auth() {
+	for h in audionotification.api.bosecm.com dev-audionotification.api.bosecm.com; do
+		grep -q "127.0.0.1[[:space:]].*\$h" /etc/hosts 2>/dev/null || echo "127.0.0.1 \$h" >> /etc/hosts
+	done
+	command -v iptables >/dev/null 2>&1 || { log "no iptables; /speaker auth route not installed"; return 0; }
+	iptables -t nat -C OUTPUT -p tcp -d 127.0.0.1 --dport 80 -j REDIRECT --to-ports "\$MARGE_PORT" 2>/dev/null && return 0
+	if iptables -t nat -I OUTPUT 1 -p tcp -d 127.0.0.1 --dport 80 -j REDIRECT --to-ports "\$MARGE_PORT" 2>>"\$LOG"; then
+		log "redirected local :80 audio-notification auth -> :\$MARGE_PORT"
+	else
+		log "could not redirect local :80 audio-notification auth -> :\$MARGE_PORT"
+	fi
+}
+
 expose_8080
+expose_speaker_auth
 $LAUNCH >>"\$LOG" 2>&1 &
 STARTSCRIPT
 	chmod 0755 "$START" 2>/dev/null
