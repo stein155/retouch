@@ -1,0 +1,41 @@
+name: "✅ Report a working speaker"
+description: "Tell us ReTouch works on your SoundTouch model + firmware so we can add it to the list."
+title: "Works on: <speaker model> (<firmware>)"
+labels: ["confirmed-hardware"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping! Every report makes the next person more confident to try ReTouch.
+        You can find the firmware version in the SoundTouch app, or in ReTouch's settings.
+  - type: input
+    id: model
+    attributes:
+      label: Speaker model
+      placeholder: "e.g. Bose SoundTouch 10 / 20 / 30 / Wave / Portable"
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      placeholder: "e.g. 27.0.6.46330.5043500 epdbuild..."
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: How well does it work?
+      options:
+        - "Everything works (radio, presets, multiroom, updates)"
+        - "Mostly works — minor issues (describe below)"
+        - "Partly works (describe below)"
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything worth noting?
+      placeholder: "Quirks, install hiccups, a feature that didn't work, etc. Optional."
+    validations:
+      required: false

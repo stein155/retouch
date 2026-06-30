@@ -10,6 +10,15 @@ for multiroom, and keep it updated — all from your phone.
 > "SoundTouch" and "Bose" are trademarks of Bose Corporation. ReTouch is an
 > unofficial community project — use at your own risk.
 
+### Is this you?
+
+If Bose shutting down the SoundTouch servers left you with any of these, ReTouch fixes it:
+
+- Internet radio stopped working and your presets play nothing
+- The SoundTouch app can't find or add music sources anymore
+- The speaker still powers on and plays Bluetooth/AUX, but the "smart" half is dead
+- You looked into a Raspberry Pi or always-on server as a workaround and would rather not
+
 ## No extra hardware. No cloud. No fuss.
 
 The whole thing is one tiny program that lives on a speaker you already own. There
@@ -20,6 +29,21 @@ is nothing else to buy, run, or keep powered on:
 - ❌ **No VPS, no cloud, no account** — nothing leaves your home network
 - ❌ **No desktop app** — after the one-time install you never touch a terminal again
 - 📱 **It's just a web page** — open the link, *Add to Home Screen*, and use it like any app
+
+### How that compares to the usual approach
+
+Most ways to revive a SoundTouch put a second box on your network — a Raspberry Pi
+or an always-on computer that has to keep running for the speaker to work. ReTouch
+takes the other route and lives on the speaker itself:
+
+| | The usual approach | **ReTouch** |
+|---|---|---|
+| Where it runs | A separate Pi / PC / server | **On the speaker itself** |
+| Extra hardware to buy | Usually yes | **None** |
+| Something always-on | Yes — if it's off, the radio's off | **No — just the speaker** |
+| Where your data goes | Often via an external box or account | **Stays on your home network** |
+| Setup | Flash an image, wire it up, maintain it | **One install line, then a web app** |
+| Reversible | Varies | **Yes — one uninstall script** |
 
 ## Screenshots
 
