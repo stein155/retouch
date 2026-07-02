@@ -115,6 +115,8 @@ type streamURLEntry struct {
 // minutes, so a short cache keeps the line current without per-poll stream reads.
 const npTTL = 15 * time.Second
 
+const updateDownloadTimeout = 5 * time.Minute
+
 // streamURLTTL is how long a resolved stream URL is reused before re-resolving.
 const streamURLTTL = 5 * time.Minute
 
@@ -666,12 +668,16 @@ func (s *Server) getJSON(ctx context.Context, target string, out any) error {
 }
 
 func (s *Server) downloadFile(ctx context.Context, target, path string, mode fs.FileMode) error {
+	ctx, cancel := context.WithTimeout(ctx, updateDownloadTimeout)
+	defer cancel()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "ReTouch/"+s.version)
-	resp, err := s.proxy.Do(req)
+	client := &http.Client{Timeout: updateDownloadTimeout}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -686,7 +692,11 @@ func (s *Server) downloadFile(ctx context.Context, target, path string, mode fs.
 	_, copyErr := io.Copy(f, resp.Body)
 	closeErr := f.Close()
 	if copyErr != nil {
+		_ = os.Remove(path)
 		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(path)
 	}
 	return closeErr
 }
