@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { getNowPlaying, getVolume, getPresets } from '../lib/api';
+import { subscribeState } from '../lib/events';
 import { sameStation } from '../lib/station';
 
 // Live state for the single speaker driven through STLocal's /api/* endpoints.
@@ -14,8 +15,9 @@ import { sameStation } from '../lib/station';
 
 const PENDING_MAX_MS = 15000; // hard cap: give up holding, show reality (likely an error)
 const STOP_HOLD_MS = 8000; // after Stop: ignore the box still reporting PLAY_STATE this long
-const POLL_ACTIVE_MS = 2500; // poll faster while starting / buffering
-const POLL_IDLE_MS = 8000; // settle back to a calm poll when playing / idle
+const POLL_ACTIVE_MS = 2500; // poll faster while starting / buffering (SSE down)
+const POLL_IDLE_MS = 8000; // settle back to a calm poll when playing / idle (SSE down)
+const POLL_SAFETY_MS = 30000; // while SSE is live, only poll occasionally as a backstop
 const VOLUME_HOLD_MS = 2500; // ignore polled volume this long after a local change
 
 export function useSpeaker() {
@@ -45,19 +47,23 @@ export function useSpeaker() {
   // Set on Stop: while it holds, ignore the box still reporting the old station
   // as playing (its state transitions lag, just like on start).
   const stopHoldRef = useRef(0);
+  // Whether the SSE stream is live. While connected, state is pushed and polling
+  // drops to a slow safety net; when the stream drops we resume adaptive polling.
+  const connectedRef = useRef(false);
 
-  const refresh = useCallback(async () => {
-    const seq = ++refreshSeqRef.current;
-    const [np, vol] = await Promise.all([getNowPlaying(), getVolume()]);
-    if (seq !== refreshSeqRef.current) return; // a newer refresh is in flight or landed
+  // Fold a fresh reading (from a poll or an SSE push) into local state. np is the
+  // normalised now-playing (object / {standby} / null-or-undefined when unknown);
+  // vol is a number (or null/undefined when unknown). Both sources funnel through
+  // here so the optimistic holds behave identically whichever delivered the update.
+  const applyState = useCallback((np, vol) => {
     // Right after Stop the box still reports the old station as PLAY_STATE for a
     // moment; ignore now-playing (but not volume) until it catches up or the hold
     // expires, so the stopped station doesn't pop back on screen.
     const hold = stopHoldRef.current;
-    const stillPlaying = np !== null && !np.standby && np.playStatus === 'PLAY_STATE';
+    const stillPlaying = np != null && !np.standby && np.playStatus === 'PLAY_STATE';
     const holding = hold && stillPlaying && Date.now() - hold < STOP_HOLD_MS;
     if (hold && !holding) stopHoldRef.current = 0;
-    if (np !== null && !holding) {
+    if (np != null && !holding) {
       setNowPlaying(np);
       const p = pendingRef.current;
       if (p) {
@@ -73,7 +79,7 @@ export function useSpeaker() {
         if (settled || elapsed > PENDING_MAX_MS) setPending(null);
       }
     }
-    if (vol !== null) {
+    if (vol != null) {
       // While a local change is held, only accept the speaker's value once it has
       // caught up to what we set (or the hold expires) — otherwise a stale read
       // would make the slider jump back.
@@ -86,6 +92,13 @@ export function useSpeaker() {
       }
     }
   }, []);
+
+  const refresh = useCallback(async () => {
+    const seq = ++refreshSeqRef.current;
+    const [np, vol] = await Promise.all([getNowPlaying(), getVolume()]);
+    if (seq !== refreshSeqRef.current) return; // a newer refresh is in flight or landed
+    applyState(np, vol);
+  }, [applyState]);
 
   // Set volume locally and hold that value briefly against stale polls.
   const setVolumeOptimistic = useCallback((v) => {
@@ -186,7 +199,26 @@ export function useSpeaker() {
     Promise.all([refresh(), refreshPresets()]).finally(() => setLoading(false));
   }, [refresh, refreshPresets]);
 
-  // Adaptive polling: quick while a station is starting / buffering, calm otherwise.
+  // Live push: the server streams now-playing + volume the instant they change.
+  // An SSE push is the freshest truth, so bump the refresh sequence to discard
+  // any slower in-flight poll response before folding it in.
+  useEffect(() => {
+    return subscribeState({
+      onState: ({ now, volume }) => {
+        refreshSeqRef.current++;
+        applyState(now, volume);
+      },
+      onOpen: () => {
+        connectedRef.current = true;
+      },
+      onError: () => {
+        connectedRef.current = false;
+      },
+    });
+  }, [applyState]);
+
+  // Polling: adaptive (quick while starting / buffering) when the SSE stream is
+  // down; a slow safety net while it's live, in case a push is ever missed.
   useEffect(() => {
     let timer;
     let cancelled = false;
@@ -194,7 +226,8 @@ export function useSpeaker() {
       await refresh();
       if (cancelled) return;
       const active = statusRef.current === 'starting' || statusRef.current === 'buffering';
-      timer = setTimeout(tick, active ? POLL_ACTIVE_MS : POLL_IDLE_MS);
+      const delay = connectedRef.current ? POLL_SAFETY_MS : active ? POLL_ACTIVE_MS : POLL_IDLE_MS;
+      timer = setTimeout(tick, delay);
     };
     timer = setTimeout(tick, POLL_IDLE_MS);
     return () => {

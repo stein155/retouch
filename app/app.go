@@ -135,6 +135,9 @@ func Run() {
 		}()
 	}
 
+	// Push live playback/volume state to browsers over SSE (/api/events).
+	go webSrv.Run(ctx)
+
 	var wg sync.WaitGroup
 	serve := func(name, addr string, h http.Handler) {
 		wg.Add(1)
