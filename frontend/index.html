@@ -6,6 +6,23 @@
     <title>ReTouch</title>
     <meta name="theme-color" content="#f1e6cb" />
     <link rel="icon" href="data:," />
+    <!-- Critical base layout, inline so it applies before the JS bundle mounts
+         and styled-components injects GlobalStyle. Without it the body briefly
+         shows the UA margin + a window scrollbar, so the centred app frame jumps
+         from narrow to wider on refresh. Keep in sync with GlobalStyle. -->
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #f1e6cb;
+        height: 100dvh;
+        overflow: hidden;
+        overscroll-behavior: none;
+      }
+      @media (min-width: 720px) {
+        body { display: grid; place-items: center; }
+      }
+    </style>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=DM+Serif+Display&family=JetBrains+Mono:wght@500;700&family=Caveat:wght@600;700&family=Bebas+Neue&display=swap" rel="stylesheet" />
