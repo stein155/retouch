@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import styled from 'styled-components';
 import { Icon } from '../atoms/Icon';
 import { Spinner } from '../atoms/Spinner';
+import { Skeleton } from '../atoms/Skeleton';
 import { Button } from '../atoms/Button';
 import { Toggle } from '../atoms/Toggle';
 import { BassSlider } from '../molecules/BassSlider';
@@ -96,6 +97,48 @@ function MultiroomSection() {
   );
 }
 
+// Shimmering placeholder shown while the sheet's first settings fetch is in
+// flight. Mirrors the real form's section rhythm so the layout doesn't jump
+// when the data lands.
+function SettingsSkeleton() {
+  const section = { marginTop: 22 };
+  return (
+    <Form aria-hidden="true">
+      <FormSection><Skeleton $w="30%" $h="12px" /></FormSection>
+      <FieldCard>
+        <FieldRow>
+          <Skeleton $w="72px" $h="14px" />
+          <Skeleton $w="40%" $h="14px" style={{ marginLeft: 'auto' }} />
+        </FieldRow>
+      </FieldCard>
+
+      <FormSection style={section}><Skeleton $w="26%" $h="12px" /></FormSection>
+      <BassCard>
+        <BassHead>
+          <Skeleton $w="64px" $h="15px" />
+          <Skeleton $w="28px" $h="15px" />
+        </BassHead>
+        <Skeleton $h="8px" $r="4px" />
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 9 }}>
+          <Skeleton $w="24px" $h="11px" />
+          <Skeleton $w="24px" $h="11px" />
+        </div>
+      </BassCard>
+
+      <FormSection style={section}><Skeleton $w="34%" $h="12px" /></FormSection>
+      <Skeleton $h="49px" $r="14px" />
+
+      <FormSection style={section}><Skeleton $w="28%" $h="12px" /></FormSection>
+      <FieldCard>
+        <FieldRow>
+          <Skeleton $w="55%" $h="14px" />
+          <Skeleton $w="42px" $h="24px" $r="12px" style={{ marginLeft: 'auto' }} />
+        </FieldRow>
+      </FieldCard>
+    </Form>
+  );
+}
+
 // Settings sheet: speaker name + sound (bass, and treble where the speaker has
 // tone controls), UI language (persisted locally), and device-specific network
 // settings (Wi-Fi/streaming optimization + a read-only connection summary). Each
@@ -118,12 +161,14 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
   const [showBetas, setShowBetas] = useState(() => localStorage.getItem(betaUpdatesKey) === '1');
   const [selTag, setSelTag] = useState('');              // '' = latest stable
   const [upd, setUpd] = useState({ phase: 'idle', text: '' }); // idle | busy | done | error
+  const [loading, setLoading] = useState(true); // true until the first settings fetch resolves
   const nameTimer = useRef(null);
   const pollRef = useRef(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) { setLoading(true); return; }
     getSettings().then((s) => {
+      setLoading(false);
       if (!s) return;
       if (typeof s.name === 'string') setName(s.name);
       if (typeof s.host === 'string') setHost(s.host);
@@ -138,7 +183,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
       setWifiOpt(typeof s.wifiOptimization === 'boolean' ? s.wifiOptimization : null);
       setCloseTelnet(!!s.closeTelnet);
       setNetwork(s.network || null);
-    });
+    }).catch(() => setLoading(false));
     getVersion().then((v) => v && setVer(v));
     getReleases().then((r) => { if (r) setBetas(r.betas || []); });
   }, [open]);
@@ -248,6 +293,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
           <SetEyebrow>{t('thisRadio')}</SetEyebrow>
         </SheetHeader>
         <SheetBody>
+          {loading ? <SettingsSkeleton /> : (
           <Form>
             <FormSection>{t('name')}</FormSection>
             <FieldCard>
@@ -436,6 +482,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
               </>
             )}
           </Form>
+          )}
         </SheetBody>
       </SheetEl>
     </>

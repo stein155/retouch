@@ -15,6 +15,7 @@ import { sameStation } from '../lib/station';
 const PENDING_MAX_MS = 15000; // hard cap: give up holding, show reality (likely an error)
 const POLL_ACTIVE_MS = 2500; // poll faster while starting / buffering
 const POLL_IDLE_MS = 8000; // settle back to a calm poll when playing / idle
+const VOLUME_HOLD_MS = 2500; // ignore polled volume this long after a local change
 
 export function useSpeaker() {
   const [nowPlaying, setNowPlaying] = useState(null); // raw normalised speaker state
@@ -25,6 +26,9 @@ export function useSpeaker() {
 
   const pendingRef = useRef(null);
   pendingRef.current = pending;
+  // Volume the user just set locally, held for a moment so a poll that reads the
+  // speaker's not-yet-applied volume can't yank the slider back. { value, until }.
+  const volumeHoldRef = useRef(null);
   // What's on screen right now (real or pending), so a tap can remember which
   // station we're switching *away* from.
   const shownNameRef = useRef('');
@@ -53,7 +57,24 @@ export function useSpeaker() {
         if (settled || elapsed > PENDING_MAX_MS) setPending(null);
       }
     }
-    if (vol !== null) setVolumeState(vol);
+    if (vol !== null) {
+      // While a local change is held, only accept the speaker's value once it has
+      // caught up to what we set (or the hold expires) — otherwise a stale read
+      // would make the slider jump back.
+      const hold = volumeHoldRef.current;
+      if (hold && Date.now() < hold.until && vol !== hold.value) {
+        // keep the optimistic value
+      } else {
+        volumeHoldRef.current = null;
+        setVolumeState(vol);
+      }
+    }
+  }, []);
+
+  // Set volume locally and hold that value briefly against stale polls.
+  const setVolumeOptimistic = useCallback((v) => {
+    volumeHoldRef.current = { value: v, until: Date.now() + VOLUME_HOLD_MS };
+    setVolumeState(v);
   }, []);
 
   const refreshPresets = useCallback(async () => {
@@ -163,7 +184,7 @@ export function useSpeaker() {
     loading,
     refreshPresets,
     refreshNowPlaying: refresh,
-    setVolumeOptimistic: setVolumeState,
+    setVolumeOptimistic,
     playOptimistic,
     stopOptimistic,
     nudge,

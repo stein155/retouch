@@ -26,3 +26,8 @@ export const mpfade = keyframes`
   from { opacity: 0; transform: translateY(3px); }
   to   { opacity: 1; transform: none; }
 `;
+
+export const shimmer = keyframes`
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+`;

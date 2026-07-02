@@ -66,6 +66,7 @@ function HomeBody({
         <PresetGrid
           presets={data.presets}
           player={data.player}
+          loading={data.loading}
           onPlay={handlePlay}
           onAssign={handleAssign}
         />
@@ -127,6 +128,13 @@ export default function HomePage() {
       if (clean(s.model)) setSpeakerModel(clean(s.model));
     });
   }, []);
+
+  // Reflect the speaker's name in the browser tab, e.g. "Living Room · ReTouch",
+  // falling back to plain "ReTouch" before the name loads.
+  useEffect(() => {
+    const nm = clean(speakerName);
+    document.title = nm ? `${nm} · ReTouch` : 'ReTouch';
+  }, [speakerName]);
 
   const handleSetLang = useCallback((code) => {
     setLang(code);
