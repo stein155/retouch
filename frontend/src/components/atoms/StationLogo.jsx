@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 function stationInitials(name) {
   if (!name) return '?';
@@ -30,31 +30,52 @@ const initialsStyle = {
 };
 
 export function StationLogo({ id, name, tuneInId, logo }) {
-  // Track failure and successful load per URL, so state doesn't leak across
-  // stations when this component is reused in place (the MiniPlayer keeps one
-  // StationLogo mounted across station switches).
-  const [errorUrl, setErrorUrl] = useState(null);
-  const [loadedUrl, setLoadedUrl] = useState(null);
-
   // Prefer an explicit logo URL (from a preset / search result), else derive
   // one from the TuneIn id. Everything is proxied.
   const logoUrl = (logo ? proxiedLogo(logo) : null) || tuneInLogoUrl(tuneInId);
 
+  // 'loading' | 'loaded' | 'error'. Keyed off logoUrl via the effect below so
+  // state doesn't leak across stations when this component is reused in place
+  // (the MiniPlayer keeps one StationLogo mounted across station switches).
+  const [status, setStatus] = useState('loading');
+  const imgRef = useRef(null);
+
+  // Reset on URL change and fade the logo in reliably. On the speaker's LAN the
+  // proxied logo often loads within a single frame; flipping opacity 0 -> 1 in
+  // that same frame gives the transition no painted "from" state, so it snaps
+  // in ("pops") instead of fading. Deferring the switch to a rAF guarantees the
+  // opacity-0 frame is painted first. We also catch images that were already
+  // cached (img.complete) before onLoad could attach, so they fade too rather
+  // than sitting invisible behind the initials.
+  useEffect(() => {
+    setStatus('loading');
+    if (!logoUrl) return undefined;
+    const img = imgRef.current;
+    if (!img || !img.complete) return undefined;
+    if (img.naturalWidth === 0) {
+      setStatus('error');
+      return undefined;
+    }
+    const raf = requestAnimationFrame(() => setStatus('loaded'));
+    return () => cancelAnimationFrame(raf);
+  }, [logoUrl]);
+
   const initials = <span style={initialsStyle}>{stationInitials(name || id || '?')}</span>;
 
-  if (!logoUrl || errorUrl === logoUrl) return initials;
+  if (!logoUrl || status === 'error') return initials;
 
   // Show the initials as a placeholder and fade the logo in over them once it
   // has loaded, so the tile doesn't sit as an empty box and then pop.
-  const loaded = loadedUrl === logoUrl;
+  const loaded = status === 'loaded';
   return (
     <span style={{ position: 'relative', width: '100%', height: '100%', display: 'grid', placeItems: 'center' }}>
       {!loaded && initials}
       <img
+        ref={imgRef}
         src={logoUrl}
         alt={name || id || ''}
-        onLoad={() => setLoadedUrl(logoUrl)}
-        onError={() => setErrorUrl(logoUrl)}
+        onLoad={() => requestAnimationFrame(() => setStatus('loaded'))}
+        onError={() => setStatus('error')}
         style={{
           position: 'absolute',
           inset: 0,
