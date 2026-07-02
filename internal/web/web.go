@@ -310,6 +310,12 @@ func (s *Server) multiroomUngroup(w http.ResponseWriter, r *http.Request) {
 			slave.DeviceID = info.DeviceID
 		}
 	}
+	if slave.DeviceID == "" {
+		// Without a device id the firmware ignores the removal; don't report
+		// "ungrouped" for a speaker that was never removed.
+		s.fail(w, "could not identify that speaker", nil)
+		return
+	}
 	master := speaker.Member{DeviceID: self.DeviceID, IP: self.IP}
 	if err := s.speaker.RemoveZoneSlave(ctx, master, []speaker.Member{slave}); err != nil {
 		s.fail(w, "ungrouping failed", err)
@@ -326,7 +332,7 @@ func (s *Server) zoneTargetIP(w http.ResponseWriter, r *http.Request) (string, b
 		IP string `json:"ip"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		s.fail(w, "bad body", err)
+		s.badRequest(w, "bad body", err)
 		return "", false
 	}
 	ip := strings.TrimSpace(body.IP)
@@ -772,7 +778,30 @@ func (s *Server) logoProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad url", http.StatusBadRequest)
 		return
 	}
+	// Logos live on public CDNs. Refuse loopback/LAN targets so the proxy can't
+	// be used to reach the loopback-only marge stub or other LAN-internal hosts.
+	if !publicHost(r.Context(), u.Hostname()) {
+		http.Error(w, "bad url", http.StatusBadRequest)
+		return
+	}
 	s.relay(w, r, u.String(), "image/png", logoMaxBytes)
+}
+
+// publicHost reports whether host resolves exclusively to globally routable
+// addresses — i.e. it is not loopback, RFC1918/ULA, link-local or unspecified.
+func publicHost(ctx context.Context, host string) bool {
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return false
+	}
+	for _, ip := range ips {
+		a := ip.IP
+		if a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() ||
+			a.IsLinkLocalMulticast() || a.IsMulticast() || a.IsUnspecified() {
+			return false
+		}
+	}
+	return true
 }
 
 // relay performs a bounded upstream GET and copies the response back. fallbackCT
@@ -823,8 +852,8 @@ func (s *Server) setPreset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p store.Preset
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil || p.StationID == "" {
-		s.fail(w, "stationId required", err)
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil || !validStationID(p.StationID) {
+		s.badRequest(w, "valid stationId required", err)
 		return
 	}
 	p.Slot = slot
@@ -837,6 +866,11 @@ func (s *Server) setPreset(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.mirror != nil {
 		s.mirror.MirrorPreset(slot, p.Name, loc, p.Logo)
+	}
+	// Keep the local store in sync: it is the fallback GET /api/presets serves
+	// when the speaker is unreachable, so it must reflect edits made here.
+	if err := s.store.Set(p); err != nil {
+		s.log.Warn("mirror preset to local store", "err", err)
 	}
 	s.log.Info("store preset", "slot", slot, "station", p.StationID, "name", p.Name)
 	writeJSON(w, 200, p)
@@ -856,6 +890,9 @@ func (s *Server) delPreset(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.mirror != nil {
 		s.mirror.RemovePreset(slot)
+	}
+	if err := s.store.Remove(slot); err != nil {
+		s.log.Warn("remove preset from local store", "err", err)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -885,8 +922,8 @@ func (s *Server) playStation(w http.ResponseWriter, r *http.Request) {
 		StationID string `json:"stationId"`
 		Name      string `json:"name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.StationID == "" {
-		s.fail(w, "stationId required", err)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !validStationID(body.StationID) {
+		s.badRequest(w, "valid stationId required", err)
 		return
 	}
 	s.playStationID(w, r, body.StationID, body.Name)
@@ -976,6 +1013,15 @@ func (s *Server) cachedNowPlaying(ctx context.Context, stationID string) (tunein
 		return tunein.Track{}, false
 	}
 	s.npMu.Lock()
+	// The cache only needs the stations currently on screen; drop expired
+	// entries once it grows past that so it can't accumulate for months.
+	if len(s.npCache) > 64 {
+		for id, e := range s.npCache {
+			if time.Since(e.at) >= npTTL {
+				delete(s.npCache, id)
+			}
+		}
+	}
 	s.npCache[stationID] = npCacheEntry{track: t, at: time.Now()}
 	s.npMu.Unlock()
 	return t, true
@@ -997,7 +1043,7 @@ func (s *Server) setVolume(w http.ResponseWriter, r *http.Request) {
 		Volume int `json:"volume"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		s.fail(w, "bad body", err)
+		s.badRequest(w, "bad body", err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
@@ -1056,7 +1102,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		CloseTelnet      *bool   `json:"closeTelnet"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		s.fail(w, "bad body", err)
+		s.badRequest(w, "bad body", err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
@@ -1106,7 +1152,16 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) setCloseTelnet(on bool) error {
 	path := filepath.Join(s.homeDir, ".close-telnet")
 	if on {
-		return os.WriteFile(path, []byte("1\n"), 0o644)
+		if err := os.WriteFile(path, []byte("1\n"), 0o644); err != nil {
+			return err
+		}
+		// Past the startup grace window the scheduled one-shot has already fired
+		// and skipped (no marker file then), so apply the rule now — otherwise the
+		// toggle reports success but the port stays open until the next boot.
+		if time.Since(s.startedAt) > telnetCloseWindow {
+			go s.closeTelnetNow()
+		}
+		return nil
 	}
 	if time.Since(s.startedAt) > telnetCloseWindow {
 		return fmt.Errorf("telnet close can only be disabled within 5 minutes after ReTouch starts")
@@ -1115,6 +1170,17 @@ func (s *Server) setCloseTelnet(on bool) error {
 		return err
 	}
 	return nil
+}
+
+// closeTelnetNow installs the raw-table DROP that hides the :17000 diagnostic CLI
+// from the LAN (loopback stays open), de-duplicating any earlier copies first.
+func (s *Server) closeTelnetNow() {
+	cmd := exec.Command("sh", "-c", "while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 17000 -j DROP 2>/dev/null; do :; done; iptables -t raw -I PREROUTING 1 ! -i lo -p tcp --dport 17000 -j DROP")
+	if err := cmd.Run(); err != nil {
+		s.log.Warn("close telnet failed", "err", err)
+		return
+	}
+	s.log.Info("closed LAN telnet", "port", 17000)
 }
 
 func (s *Server) scheduleTelnetClose() {
@@ -1126,14 +1192,16 @@ func (s *Server) scheduleTelnetClose() {
 		if !fileExists(filepath.Join(s.homeDir, ".close-telnet")) {
 			return
 		}
-		cmd := exec.Command("sh", "-c", "while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 17000 -j DROP 2>/dev/null; do :; done; iptables -t raw -I PREROUTING 1 ! -i lo -p tcp --dport 17000 -j DROP")
-		if err := cmd.Run(); err != nil {
-			s.log.Warn("close telnet failed", "err", err)
-			return
-		}
-		s.log.Info("closed LAN telnet", "port", 17000, "after", telnetCloseWindow.String())
+		s.closeTelnetNow()
 	}()
 }
+
+// stationIDRe matches a TuneIn guide id (e.g. "s6712"). The id is interpolated
+// into the ContentItem location and, via marge, into the upstream Tune.ashx
+// query, so anything beyond plain alphanumerics is rejected up front.
+var stationIDRe = regexp.MustCompile(`^[A-Za-z0-9]{1,64}$`)
+
+func validStationID(id string) bool { return stationIDRe.MatchString(id) }
 
 func slotOf(w http.ResponseWriter, r *http.Request) (int, bool) {
 	slot, err := strconv.Atoi(r.PathValue("slot"))
@@ -1155,4 +1223,13 @@ func (s *Server) fail(w http.ResponseWriter, msg string, err error) {
 		s.log.Warn(msg, "err", err.Error())
 	}
 	writeJSON(w, http.StatusBadGateway, map[string]string{"error": msg})
+}
+
+// badRequest reports a client error (malformed body, missing field) as a 400,
+// so callers can tell their own mistakes apart from speaker/upstream failures.
+func (s *Server) badRequest(w http.ResponseWriter, msg string, err error) {
+	if err != nil {
+		s.log.Warn(msg, "err", err.Error())
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 }

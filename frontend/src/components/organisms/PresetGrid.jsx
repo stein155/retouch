@@ -1,6 +1,6 @@
 import styled from 'styled-components';
 import { Section } from '../atoms/Section';
-import { PresetTile } from '../molecules/PresetTile';
+import { PresetTile, PresetTileSkeleton } from '../molecules/PresetTile';
 import { useI18n } from '../../lib/i18n';
 
 const SectHead = styled.div`
@@ -27,7 +27,7 @@ const Grid = styled.div`
   gap: 12px;
 `;
 
-export function PresetGrid({ presets, player, onPlay, onAssign }) {
+export function PresetGrid({ presets, player, loading, onPlay, onAssign }) {
   const { t } = useI18n();
   return (
     <Section>
@@ -36,15 +36,17 @@ export function PresetGrid({ presets, player, onPlay, onAssign }) {
         <SectSub>{t('tapToPlay')}</SectSub>
       </SectHead>
       <Grid>
-        {presets.map((preset, i) => (
-          <PresetTile
-            key={i}
-            preset={preset}
-            player={player}
-            onPlay={() => preset && onPlay(preset, i + 1)}
-            onAssign={() => onAssign(i + 1)}
-          />
-        ))}
+        {loading
+          ? Array.from({ length: 6 }, (_, i) => <PresetTileSkeleton key={i} />)
+          : presets.map((preset, i) => (
+            <PresetTile
+              key={i}
+              preset={preset}
+              player={player}
+              onPlay={() => preset && onPlay(preset, i + 1)}
+              onAssign={() => onAssign(i + 1)}
+            />
+          ))}
       </Grid>
     </Section>
   );

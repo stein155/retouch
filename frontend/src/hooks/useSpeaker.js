@@ -13,6 +13,7 @@ import { sameStation } from '../lib/station';
 // instead of the raw playStatus, so "starten / bufferen / live" render cleanly.
 
 const PENDING_MAX_MS = 15000; // hard cap: give up holding, show reality (likely an error)
+const STOP_HOLD_MS = 8000; // after Stop: ignore the box still reporting PLAY_STATE this long
 const POLL_ACTIVE_MS = 2500; // poll faster while starting / buffering
 const POLL_IDLE_MS = 8000; // settle back to a calm poll when playing / idle
 
@@ -34,10 +35,25 @@ export function useSpeaker() {
   // fallback until TuneIn enrichment warms up. We keep what we already knew and
   // backfill it for the same station so the logo never regresses.
   const lastPickedRef = useRef(null); // { name, logo, tuneInId }
+  // Monotonic id per refresh, so a slow response can't clobber a newer one
+  // (refresh is fired concurrently by the poll, nudge timers and action handlers).
+  const refreshSeqRef = useRef(0);
+  // Set on Stop: while it holds, ignore the box still reporting the old station
+  // as playing (its state transitions lag, just like on start).
+  const stopHoldRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const seq = ++refreshSeqRef.current;
     const [np, vol] = await Promise.all([getNowPlaying(), getVolume()]);
-    if (np !== null) {
+    if (seq !== refreshSeqRef.current) return; // a newer refresh is in flight or landed
+    // Right after Stop the box still reports the old station as PLAY_STATE for a
+    // moment; ignore now-playing (but not volume) until it catches up or the hold
+    // expires, so the stopped station doesn't pop back on screen.
+    const hold = stopHoldRef.current;
+    const stillPlaying = np !== null && !np.standby && np.playStatus === 'PLAY_STATE';
+    const holding = hold && stillPlaying && Date.now() - hold < STOP_HOLD_MS;
+    if (hold && !holding) stopHoldRef.current = 0;
+    if (np !== null && !holding) {
       setNowPlaying(np);
       const p = pendingRef.current;
       if (p) {
@@ -65,6 +81,7 @@ export function useSpeaker() {
   // station: { name, tuneInId?, logo? }.
   const playOptimistic = useCallback((station) => {
     if (!station) return;
+    stopHoldRef.current = 0;
     lastPickedRef.current = {
       name: station.name || '',
       logo: station.logo || '',
@@ -81,14 +98,23 @@ export function useSpeaker() {
 
   // Stop: drop any pending target and show idle right away (the box follows shortly).
   const stopOptimistic = useCallback(() => {
+    stopHoldRef.current = Date.now();
     setPending(null);
     setNowPlaying({ standby: true });
   }, []);
 
+  // Drop the pending target (e.g. when the play request itself failed), so the
+  // UI stops showing "starting" for a station that was never asked to play.
+  const cancelPending = useCallback(() => setPending(null), []);
+
   // Refresh now-playing a few times after an action so the optimistic state
-  // converges to the real one (wake + buffering can take a moment).
+  // converges to the real one (wake + buffering can take a moment). A new nudge
+  // supersedes the previous one's remaining timers.
+  const nudgeTimersRef = useRef([]);
   const nudge = useCallback(() => {
-    [500, 1200, 2500, 4500, 7000, 10000, 13000].forEach((ms) => setTimeout(refresh, ms));
+    nudgeTimersRef.current.forEach(clearTimeout);
+    nudgeTimersRef.current = [500, 1200, 2500, 4500, 7000, 10000, 13000]
+      .map((ms) => setTimeout(refresh, ms));
   }, [refresh]);
 
   // Derived player state the components render. status: idle | starting | buffering | playing.
@@ -166,6 +192,7 @@ export function useSpeaker() {
     setVolumeOptimistic: setVolumeState,
     playOptimistic,
     stopOptimistic,
+    cancelPending,
     nudge,
   };
 }
