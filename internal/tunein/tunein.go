@@ -165,7 +165,7 @@ func (c *Client) NowPlaying(ctx context.Context, stationID string) (Track, error
 
 // Resolve returns the stream URLs for a station id, in TuneIn's order.
 func (c *Client) Resolve(ctx context.Context, stationID string) ([]string, error) {
-	u := fmt.Sprintf("%s/Tune.ashx?id=%s&formats=%s", base, stationID, formats)
+	u := fmt.Sprintf("%s/Tune.ashx?id=%s&formats=%s", base, urlQueryEscape(stationID), formats)
 	body, err := c.get(ctx, u)
 	if err != nil {
 		return nil, err
@@ -220,8 +220,10 @@ func (c *Client) get(ctx context.Context, u string) ([]byte, error) {
 }
 
 // urlQueryEscape is a minimal query escaper (avoids importing net/url just for
-// one call and keeps spaces/'&' safe).
+// one call and keeps spaces/'&' safe). '%' must be escaped too, or a literal
+// percent in the query (e.g. "100% NL") yields an invalid escape sequence;
+// Replacer works in a single pass, so the '%' of the other replacements is safe.
 func urlQueryEscape(s string) string {
-	r := strings.NewReplacer(" ", "%20", "&", "%26", "?", "%3F", "#", "%23", "+", "%2B")
+	r := strings.NewReplacer("%", "%25", " ", "%20", "&", "%26", "?", "%3F", "#", "%23", "+", "%2B", "=", "%3D")
 	return r.Replace(s)
 }

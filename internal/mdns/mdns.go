@@ -186,6 +186,10 @@ func (r *Responder) handleQuery(msg []byte, src *net.UDPAddr) {
 	}
 	qd := int(binary.BigEndian.Uint16(msg[4:6]))
 	host := r.Hostname()
+	// A query from a port other than 5353 is a legacy one-shot resolver
+	// (RFC 6762 §6.7): it needs a unicast answer that echoes its query ID,
+	// or it never sees / discards the response.
+	legacy := src != nil && src.Port != 5353
 	off := 12
 	for i := 0; i < qd; i++ {
 		name, next, ok := readName(msg, off)
@@ -196,6 +200,11 @@ func (r *Responder) handleQuery(msg []byte, src *net.UDPAddr) {
 		qclass := binary.BigEndian.Uint16(msg[next+2 : next+4])
 		off = next + 4
 		if (qtype == typeA || qtype == typeANY) && strings.EqualFold(name, host) {
+			if legacy {
+				pkt := r.recordID(binary.BigEndian.Uint16(msg[0:2]), ttlSeconds)
+				_, _ = r.conn.WriteToUDP(pkt, src)
+				continue
+			}
 			pkt := r.record(ttlSeconds)
 			// Honour the unicast-response bit; otherwise answer the whole group.
 			if qclass&0x8000 != 0 && src != nil {
@@ -225,9 +234,14 @@ func (r *Responder) goodbye() {
 }
 
 // record builds an mDNS response carrying our single A record at the given TTL.
-func (r *Responder) record(ttl uint32) []byte {
+func (r *Responder) record(ttl uint32) []byte { return r.recordID(0, ttl) }
+
+// recordID is record with an explicit header ID (legacy unicast responses must
+// echo the query's ID; multicast responses use 0).
+func (r *Responder) recordID(id uint16, ttl uint32) []byte {
 	host := r.Hostname()
 	b := make([]byte, 12)
+	binary.BigEndian.PutUint16(b[0:2], id)
 	binary.BigEndian.PutUint16(b[2:4], flagQR|flagAA)
 	binary.BigEndian.PutUint16(b[6:8], 1) // ANCOUNT
 	b = append(b, encodeName(host)...)

@@ -26,3 +26,9 @@ export const mpfade = keyframes`
   from { opacity: 0; transform: translateY(3px); }
   to   { opacity: 1; transform: none; }
 `;
+
+// Sweep a soft highlight band across a skeleton placeholder while data loads.
+export const shimmer = keyframes`
+  from { background-position: -150% 0; }
+  to   { background-position: 150% 0; }
+`;
