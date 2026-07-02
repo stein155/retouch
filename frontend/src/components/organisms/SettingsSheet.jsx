@@ -41,7 +41,7 @@ const ScanButton = styled(Button).attrs({ $variant: 'update' })`
 // list comes from a network sweep, so it auto-scans on open and offers a manual
 // rescan. Each row toggles membership; toggles apply optimistically and revert
 // on failure.
-function MultiroomSection() {
+function MultiroomSection({ open }) {
   const { t } = useI18n();
   const [speakers, setSpeakers] = useState(null); // null = not scanned yet; [] = scanned, none found
   const [scanning, setScanning] = useState(false);
@@ -54,7 +54,9 @@ function MultiroomSection() {
     setScanning(false);
   }, []);
 
-  useEffect(() => { scan(); }, [scan]);
+  // Scan when the sheet opens (not at app start — the sheet is always mounted,
+  // just hidden), so the list is fresh each time the user actually looks at it.
+  useEffect(() => { if (open) scan(); }, [open, scan]);
 
   const toggle = async (sp) => {
     if (busy[sp.ip]) return;
@@ -104,35 +106,35 @@ function SettingsSkeleton() {
   const section = { marginTop: 22 };
   return (
     <Form aria-hidden="true">
-      <FormSection><Skeleton $w="30%" $h="12px" /></FormSection>
+      <FormSection><Skeleton style={{ width: '30%', height: 12 }} $radius="6px" /></FormSection>
       <FieldCard>
         <FieldRow>
-          <Skeleton $w="72px" $h="14px" />
-          <Skeleton $w="40%" $h="14px" style={{ marginLeft: 'auto' }} />
+          <Skeleton style={{ width: 72, height: 14 }} $radius="6px" />
+          <Skeleton style={{ width: '40%', height: 14, marginLeft: 'auto' }} $radius="6px" />
         </FieldRow>
       </FieldCard>
 
-      <FormSection style={section}><Skeleton $w="26%" $h="12px" /></FormSection>
+      <FormSection style={section}><Skeleton style={{ width: '26%', height: 12 }} $radius="6px" /></FormSection>
       <BassCard>
         <BassHead>
-          <Skeleton $w="64px" $h="15px" />
-          <Skeleton $w="28px" $h="15px" />
+          <Skeleton style={{ width: 64, height: 15 }} $radius="6px" />
+          <Skeleton style={{ width: 28, height: 15 }} $radius="6px" />
         </BassHead>
-        <Skeleton $h="8px" $r="4px" />
+        <Skeleton style={{ width: '100%', height: 8 }} $radius="4px" />
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 9 }}>
-          <Skeleton $w="24px" $h="11px" />
-          <Skeleton $w="24px" $h="11px" />
+          <Skeleton style={{ width: 24, height: 11 }} $radius="6px" />
+          <Skeleton style={{ width: 24, height: 11 }} $radius="6px" />
         </div>
       </BassCard>
 
-      <FormSection style={section}><Skeleton $w="34%" $h="12px" /></FormSection>
-      <Skeleton $h="49px" $r="14px" />
+      <FormSection style={section}><Skeleton style={{ width: '34%', height: 12 }} $radius="6px" /></FormSection>
+      <Skeleton style={{ width: '100%', height: 49 }} $radius="14px" />
 
-      <FormSection style={section}><Skeleton $w="28%" $h="12px" /></FormSection>
+      <FormSection style={section}><Skeleton style={{ width: '28%', height: 12 }} $radius="6px" /></FormSection>
       <FieldCard>
         <FieldRow>
-          <Skeleton $w="55%" $h="14px" />
-          <Skeleton $w="42px" $h="24px" $r="12px" style={{ marginLeft: 'auto' }} />
+          <Skeleton style={{ width: '55%', height: 14 }} $radius="6px" />
+          <Skeleton style={{ width: 42, height: 24, marginLeft: 'auto' }} $radius="12px" />
         </FieldRow>
       </FieldCard>
     </Form>
@@ -164,6 +166,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
   const [loading, setLoading] = useState(true); // true until the first settings fetch resolves
   const nameTimer = useRef(null);
   const pollRef = useRef(null);
+  const pollGen = useRef(0); // bumped to invalidate a poll tick that is mid-await
 
   useEffect(() => {
     if (!open) { setLoading(true); return; }
@@ -188,22 +191,30 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     getReleases().then((r) => { if (r) setBetas(r.betas || []); });
   }, [open]);
 
-  // Stop any version poll when the sheet closes or unmounts.
+  // Stop any version poll when the sheet closes or unmounts. Bumping pollGen
+  // also cancels a tick that is mid-await (clearTimeout alone can't stop that:
+  // the resumed tick would re-arm the timer and setState behind a closed sheet).
   useEffect(() => {
     if (open) return;
+    pollGen.current += 1;
     clearTimeout(pollRef.current);
     setUpd({ phase: 'idle', text: '' });
   }, [open]);
-  useEffect(() => () => clearTimeout(pollRef.current), []);
+  useEffect(() => () => {
+    pollGen.current += 1;
+    clearTimeout(pollRef.current);
+  }, []);
 
   // Poll /api/version until the speaker comes back on the target tag (it restarts
   // mid-update, so the endpoint drops out for a bit). Times out after ~3 minutes.
   const pollVersion = (target) => {
     const startV = ver?.version;
+    const gen = ++pollGen.current;
     let n = 0;
     const tick = async () => {
       n += 1;
       const v = await getVersion();
+      if (gen !== pollGen.current) return; // sheet closed / poll superseded
       // Done when we reach the target tag, or — with no known target — when the
       // version changes from a KNOWN baseline. Without a baseline we can't tell a
       // change from a first read, so keep polling rather than declare success.
@@ -415,7 +426,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
             </FieldCard>
             <FieldHint>{t('closeTelnetHint')}</FieldHint>
 
-            <MultiroomSection />
+            <MultiroomSection open={open} />
 
             {ver && (
               <>

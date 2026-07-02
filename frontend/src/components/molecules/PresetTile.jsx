@@ -4,6 +4,7 @@ import { StationLogo } from '../atoms/StationLogo';
 import { Icon } from '../atoms/Icon';
 import { EqualizerBars } from '../atoms/EqualizerBars';
 import { Spinner } from '../atoms/Spinner';
+import { Skeleton } from '../atoms/Skeleton';
 import { useI18n } from '../../lib/i18n';
 import { sameStation } from '../../lib/station';
 import { pop } from '../../theme/keyframes';
@@ -216,6 +217,30 @@ const Popover = styled.div`
   }
   button:hover { background: var(--surface-3); }
 `;
+
+// .tile-skeleton — a loading placeholder matching the filled tile's shape, so
+// the grid doesn't flash empty "add" slots before the presets arrive.
+const TileSkeleton = styled.div`
+  background: #fff;
+  border-radius: var(--radius);
+  aspect-ratio: 1.1 / 1;
+  min-height: 116px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 14px;
+`;
+
+export function PresetTileSkeleton() {
+  return (
+    <TileSkeleton aria-hidden="true">
+      <Skeleton style={{ width: 44, height: 44 }} $radius="12px" />
+      <Skeleton style={{ width: '70%', height: 16 }} $radius="6px" />
+    </TileSkeleton>
+  );
+}
 
 export function PresetTile({ preset, player, onPlay, onAssign }) {
   const { t } = useI18n();

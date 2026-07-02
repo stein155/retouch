@@ -169,8 +169,8 @@ func TestPresetBadSlot(t *testing.T) {
 func TestPresetMissingStationID(t *testing.T) {
 	h, _ := newServer(t)
 	rec := do(t, h, "PUT", "/api/presets/1", `{"name":"no id"}`)
-	if rec.Code != http.StatusBadGateway {
-		t.Errorf("PUT without stationId: code %d, want 502", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("PUT without stationId: code %d, want 400", rec.Code)
 	}
 }
 
@@ -352,8 +352,8 @@ func TestDeviceSettingsRoundTrip(t *testing.T) {
 func TestSettingsBadBody(t *testing.T) {
 	h, _ := newServer(t)
 	rec := do(t, h, "PUT", "/api/settings", `not json`)
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("PUT bad body: %d, want 502", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT bad body: %d, want 400", rec.Code)
 	}
 	var got struct {
 		Error string `json:"error"`
