@@ -2,16 +2,18 @@ name: Release
 
 # Build the web UI, cross-compile the armv7l agent, and attach the binary +
 # checksums to the GitHub release. Runs when a release is published (incl. when a
-# Release Drafter draft is published) or a v* tag is pushed; also on demand.
+# Release Drafter draft is published), or on demand.
 on:
   release:
     types: [published]
-  push:
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -21,7 +23,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -33,14 +35,14 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.22'
+          go-version: "1.22"
 
       - name: Cross-compile agent (armv7l)
         env:
           GOOS: linux
           GOARCH: arm
-          GOARM: '7'
-          CGO_ENABLED: '0'
+          GOARM: "7"
+          CGO_ENABLED: "0"
         run: go build -ldflags "-s -w -X main.version=${{ github.event.release.tag_name || github.ref_name }}" -o retouch-armv7l .
 
       - name: Checksums
