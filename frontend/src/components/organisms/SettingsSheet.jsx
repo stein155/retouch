@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import styled from 'styled-components';
 import { Icon } from '../atoms/Icon';
 import { Spinner } from '../atoms/Spinner';
+import { Skeleton } from '../atoms/Skeleton';
 import { Button } from '../atoms/Button';
 import { Toggle } from '../atoms/Toggle';
 import { BassSlider } from '../molecules/BassSlider';
@@ -98,6 +99,48 @@ function MultiroomSection({ open }) {
   );
 }
 
+// Shimmering placeholder shown while the sheet's first settings fetch is in
+// flight. Mirrors the real form's section rhythm so the layout doesn't jump
+// when the data lands.
+function SettingsSkeleton() {
+  const section = { marginTop: 22 };
+  return (
+    <Form aria-hidden="true">
+      <FormSection><Skeleton style={{ width: '30%', height: 12 }} $radius="6px" /></FormSection>
+      <FieldCard>
+        <FieldRow>
+          <Skeleton style={{ width: 72, height: 14 }} $radius="6px" />
+          <Skeleton style={{ width: '40%', height: 14, marginLeft: 'auto' }} $radius="6px" />
+        </FieldRow>
+      </FieldCard>
+
+      <FormSection style={section}><Skeleton style={{ width: '26%', height: 12 }} $radius="6px" /></FormSection>
+      <BassCard>
+        <BassHead>
+          <Skeleton style={{ width: 64, height: 15 }} $radius="6px" />
+          <Skeleton style={{ width: 28, height: 15 }} $radius="6px" />
+        </BassHead>
+        <Skeleton style={{ width: '100%', height: 8 }} $radius="4px" />
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 9 }}>
+          <Skeleton style={{ width: 24, height: 11 }} $radius="6px" />
+          <Skeleton style={{ width: 24, height: 11 }} $radius="6px" />
+        </div>
+      </BassCard>
+
+      <FormSection style={section}><Skeleton style={{ width: '34%', height: 12 }} $radius="6px" /></FormSection>
+      <Skeleton style={{ width: '100%', height: 49 }} $radius="14px" />
+
+      <FormSection style={section}><Skeleton style={{ width: '28%', height: 12 }} $radius="6px" /></FormSection>
+      <FieldCard>
+        <FieldRow>
+          <Skeleton style={{ width: '55%', height: 14 }} $radius="6px" />
+          <Skeleton style={{ width: 42, height: 24, marginLeft: 'auto' }} $radius="12px" />
+        </FieldRow>
+      </FieldCard>
+    </Form>
+  );
+}
+
 // Settings sheet: speaker name + sound (bass, and treble where the speaker has
 // tone controls), UI language (persisted locally), and device-specific network
 // settings (Wi-Fi/streaming optimization + a read-only connection summary). Each
@@ -120,13 +163,15 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
   const [showBetas, setShowBetas] = useState(() => localStorage.getItem(betaUpdatesKey) === '1');
   const [selTag, setSelTag] = useState('');              // '' = latest stable
   const [upd, setUpd] = useState({ phase: 'idle', text: '' }); // idle | busy | done | error
+  const [loading, setLoading] = useState(true); // true until the first settings fetch resolves
   const nameTimer = useRef(null);
   const pollRef = useRef(null);
   const pollGen = useRef(0); // bumped to invalidate a poll tick that is mid-await
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) { setLoading(true); return; }
     getSettings().then((s) => {
+      setLoading(false);
       if (!s) return;
       if (typeof s.name === 'string') setName(s.name);
       if (typeof s.host === 'string') setHost(s.host);
@@ -141,7 +186,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
       setWifiOpt(typeof s.wifiOptimization === 'boolean' ? s.wifiOptimization : null);
       setCloseTelnet(!!s.closeTelnet);
       setNetwork(s.network || null);
-    });
+    }).catch(() => setLoading(false));
     getVersion().then((v) => v && setVer(v));
     getReleases().then((r) => { if (r) setBetas(r.betas || []); });
   }, [open]);
@@ -259,6 +304,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
           <SetEyebrow>{t('thisRadio')}</SetEyebrow>
         </SheetHeader>
         <SheetBody>
+          {loading ? <SettingsSkeleton /> : (
           <Form>
             <FormSection>{t('name')}</FormSection>
             <FieldCard>
@@ -447,6 +493,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
               </>
             )}
           </Form>
+          )}
         </SheetBody>
       </SheetEl>
     </>

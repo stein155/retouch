@@ -146,6 +146,13 @@ export default function HomePage() {
       .finally(() => setSettingsLoaded(true));
   }, []);
 
+  // Reflect the speaker's name in the browser tab, e.g. "Living Room · ReTouch",
+  // falling back to plain "ReTouch" before the name loads.
+  useEffect(() => {
+    const nm = clean(speakerName);
+    document.title = nm ? `${nm} · ReTouch` : 'ReTouch';
+  }, [speakerName]);
+
   const handleSetLang = useCallback((code) => {
     setLang(code);
     saveSettings({ language: code });
