@@ -89,6 +89,7 @@ type Server struct {
 	ui        http.Handler // serves the embedded dist bundle
 	proxy     *http.Client // for the same-origin TuneIn / logo proxies + artwork
 	stream    *http.Client // reads ICY metadata off the audio stream
+	hub       *hub         // pushes live state to browsers over SSE (/api/events)
 
 	npMu       sync.Mutex                // guards npCache and streamURLs
 	npCache    map[string]npCacheEntry   // now-playing, keyed by station id
@@ -156,8 +157,15 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		npCache:    map[string]npCacheEntry{},
 		streamURLs: map[string]streamURLEntry{},
 	}
+	srv.hub = newHub(srv.pollState, log.With("comp", "events"))
 	srv.scheduleTelnetClose()
 	return srv
+}
+
+// Run drives the background services the Server owns — currently the SSE hub's
+// speaker poll loop — until ctx is cancelled. Call it once, in a goroutine.
+func (s *Server) Run(ctx context.Context) {
+	s.hub.run(ctx)
 }
 
 // SetPresetMirror attaches the local cloud preset store after both servers exist.
@@ -184,6 +192,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/play", s.playStation)
 	mux.HandleFunc("POST /api/stop", s.stop)
 	mux.HandleFunc("GET /api/now", s.now)
+	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/volume", s.getVolume)
 	mux.HandleFunc("POST /api/volume", s.setVolume)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
@@ -932,6 +941,7 @@ func (s *Server) playPreset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("play preset", "slot", slot)
+	s.hub.nudge() // push the new playback state to browsers at once
 	writeJSON(w, 200, map[string]int{"playing": slot})
 }
 
@@ -959,6 +969,7 @@ func (s *Server) playStationID(w http.ResponseWriter, r *http.Request, stationID
 		return
 	}
 	s.log.Info("play", "station", stationID, "name", name)
+	s.hub.nudge() // push the new playback state to browsers at once
 	writeJSON(w, 200, map[string]string{"status": "playing", "station": stationID})
 }
 
@@ -969,6 +980,7 @@ func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "stop failed", err)
 		return
 	}
+	s.hub.nudge() // push the stopped state to browsers at once
 	writeJSON(w, 200, map[string]string{"status": "stopped"})
 }
 
@@ -1135,6 +1147,7 @@ func (s *Server) setVolume(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "set volume failed", err)
 		return
 	}
+	s.hub.nudge() // push the new volume to other browsers at once
 	writeJSON(w, 200, map[string]int{"volume": body.Volume})
 }
 
