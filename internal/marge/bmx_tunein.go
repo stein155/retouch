@@ -62,7 +62,10 @@ func (s *Server) bmxTunein(w http.ResponseWriter, r *http.Request) {
 // resolver (TuneIn OPML) and returns the BMX playback document.
 func (s *Server) tuneinPlayback(w http.ResponseWriter, r *http.Request, stationID string) {
 	stationID = strings.Trim(stationID, "/")
-	if i := strings.IndexAny(stationID, "/?"); i >= 0 {
+	// Cut at any character that could smuggle extra path segments or query
+	// parameters into the upstream Tune.ashx request ('&' would inject a second
+	// query parameter, e.g. formats=hls).
+	if i := strings.IndexAny(stationID, "/?&#%"); i >= 0 {
 		stationID = stationID[:i]
 	}
 	if s.tunein == nil {

@@ -572,7 +572,9 @@ case "${RETOUCH_CLOSE_TELNET:-}" in
 esac
 NETINSTALL_RUN="sh /tmp/b"
 [ -z "$NETINSTALL_ENV" ] || NETINSTALL_RUN="$NETINSTALL_ENV sh /tmp/b"
-if send "envswitch boseurls set \"$PLACE;curl -sSL $NETINSTALL -o /tmp/b;$NETINSTALL_RUN\" \"$PLACE/update\""; then
+# -f so an HTTP error page (404/500/captive portal) fails the curl instead of being
+# saved, and && so a failed/partial download never gets executed as root.
+if send "envswitch boseurls set \"$PLACE;curl -fsSL $NETINSTALL -o /tmp/b && $NETINSTALL_RUN\" \"$PLACE/update\""; then
 	step_ok "$(msg sent_setup)"
 else
 	die "$(fmt couldnt_reach "$NAME" "$IP")"

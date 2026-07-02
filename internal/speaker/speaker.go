@@ -568,7 +568,11 @@ func (c *Client) Wake(ctx context.Context) {
 		if np, err := c.NowPlaying(ctx); err == nil && np.Source != "STANDBY" {
 			return
 		}
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
 }
 

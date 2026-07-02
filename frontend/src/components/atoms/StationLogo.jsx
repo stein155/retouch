@@ -22,18 +22,21 @@ function tuneInLogoUrl(tuneInId) {
 }
 
 export function StationLogo({ id, name, tuneInId, logo }) {
-  const [imgError, setImgError] = useState(false);
+  // Track the failure per URL, so a broken logo for one station doesn't keep
+  // suppressing the next station's logo when this component is reused in place
+  // (the MiniPlayer keeps one StationLogo mounted across station switches).
+  const [errorUrl, setErrorUrl] = useState(null);
 
   // Prefer an explicit logo URL (from a preset / search result), else derive
   // one from the TuneIn id. Everything is proxied.
   const logoUrl = (logo ? proxiedLogo(logo) : null) || tuneInLogoUrl(tuneInId);
 
-  if (logoUrl && !imgError) {
+  if (logoUrl && errorUrl !== logoUrl) {
     return (
       <img
         src={logoUrl}
         alt={name || id || ''}
-        onError={() => setImgError(true)}
+        onError={() => setErrorUrl(logoUrl)}
         style={{
           width: '100%',
           height: '100%',

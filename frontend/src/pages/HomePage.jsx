@@ -26,13 +26,19 @@ function HomeBody({
     const standby = data.player.status !== 'playing';
     data.playOptimistic(preset); // show it instantly
     data.nudge();
-    await playPreset(slot, standby, preset);
+    try {
+      await playPreset(slot, standby, preset);
+    } catch {
+      data.cancelPending(); // request never reached the box: stop showing "starting"
+    }
     data.refreshNowPlaying();
   }, [data]);
 
   const handleStop = useCallback(async () => {
     data.stopOptimistic(); // collapse to idle right away
-    await stopPlayback();
+    try {
+      await stopPlayback();
+    } catch { /* the poll reconciles with the box's real state */ }
     setTimeout(data.refreshNowPlaying, 1000);
   }, [data]);
 
@@ -47,14 +53,19 @@ function HomeBody({
     // Stations come straight from live TuneIn search, so the id is always
     // current (no hardcoded catalog ids that could go stale).
     if (!station.tuneInId) { setSearch(null); return; }
-    if (search?.mode === 'assign') {
-      await storePreset(search.slot, station.tuneInId, station.name, station.logo);
-      await data.refreshPresets();
-    }
+    const assignSlot = search?.mode === 'assign' ? search.slot : null;
     data.playOptimistic(station); // show it instantly
     data.nudge();
     setSearch(null);
-    await selectStation(station.tuneInId, station.name);
+    try {
+      if (assignSlot != null) {
+        await storePreset(assignSlot, station.tuneInId, station.name, station.logo);
+        await data.refreshPresets();
+      }
+      await selectStation(station.tuneInId, station.name);
+    } catch {
+      data.cancelPending(); // request failed: stop showing "starting"
+    }
     data.refreshNowPlaying();
   }, [search, data, setSearch]);
 
@@ -66,6 +77,7 @@ function HomeBody({
         <PresetGrid
           presets={data.presets}
           player={data.player}
+          loading={data.loading}
           onPlay={handlePlay}
           onAssign={handleAssign}
         />
@@ -82,6 +94,7 @@ function HomeBody({
         player={data.player}
         volume={data.volume}
         speakerName={speakerName}
+        loading={data.loading}
         onStop={handleStop}
         onVolume={handleVolume}
       />
