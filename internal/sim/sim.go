@@ -151,9 +151,10 @@ func postOnly(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// ServeCLI runs the :17000 diagnostic CLI on ln until ln is closed. The only command
-// the firmware sends is "sys power" (wake/standby toggle); unknown commands are
-// accepted and ignored, like the real CLI's prompt.
+// ServeCLI runs the :17000 diagnostic CLI on ln until ln is closed. It handles the
+// commands internal/speaker sends: "sys power" (wake/standby toggle), a Wi-Fi site
+// survey ("network wifi scan"), and joining a network ("network wifi profiles add").
+// Unknown commands are accepted and ignored, like the real CLI's prompt.
 func (s *Speaker) ServeCLI(ln net.Listener) {
 	for {
 		conn, err := ln.Accept()
@@ -168,10 +169,41 @@ func (s *Speaker) handleCLI(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	sc := bufio.NewScanner(conn)
 	for sc.Scan() {
-		if strings.TrimSpace(sc.Text()) == "sys power" {
+		cmd := strings.TrimSpace(sc.Text())
+		switch {
+		case cmd == "sys power":
 			s.togglePower()
+		case strings.HasPrefix(cmd, "network wifi scan"):
+			_, _ = conn.Write([]byte(s.wifiScanReply()))
+		case strings.HasPrefix(cmd, "network wifi profiles add "):
+			s.addWifiProfile(strings.TrimPrefix(cmd, "network wifi profiles add "))
 		}
 	}
+}
+
+// wifiScanReply returns a plausible site-survey response. The real firmware's wire
+// format is undocumented, so this mirrors the attribute style parseWifiScan expects.
+func (s *Speaker) wifiScanReply() string {
+	s.mu.Lock()
+	current := s.wifiSSID
+	s.mu.Unlock()
+	return `<WiFiScanResults>` +
+		`<scanResult ssid="` + esc(current) + `" signal="EXCELLENT_SIGNAL" secure="true"/>` +
+		`<scanResult ssid="Neighbour 5G" signal="GOOD_SIGNAL" secure="true"/>` +
+		`<scanResult ssid="CoffeeBar Free" signal="FAIR_SIGNAL" secure="false"/>` +
+		`</WiFiScanResults>` + "\n"
+}
+
+// addWifiProfile records a joined network so /networkInfo reflects the switch. args
+// is "<ssid> <security> [<password>]"; the SSID is the first whitespace field.
+func (s *Speaker) addWifiProfile(args string) {
+	fields := strings.Fields(args)
+	if len(fields) == 0 {
+		return
+	}
+	s.mu.Lock()
+	s.wifiSSID = fields[0]
+	s.mu.Unlock()
 }
 
 func (s *Speaker) togglePower() {

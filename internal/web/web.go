@@ -188,6 +188,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/volume", s.setVolume)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
+	mux.HandleFunc("GET /api/wifi/scan", s.wifiScan)
+	mux.HandleFunc("POST /api/wifi", s.setWifi)
 	mux.HandleFunc("GET /api/multiroom", s.multiroom)
 	mux.HandleFunc("GET /api/multiroom/speakers", s.multiroomSpeakers)
 	mux.HandleFunc("POST /api/multiroom/group", s.multiroomGroup)
@@ -1228,6 +1230,44 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, "set telnet close failed", err)
 			return
 		}
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+// wifiScan surveys nearby Wi-Fi networks so the settings sheet can offer a pick
+// list. An empty list is a valid answer (the UI falls back to manual SSID entry).
+func (s *Server) wifiScan(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	nets, err := s.speaker.ScanWifi(ctx)
+	if err != nil {
+		s.fail(w, "wifi scan failed", err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"networks": nets})
+}
+
+// setWifi joins the speaker to a Wi-Fi network. This can drop the speaker's current
+// connection (and this app) while it switches over — the UI warns before calling.
+func (s *Server) setWifi(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		SSID     string `json:"ssid"`
+		Security string `json:"security"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.badRequest(w, "bad body", err)
+		return
+	}
+	if strings.TrimSpace(body.SSID) == "" {
+		s.badRequest(w, "ssid required", nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+	if err := s.speaker.SetWifi(ctx, body.SSID, body.Security, body.Password); err != nil {
+		s.fail(w, "set wifi failed", err)
+		return
 	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }

@@ -261,6 +261,61 @@ func TestNetworkInfoRoundTrip(t *testing.T) {
 	}
 }
 
+func TestScanWifi(t *testing.T) {
+	_, c := newSim(t)
+	nets, err := c.ScanWifi(ctx())
+	if err != nil {
+		t.Fatalf("ScanWifi: %v", err)
+	}
+	if len(nets) != 3 {
+		t.Fatalf("ScanWifi returned %d networks, want 3: %+v", len(nets), nets)
+	}
+	// The sim reports the connected network first (excellent, secured), then an open one.
+	if nets[0].SSID != "HomeWiFi" || nets[0].Signal != "excellent" || !nets[0].Secure {
+		t.Errorf("network[0] = %+v", nets[0])
+	}
+	if nets[2].SSID != "CoffeeBar Free" || nets[2].Secure {
+		t.Errorf("open network parsed wrong: %+v", nets[2])
+	}
+}
+
+func TestSetWifiRoundTrip(t *testing.T) {
+	_, c := newSim(t)
+	if err := c.SetWifi(ctx(), "Studio5G", "wpa_or_wpa2", "hunter2"); err != nil {
+		t.Fatalf("SetWifi: %v", err)
+	}
+	// The sim records the joined profile, so /networkInfo now reports the new SSID.
+	if n, _ := c.NetworkInfo(ctx()); n.SSID != "Studio5G" {
+		t.Errorf("after SetWifi, SSID = %q, want %q", n.SSID, "Studio5G")
+	}
+	// A newline in the SSID would smuggle a second CLI command — must be rejected.
+	if err := c.SetWifi(ctx(), "evil\nsys power", "none", ""); err == nil {
+		t.Error("SetWifi accepted an SSID with a newline")
+	}
+	if err := c.SetWifi(ctx(), "x", "bogus", "pw"); err == nil {
+		t.Error("SetWifi accepted an unknown security type")
+	}
+}
+
+func TestParseWifiScan(t *testing.T) {
+	reply := `<WiFiScanResults>` +
+		`<scanResult ssid="Caf&amp;e" signal="GOOD_SIGNAL" security="wpa_or_wpa2"/>` +
+		`<scanResult ssid="Open Net" signal="POOR_SIGNAL" security="none"/>` +
+		`<scanResult ssid="Caf&amp;e" signal="GOOD_SIGNAL" security="wpa_or_wpa2"/>` + // dup
+		`<scanResult ssid="" signal="FAIR_SIGNAL"/>` + // hidden -> skipped
+		`</WiFiScanResults>`
+	got := parseWifiScan(reply)
+	if len(got) != 2 {
+		t.Fatalf("parseWifiScan = %d entries, want 2 (dedup + skip hidden): %+v", len(got), got)
+	}
+	if got[0].SSID != "Caf&e" || got[0].Signal != "good" || !got[0].Secure {
+		t.Errorf("entry[0] = %+v (want unescaped SSID, good, secure)", got[0])
+	}
+	if got[1].SSID != "Open Net" || got[1].Secure {
+		t.Errorf("entry[1] = %+v (want open network)", got[1])
+	}
+}
+
 func TestPresetPlayback(t *testing.T) {
 	_, c := newSim(t)
 	if err := c.StorePreset(ctx(), 2, "TUNEIN", "stationurl", "/v1/playback/station/s1", "Jazz FM", ""); err != nil {

@@ -18,7 +18,7 @@ import {
 import { useI18n, LANGS } from '../../lib/i18n';
 import {
   getSettings, saveSettings, getVersion, getReleases, startUpdate,
-  findSpeakers, groupSpeaker, ungroupSpeaker,
+  findSpeakers, groupSpeaker, ungroupSpeaker, scanWifi, setWifi,
 } from '../../lib/api';
 
 const fmtBass = (v) => (v > 0 ? '+' + v : String(v));
@@ -94,6 +94,166 @@ function MultiroomSection({ open }) {
       <ScanButton onClick={scan} disabled={scanning}>
         {scanning ? <Spinner $scan /> : <Icon.search width="18" height="18" />}
         <span>{t('findSpeakers')}</span>
+      </ScanButton>
+    </>
+  );
+}
+
+// .wifi-row — one selectable network in the Wi-Fi pick list; borrows FieldRow's
+// rhythm but is a full-width button with a check on the chosen row.
+const WifiRow = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  & + & { border-top: 1px solid rgba(31, 24, 20, 0.07); }
+`;
+
+const WifiName = styled.span`
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+const WifiMeta = styled.span`
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-3);
+  flex-shrink: 0;
+`;
+
+// Wi-Fi setup: move this speaker onto a different network. It surveys nearby
+// networks over the speaker's diagnostic CLI (best-effort — some hardware returns
+// nothing, so "Other network…" always lets the user type an SSID). Picking a
+// network reveals a password field; joining can briefly drop the speaker's own
+// connection while it switches, which the hint warns about.
+function WifiSection() {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const [nets, setNets] = useState(null); // null = not scanned yet; [] = scanned, none
+  const [scanning, setScanning] = useState(false);
+  const [sel, setSel] = useState(null);   // { ssid, secure, manual }
+  const [pw, setPw] = useState('');
+  const [status, setStatus] = useState({ phase: 'idle', text: '' }); // idle|busy|done|error
+
+  const scan = useCallback(async () => {
+    setScanning(true);
+    setNets(await scanWifi());
+    setScanning(false);
+  }, []);
+
+  const onExpand = () => { setExpanded(true); if (nets === null) scan(); };
+
+  const choose = (n) => { setSel({ ...n, manual: false }); setPw(''); setStatus({ phase: 'idle', text: '' }); };
+  const chooseManual = () => { setSel({ ssid: '', secure: true, manual: true }); setPw(''); setStatus({ phase: 'idle', text: '' }); };
+
+  const ssid = (sel?.ssid || '').trim();
+  // A scanned secured network needs a password; a manual entry is treated as open
+  // when the password is left blank, so it's never required there.
+  const needsPw = !!sel && !sel.manual && sel.secure;
+  const secure = sel?.manual ? !!pw : !!sel?.secure;
+
+  const connect = async () => {
+    if (!ssid || status.phase === 'busy') return;
+    setStatus({ phase: 'busy', text: t('wifiConnecting') });
+    try {
+      await setWifi({ ssid, security: secure ? 'wpa_or_wpa2' : 'none', password: secure ? pw : '' });
+      setStatus({ phase: 'done', text: t('wifiSaved') });
+    } catch {
+      setStatus({ phase: 'error', text: t('wifiSetError') });
+    }
+  };
+
+  if (!expanded) {
+    return (
+      <ScanButton onClick={onExpand} style={{ marginTop: 12 }}>
+        <Icon.settings width="18" height="18" />
+        <span>{t('changeWifi')}</span>
+      </ScanButton>
+    );
+  }
+
+  const showPw = needsPw || (sel && sel.manual);
+  return (
+    <>
+      <FieldHint style={{ marginTop: 12 }}>{t('wifiSetupHint')}</FieldHint>
+      {nets && nets.length > 0 && (
+        <FieldCard>
+          {nets.map((n) => (
+            <WifiRow key={n.ssid} type="button" onClick={() => choose(n)}>
+              <WifiName>{n.ssid}</WifiName>
+              <WifiMeta>
+                {n.signal && <span>{sigLabel(t, n.signal)}</span>}
+                {sel && !sel.manual && sel.ssid === n.ssid && <Icon.check width="18" height="18" />}
+              </WifiMeta>
+            </WifiRow>
+          ))}
+          <WifiRow type="button" onClick={chooseManual}>
+            <WifiName>{t('wifiOtherNetwork')}</WifiName>
+            <WifiMeta>{sel?.manual && <Icon.check width="18" height="18" />}</WifiMeta>
+          </WifiRow>
+        </FieldCard>
+      )}
+      {nets && nets.length === 0 && !scanning && (
+        <FieldHint>{t('wifiNoNetworks')}</FieldHint>
+      )}
+      {sel && (
+        <FieldCard style={{ marginTop: 12 }}>
+          {sel.manual && (
+            <FieldRow>
+              <FieldRowLabel as="span">{t('wifiNetwork')}</FieldRowLabel>
+              <FieldRowInput
+                value={sel.ssid}
+                onChange={(e) => setSel((s) => ({ ...s, ssid: e.target.value }))}
+                placeholder={t('wifiSsidPlaceholder')}
+                maxLength={32}
+                autoComplete="off"
+              />
+            </FieldRow>
+          )}
+          {showPw && (
+            <FieldRow>
+              <FieldRowLabel htmlFor="wifi-pw">{t('wifiPassword')}</FieldRowLabel>
+              <FieldRowInput
+                id="wifi-pw"
+                type="password"
+                value={pw}
+                onChange={(e) => setPw(e.target.value)}
+                placeholder={t('wifiPassword')}
+                autoComplete="off"
+              />
+            </FieldRow>
+          )}
+        </FieldCard>
+      )}
+      {sel && (
+        <Button
+          $variant="update"
+          onClick={connect}
+          disabled={status.phase === 'busy' || !ssid || (needsPw && !pw)}
+          style={{ marginTop: 8 }}
+        >
+          {status.phase === 'busy' ? <Spinner $scan /> : <Icon.check width="18" height="18" />}
+          <span>{t('wifiConnect')}</span>
+        </Button>
+      )}
+      {status.text && <FieldHint $error={status.phase === 'error'}>{status.text}</FieldHint>}
+      <ScanButton onClick={scan} disabled={scanning} style={{ marginTop: 8 }}>
+        {scanning ? <Spinner $scan /> : <Icon.search width="18" height="18" />}
+        <span>{t('wifiRescan')}</span>
       </ScanButton>
     </>
   );
@@ -368,8 +528,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
               <SelectChev aria-hidden="true"><Icon.chevron width="18" height="18" /></SelectChev>
             </SelectWrap>
 
-            {(wifiOpt !== null || network) && (
-              <>
+            <>
                 <FormSection style={{ marginTop: 22 }}>{t('network')}</FormSection>
                 {wifiOpt !== null && (
                   <>
@@ -409,8 +568,8 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
                     )}
                   </FieldCard>
                 )}
+                <WifiSection />
               </>
-            )}
 
             <FormSection style={{ marginTop: 22 }}>{t('security')}</FormSection>
             <FieldCard>
