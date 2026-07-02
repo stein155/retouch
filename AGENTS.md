@@ -22,6 +22,8 @@ as it did before. ReTouch only stands in for the API that used to live in the cl
 ```
 main.go              flags + HTTP servers (web app + local cloud-API emulation)
 internal/tunein/     TuneIn directory client (search / resolve / describe)
+internal/icy/        reads now-playing (StreamTitle) from the ICY stream metadata
+internal/artwork/    cover-art lookup for a track via the iTunes Search API
 internal/speaker/    speaker control (play, presets, volume, name, bass, multiroom zones)
 internal/discover/   finds other ReTouch speakers on the LAN (for multiroom)
 internal/marge/      local emulation of the Bose cloud API the firmware expects
