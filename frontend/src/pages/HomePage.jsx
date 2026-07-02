@@ -18,7 +18,7 @@ const clean = (value) => (typeof value === 'string' ? value.trim() : '');
 // props from HomePage. This is App.jsx's old body, unchanged in behaviour.
 function HomeBody({
   lang, onSetLang, speakerName, setSpeakerName, speakerModel,
-  search, setSearch, settingsOpen, setSettingsOpen, data,
+  search, setSearch, settingsOpen, setSettingsOpen, data, settingsLoaded,
 }) {
   const { t } = useI18n();
 
@@ -94,7 +94,7 @@ function HomeBody({
         player={data.player}
         volume={data.volume}
         speakerName={speakerName}
-        loading={data.loading}
+        loading={data.loading || !settingsLoaded}
         onStop={handleStop}
         onVolume={handleVolume}
       />
@@ -128,17 +128,22 @@ export default function HomePage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [speakerName, setSpeakerName] = useState('SoundTouch');
   const [speakerModel, setSpeakerModel] = useState('');
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   const data = useSpeaker();
 
-  // Load saved language + speaker name from the speaker once.
+  // Load saved language + speaker name from the speaker once. Track when this
+  // resolves so the player can keep its skeleton until the real name is known —
+  // otherwise it briefly shows the "SoundTouch" default and then jumps.
   useEffect(() => {
-    getSettings().then((s) => {
-      if (!s) return;
-      if (s.language && LANGS.some((l) => l.code === s.language)) setLang(s.language);
-      if (clean(s.name)) setSpeakerName(clean(s.name));
-      if (clean(s.model)) setSpeakerModel(clean(s.model));
-    });
+    getSettings()
+      .then((s) => {
+        if (!s) return;
+        if (s.language && LANGS.some((l) => l.code === s.language)) setLang(s.language);
+        if (clean(s.name)) setSpeakerName(clean(s.name));
+        if (clean(s.model)) setSpeakerModel(clean(s.model));
+      })
+      .finally(() => setSettingsLoaded(true));
   }, []);
 
   const handleSetLang = useCallback((code) => {
@@ -159,6 +164,7 @@ export default function HomePage() {
         settingsOpen={settingsOpen}
         setSettingsOpen={setSettingsOpen}
         data={data}
+        settingsLoaded={settingsLoaded}
       />
     </I18nContext.Provider>
   );

@@ -21,42 +21,51 @@ function tuneInLogoUrl(tuneInId) {
   return proxiedLogo(`http://cdn-radiotime-logos.tunein.com/${tuneInId}g.png`);
 }
 
+const initialsStyle = {
+  fontFamily: 'inherit',
+  fontWeight: 800,
+  fontSize: '14px',
+  lineHeight: 1,
+  textAlign: 'center',
+};
+
 export function StationLogo({ id, name, tuneInId, logo }) {
-  // Track the failure per URL, so a broken logo for one station doesn't keep
-  // suppressing the next station's logo when this component is reused in place
-  // (the MiniPlayer keeps one StationLogo mounted across station switches).
+  // Track failure and successful load per URL, so state doesn't leak across
+  // stations when this component is reused in place (the MiniPlayer keeps one
+  // StationLogo mounted across station switches).
   const [errorUrl, setErrorUrl] = useState(null);
+  const [loadedUrl, setLoadedUrl] = useState(null);
 
   // Prefer an explicit logo URL (from a preset / search result), else derive
   // one from the TuneIn id. Everything is proxied.
   const logoUrl = (logo ? proxiedLogo(logo) : null) || tuneInLogoUrl(tuneInId);
 
-  if (logoUrl && errorUrl !== logoUrl) {
-    return (
+  const initials = <span style={initialsStyle}>{stationInitials(name || id || '?')}</span>;
+
+  if (!logoUrl || errorUrl === logoUrl) return initials;
+
+  // Show the initials as a placeholder and fade the logo in over them once it
+  // has loaded, so the tile doesn't sit as an empty box and then pop.
+  const loaded = loadedUrl === logoUrl;
+  return (
+    <span style={{ position: 'relative', width: '100%', height: '100%', display: 'grid', placeItems: 'center' }}>
+      {!loaded && initials}
       <img
         src={logoUrl}
         alt={name || id || ''}
+        onLoad={() => setLoadedUrl(logoUrl)}
         onError={() => setErrorUrl(logoUrl)}
         style={{
+          position: 'absolute',
+          inset: 0,
           width: '100%',
           height: '100%',
           objectFit: 'contain',
           borderRadius: 'inherit',
+          opacity: loaded ? 1 : 0,
+          transition: 'opacity 260ms ease',
         }}
       />
-    );
-  }
-
-  // Fallback: initials
-  return (
-    <span style={{
-      fontFamily: 'inherit',
-      fontWeight: 800,
-      fontSize: '14px',
-      lineHeight: 1,
-      textAlign: 'center',
-    }}>
-      {stationInitials(name || id || '?')}
     </span>
   );
 }
