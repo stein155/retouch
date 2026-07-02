@@ -1022,8 +1022,12 @@ func (s *Server) enrichNowPlaying(np *speaker.NowPlaying) {
 		if strings.EqualFold(strings.TrimSpace(np.Artist), strings.TrimSpace(np.Station)) {
 			np.Artist = ""
 		}
-	}
-	if np.Art == "" && e.art != "" {
+		// The speaker's own art is the generic station logo; our track cover is
+		// more specific, so it takes priority when we have one.
+		if e.art != "" {
+			np.Art = e.art
+		}
+	} else if np.Art == "" && e.art != "" {
 		np.Art = e.art
 	}
 }
