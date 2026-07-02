@@ -1,5 +1,6 @@
 import styled from 'styled-components';
 import { StationLogo } from '../atoms/StationLogo';
+import { Marquee } from '../atoms/Marquee';
 import { VolumeSlider } from '../molecules/VolumeSlider';
 import { Icon } from '../atoms/Icon';
 import { LiveDot } from '../atoms/LiveDot';
@@ -122,24 +123,18 @@ const MpMeta = styled.div`
   min-width: 0;
 `;
 
-const MpName = styled.div`
+const MpName = styled(Marquee)`
   font-size: 15.5px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   animation: ${mpfade} 320ms cubic-bezier(.34,.78,.18,1);
 
   @media (prefers-reduced-motion: reduce) { animation: none; }
 `;
 
-const MpSub = styled.div`
+const MpSub = styled(Marquee)`
   font-size: 12px;
   color: var(--ink-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   margin-top: 2px;
   font-weight: 500;
 `;
@@ -257,12 +252,14 @@ export function MiniPlayer({ player, volume, speakerName, loading, onStop, onVol
               )}
             </MpArt>
             <MpMeta>
-              <MpName key={displayName}>{displayName}</MpName>
-              <MpSub>
-                {playing
-                  ? `${showNow ? `${nowLine} · ` : ''}${t('on')} ${speaker}`
-                  : `${statusLabel} · ${speaker}`}
-              </MpSub>
+              <MpName key={displayName} text={displayName} />
+              <MpSub
+                text={
+                  playing
+                    ? `${showNow ? `${nowLine} · ` : ''}${t('on')} ${speaker}`
+                    : `${statusLabel} · ${speaker}`
+                }
+              />
             </MpMeta>
             <MpStop aria-label={t('stop')} onClick={onStop}>
               <Icon.stop width="18" height="18" />

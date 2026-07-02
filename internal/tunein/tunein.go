@@ -1,7 +1,8 @@
 // Package tunein is a tiny client for TuneIn's public OPML API
-// (opml.radiotime.com): search for stations and resolve a station id to its
-// playable stream URLs. No key, no account. This is the only external service
-// ReTouch talks to.
+// (opml.radiotime.com): search for stations, resolve a station id to its
+// playable stream URLs, and describe the track currently playing. No key, no
+// account. Now-playing is read primarily from the standard ICY stream metadata
+// (internal/icy); NowPlaying here is the fallback for streams that carry none.
 package tunein
 
 import (
@@ -124,8 +125,8 @@ type Track struct {
 }
 
 // NowPlaying returns the track currently playing on a station via Describe.ashx.
-// Bose's cloud used to feed this metadata to the speaker; since the shutdown the
-// speaker only knows the station name, so ReTouch fetches it from TuneIn instead.
+// It is the fallback for the ICY stream reader (internal/icy): many stations
+// carry no in-stream metadata, and TuneIn sometimes still knows the song.
 // Best-effort: returns a zero Track (no error) when nothing is available.
 func (c *Client) NowPlaying(ctx context.Context, stationID string) (Track, error) {
 	u := fmt.Sprintf("%s/Describe.ashx?id=%s&render=json", base, urlQueryEscape(stationID))
