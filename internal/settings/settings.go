@@ -77,7 +77,8 @@ func (s *Store) persistLocked() error {
 		return err
 	}
 	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	// 0600: this file holds the MQTT broker password in the clear.
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, s.path)

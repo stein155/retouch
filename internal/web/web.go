@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"encoding/json"
@@ -163,7 +164,7 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		homeDir:    homeDir,
 		startedAt:  time.Now(),
 		ui:         http.FileServer(http.FS(sub)),
-		proxy:      &http.Client{Timeout: 12 * time.Second},
+		proxy:      &http.Client{Timeout: 12 * time.Second, Transport: publicOnlyTransport()},
 		stream:     &http.Client{Timeout: 12 * time.Second},
 		npCache:    map[string]npCacheEntry{},
 		streamURLs: map[string]streamURLEntry{},
@@ -226,7 +227,65 @@ func (s *Server) Handler() http.Handler {
 	// Everything else is the embedded single-page UI. More specific /api/...
 	// patterns above win; this serves index.html, assets and icons.
 	mux.HandleFunc("GET /", s.serveUI)
-	return mux
+	return s.guard(mux)
+}
+
+// maxRequestBody caps the body of a mutating request. The JSON/XML we accept is
+// tiny (a few settings fields, a station id); anything larger is a mistake or an
+// attempt to drive a large allocation on the memory-constrained speaker.
+const maxRequestBody = 64 << 10
+
+// guard wraps the API with the only access controls a LAN-only, login-less service
+// still needs: it blocks DNS-rebinding (a Host that isn't this speaker) and CSRF (a
+// cross-origin mutating request), and bounds request bodies. Without these, a web
+// page a LAN user merely visits could drive POST/PUT endpoints — e.g. repoint the
+// speaker at an attacker's MQTT broker via PUT /api/settings, or force a downgrade
+// via POST /api/update — from a single drive-by.
+func (s *Server) guard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !hostAllowed(r.Host) {
+			// A rebinding attack reaches us under the attacker's own hostname; a
+			// legitimate client uses the speaker's IP or its <name>.local.
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
+			// Browsers send Origin on every cross-origin mutating request (including
+			// "simple" text/plain POSTs), so a mismatch means CSRF. Sec-Fetch-Site is
+			// the belt to Origin's braces on browsers that send it.
+			if origin := r.Header.Get("Origin"); origin != "" {
+				u, err := url.Parse(origin)
+				if err != nil || u.Host != r.Host {
+					http.Error(w, "cross-origin request refused", http.StatusForbidden)
+					return
+				}
+			} else if sfs := r.Header.Get("Sec-Fetch-Site"); sfs != "" && sfs != "same-origin" && sfs != "none" {
+				http.Error(w, "cross-site request refused", http.StatusForbidden)
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// hostAllowed reports whether the request's Host names this speaker: an IP literal,
+// localhost (the on-speaker agent), or a <name>.local mDNS address. A real public
+// domain is rejected, which is what defeats DNS rebinding.
+func hostAllowed(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(host, ".")
+	if host == "" {
+		return false
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	return net.ParseIP(host) != nil
 }
 
 // multiroom returns this speaker's identity and its current multiroom zone, so
@@ -901,19 +960,53 @@ func (s *Server) logoProxy(w http.ResponseWriter, r *http.Request) {
 
 // publicHost reports whether host resolves exclusively to globally routable
 // addresses — i.e. it is not loopback, RFC1918/ULA, link-local or unspecified.
+// It is a fast up-front reject; publicOnlyTransport is the authoritative guard
+// (it re-checks the actual address dialed, so a redirect or a DNS rebind between
+// this check and the connection can't slip a private target through).
 func publicHost(ctx context.Context, host string) bool {
 	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil || len(ips) == 0 {
 		return false
 	}
 	for _, ip := range ips {
-		a := ip.IP
-		if a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() ||
-			a.IsLinkLocalMulticast() || a.IsMulticast() || a.IsUnspecified() {
+		if !publicIP(ip.IP) {
 			return false
 		}
 	}
 	return true
+}
+
+func publicIP(a net.IP) bool {
+	return !(a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() ||
+		a.IsLinkLocalMulticast() || a.IsMulticast() || a.IsUnspecified())
+}
+
+// publicOnlyTransport is the transport for the outbound proxy client (logo/TuneIn
+// mirrors, artwork + GitHub lookups). Its dialer rejects the connection if the
+// resolved address is not globally routable — checked per hop, so it closes the
+// SSRF holes that a pre-flight hostname check alone leaves open (302 to loopback,
+// DNS rebinding). All legitimate targets are public, so nothing else is affected.
+func publicOnlyTransport() *http.Transport {
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout: 10 * time.Second,
+			Control: func(_, address string, _ syscall.RawConn) error {
+				host, _, err := net.SplitHostPort(address)
+				if err != nil {
+					return err
+				}
+				if ip := net.ParseIP(host); ip == nil || !publicIP(ip) {
+					return fmt.Errorf("refusing to connect to non-public address %s", address)
+				}
+				return nil
+			},
+		}).DialContext,
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        10,
+		IdleConnTimeout:     30 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
 }
 
 // relay performs a bounded upstream GET and copies the response back. fallbackCT

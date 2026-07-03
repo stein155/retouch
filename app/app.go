@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,7 +48,7 @@ func RegisterService(f func(context.Context)) { services = append(services, f) }
 // Run starts retouch and blocks until interrupted.
 func Run() {
 	listen := flag.String("listen", ":8000", "web UI / API listen address")
-	margeAddr := flag.String("listen-marge", ":9080", "pairing-stub HTTP listen address; point the speaker's margeServerUrl / bmxRegistryUrl here")
+	margeAddr := flag.String("listen-marge", "127.0.0.1:9080", "pairing-stub HTTP listen address; the speaker only ever reaches it on loopback, so bind loopback by default (do not expose it to the LAN)")
 	margeBase := flag.String("marge-base", "", "base URL the speaker reaches the pairing stub at (default http://127.0.0.1<listen-marge>); rewritten into the BMX registry")
 	host := flag.String("speaker-host", "127.0.0.1", "speaker host (127.0.0.1 on-speaker; the speaker IP for off-speaker testing)")
 	presets := flag.String("presets", "presets.json", "path to the presets JSON file")
@@ -70,7 +71,13 @@ func Run() {
 
 	base := *margeBase
 	if base == "" {
-		base = "http://127.0.0.1" + *margeAddr
+		// -listen-marge may omit the host (":9080"); the speaker reaches the stub on
+		// loopback, so default the base host to 127.0.0.1 in that case.
+		addr := *margeAddr
+		if strings.HasPrefix(addr, ":") {
+			addr = "127.0.0.1" + addr
+		}
+		base = "http://" + addr
 	}
 
 	bc := speaker.New(*host)

@@ -28,7 +28,9 @@ MAX_ATTEMPTS=5
 # Where the speaker reaches the on-speaker pairing stub and web UI.
 MARGE_BASE=http://127.0.0.1:9080
 WEB_LISTEN=:8000
-MARGE_LISTEN=:9080
+# Bind the pairing stub to loopback only: the speaker reaches it on 127.0.0.1, so it
+# never needs to be on the LAN (where it would expose the cloud-emulation API).
+MARGE_LISTEN=127.0.0.1:9080
 CFG=/opt/Bose/etc/SoundTouchSdkPrivateCfg.xml
 START=$HOME_DIR/start.sh
 
@@ -72,8 +74,8 @@ write_start_script() {
 #!/bin/sh
 
 LOG=/tmp/retouch.log
-APP_PORT=${WEB_LISTEN#:}
-MARGE_PORT=${MARGE_LISTEN#:}
+APP_PORT=${WEB_LISTEN##*:}
+MARGE_PORT=${MARGE_LISTEN##*:}
 
 log() { echo "[retouch-start] \$*" >>"\$LOG" 2>&1; }
 
