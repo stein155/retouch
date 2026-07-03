@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"os"
 	"sync"
+
+	"github.com/stein155/retouch/internal/atomicjson"
 )
 
 // Settings is the persisted preference set.
@@ -71,15 +73,7 @@ func (s *Store) SetMQTT(cfg MQTT) error {
 }
 
 // persistLocked atomically writes the current settings. Caller holds s.mu.
+// 0600: the file holds the MQTT broker password in the clear.
 func (s *Store) persistLocked() error {
-	data, err := json.MarshalIndent(s.s, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := s.path + ".tmp"
-	// 0600: this file holds the MQTT broker password in the clear.
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
+	return atomicjson.Write(s.path, s.s, 0o600)
 }
