@@ -402,8 +402,21 @@ type WifiNetwork struct {
 // endpoint (:8090). Not every model exposes it (the firmware gates it behind its
 // supportedUris), so a device that can't survey returns an error here — the web
 // layer turns that into an empty list and the UI falls back to manual SSID entry.
+//
+// A site survey makes the radio sweep every channel, which takes many seconds —
+// far longer than the shared client's short timeout — so it runs on a dedicated
+// long-timeout request bounded by ctx.
 func (c *Client) ScanWifi(ctx context.Context) ([]WifiNetwork, error) {
-	body, err := c.get(ctx, "/performWirelessSiteSurvey")
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.urlFor("/performWirelessSiteSurvey"), nil)
+	resp, err := (&http.Client{Timeout: 25 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET /performWirelessSiteSurvey status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if err != nil {
 		return nil, err
 	}

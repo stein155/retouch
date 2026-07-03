@@ -1237,7 +1237,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 // wifiScan surveys nearby Wi-Fi networks so the settings sheet can offer a pick
 // list. An empty list is a valid answer (the UI falls back to manual SSID entry).
 func (s *Server) wifiScan(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	// A site survey runs on the speaker for many seconds; give it room (the speaker
+	// client bounds the actual HTTP call).
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	nets, err := s.speaker.ScanWifi(ctx)
 	if err != nil {
