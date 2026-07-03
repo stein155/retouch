@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stein155/retouch/internal/autopair"
+	"github.com/stein155/retouch/internal/habridge"
 	"github.com/stein155/retouch/internal/marge"
 	"github.com/stein155/retouch/internal/mdns"
 	"github.com/stein155/retouch/internal/settings"
@@ -123,6 +124,25 @@ func Run() {
 
 	// Keep the speaker paired to our marge account so native sources stay enabled.
 	go autopair.New(bc, info.Account, autopair.DefaultAuthToken, *pairEvery, logger.With("comp", "autopair")).Run(ctx)
+
+	// Home Assistant MQTT bridge: reads its config from the settings store on every
+	// (re)connect, so the web UI's MQTT section takes effect via bridge.Reload().
+	// The OTA button reuses the web server's self-update path.
+	bridge := habridge.New(bc, func() habridge.Config {
+		m := set.Get().MQTT
+		return habridge.Config{
+			Enabled:         m.Enabled,
+			Host:            m.Host,
+			Port:            m.Port,
+			Username:        m.Username,
+			Password:        m.Password,
+			BaseTopic:       m.BaseTopic,
+			DiscoveryPrefix: m.DiscoveryPrefix,
+			TLS:             m.TLS,
+		}
+	}, webSrv.UpdateToLatest, logger.With("comp", "habridge"))
+	webSrv.SetMQTTBridge(bridge)
+	go bridge.Run(ctx)
 
 	// Advertise a friendly <name>.local so the UI is reachable without the IP.
 	if info.IP != "" {

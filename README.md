@@ -58,6 +58,9 @@ takes the other route and lives on the speaker itself:
 - ▶️ **Play / stop and volume**, with live now-playing (station name + logo)
 - 🔗 **Multiroom** — find your other ReTouch speakers and group them so they play
   in sync, using Bose's own native zones
+- 🏠 **Home Assistant (MQTT)** — connect the speaker to your MQTT broker and it
+  appears in Home Assistant automatically, with volume, station switching, transport,
+  power on/off, and now-playing (plus software version and an over-the-air update button)
 - ⚙️ **Settings** — speaker name, bass, and the app's language
 - ⬆️ **Over-the-air updates** — one tap in the app; the speaker fetches the latest
   release and relaunches ReTouch in a few seconds (no reboot)
@@ -77,6 +80,13 @@ speaker adds the search, presets, and controls.
 finds your other ReTouch speakers on the network and uses Bose's own zone API to
 group them, so one speaker leads and the rest play in perfect sync, exactly like
 multiroom did when the Bose app still worked.
+
+**Home Assistant** is optional. Turn it on under Settings → Home Assistant (MQTT),
+point it at your broker, and ReTouch publishes MQTT discovery so the speaker shows
+up in Home Assistant as one device — no YAML. Home Assistant has no MQTT
+media_player, so the speaker is exposed as a set of standard entities (a volume
+number, a preset selector, transport buttons, a power switch, and now-playing
+sensors) grouped under the one device.
 
 ## Set it up once
 
