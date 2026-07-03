@@ -58,11 +58,16 @@ fi
 # firmware reads. They only take effect after the reboot below.
 if command -v nc >/dev/null 2>&1; then
 	send() { printf '%s\n' "$1" | nc -w 3 127.0.0.1 "$SETUP_PORT" >/dev/null 2>&1; }
+	# boseurls is the one-time bootstrap injection store; factory leaves it empty.
 	send "envswitch boseurls set \"\" \"\""
+	# Restore the sys-configuration cloud URLs to the FACTORY values captured in the
+	# XML backup rather than blanking them: blank is not the factory state, and the
+	# firmware may not fall back to the restored XML for these runtime keys.
+	cfgurl() { [ -f "$CFG.original" ] && sed -n "s:.*<$1>\([^<]*\)</$1>.*:\1:p" "$CFG.original" | head -1; }
 	for k in bmxRegistryUrl statsServerUrl margeServerUrl swUpdateUrl; do
-		send "sys configuration $k \"\""
+		send "sys configuration $k \"$(cfgurl "$k")\""
 	done
-	log "cleared boseurls + sys-configuration cloud URLs"
+	log "restored sys-configuration cloud URLs from $CFG.original (boseurls cleared)"
 fi
 
 # Restore a pre-existing rc.local if we backed one up; otherwise remove ours.
