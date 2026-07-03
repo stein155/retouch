@@ -8,6 +8,8 @@ import (
 	"os"
 	"sort"
 	"sync"
+
+	"github.com/stein155/retouch/internal/atomicjson"
 )
 
 // Preset is one saved station on a slot (1..6).
@@ -92,13 +94,5 @@ func (s *Store) persistLocked() error {
 		out = append(out, p)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Slot < out[j].Slot })
-	data, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
+	return atomicjson.Write(s.path, out, 0o644)
 }

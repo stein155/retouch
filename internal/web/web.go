@@ -671,7 +671,15 @@ func (s *Server) updateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func(from, to string) {
+	s.startUpdate(s.version, target)
+	writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": target})
+}
+
+// startUpdate installs release `to` and restarts, in the background. The caller must
+// already hold updateMu (via TryLock); startUpdate hands the lock off to the
+// goroutine and releases it when the install finishes or fails.
+func (s *Server) startUpdate(from, to string) {
+	go func() {
 		defer s.updateMu.Unlock()
 		if err := s.installRelease(context.Background(), to); err != nil {
 			s.log.Warn("self-update failed", "from", from, "to", to, "err", err)
@@ -679,9 +687,7 @@ func (s *Server) updateApp(w http.ResponseWriter, r *http.Request) {
 		}
 		s.log.Info("self-update installed; restarting", "from", from, "to", to)
 		s.restartAfterUpdate()
-	}(s.version, target)
-
-	writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": target})
+	}()
 }
 
 // UpdateInfo reports the running version, the latest available stable release, its
@@ -731,15 +737,7 @@ func (s *Server) UpdateToLatest(ctx context.Context) error {
 		s.updateMu.Unlock()
 		return nil // already current
 	}
-	go func(from, to string) {
-		defer s.updateMu.Unlock()
-		if err := s.installRelease(context.Background(), to); err != nil {
-			s.log.Warn("self-update failed", "from", from, "to", to, "err", err)
-			return
-		}
-		s.log.Info("self-update installed; restarting", "from", from, "to", to)
-		s.restartAfterUpdate()
-	}(s.version, target)
+	s.startUpdate(s.version, target)
 	return nil
 }
 
