@@ -22,6 +22,14 @@ function HomeBody({
 }) {
   const { t } = useI18n();
 
+  // Header turns into a translucent fade-out scrim only once the body is
+  // scrolled; at the top it stays a plain solid bar.
+  const [scrolled, setScrolled] = useState(false);
+  const handleScroll = useCallback((e) => {
+    const s = e.currentTarget.scrollTop > 4;
+    setScrolled((prev) => (prev !== s ? s : prev));
+  }, []);
+
   const handlePlay = useCallback(async (preset, slot) => {
     const standby = data.player.status !== 'playing';
     data.playOptimistic(preset); // show it instantly
@@ -71,9 +79,9 @@ function HomeBody({
 
   return (
     <Shell>
-      <Header onSettings={() => setSettingsOpen(true)} />
+      <Header onSettings={() => setSettingsOpen(true)} scrolled={scrolled} />
 
-      <ShellScroll>
+      <ShellScroll onScroll={handleScroll}>
         <PresetGrid
           presets={data.presets}
           player={data.player}
