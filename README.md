@@ -5,6 +5,13 @@
 
 # ReTouch · for SoundTouch
 
+<p>
+  <a href="https://github.com/stein155/retouch/releases"><img src="https://img.shields.io/github/v/release/stein155/retouch?color=c47a52&label=release" alt="Latest release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/stein155/retouch?color=c47a52" alt="License: MIT" /></a>
+  <img src="https://img.shields.io/github/go-mod/go-version/stein155/retouch?color=c47a52&logo=go&logoColor=white" alt="Go version" />
+  <img src="https://img.shields.io/badge/runs%20on-SoundTouch%20speaker-c47a52" alt="Runs on the SoundTouch speaker" />
+</p>
+
 **Your SoundTouch went quiet when Bose switched off its servers. ReTouch brings
 the radio back — running entirely on the speaker, with nothing else to set up.**
 
