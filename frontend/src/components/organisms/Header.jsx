@@ -19,8 +19,8 @@ const HdrBrand = styled.div`
 `;
 
 const HdrBlob = styled.span`
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   background: var(--accent-soft);
   overflow: hidden;
@@ -58,7 +58,7 @@ export function Header({ onSettings }) {
   return (
     <Hdr>
       <HdrBrand>
-        <HdrBlob aria-hidden="true"><img src="/badge.png" alt="" width="34" height="34" /></HdrBlob>
+        <HdrBlob aria-hidden="true"><img src="/badge.png" alt="" width="40" height="40" /></HdrBlob>
         <HdrTitle>{t('appTitle')}</HdrTitle>
       </HdrBrand>
       <HdrGear onClick={onSettings} aria-label={t('settings')}>
