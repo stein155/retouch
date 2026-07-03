@@ -23,14 +23,11 @@ const HdrBlob = styled.span`
   height: 34px;
   border-radius: 50%;
   background: var(--accent-soft);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  line-height: 1;
-  padding-top: 1px;
+  overflow: hidden;
   box-shadow: 0 1px 4px rgba(31, 24, 20, 0.10), 0 0 0 1px rgba(31, 24, 20, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.5);
   flex-shrink: 0;
+
+  img { width: 100%; height: 100%; object-fit: cover; display: block; }
 `;
 
 const HdrTitle = styled.span`
@@ -61,7 +58,7 @@ export function Header({ onSettings }) {
   return (
     <Hdr>
       <HdrBrand>
-        <HdrBlob aria-hidden="true">📻</HdrBlob>
+        <HdrBlob aria-hidden="true"><img src="/badge.png" alt="" width="34" height="34" /></HdrBlob>
         <HdrTitle>{t('appTitle')}</HdrTitle>
       </HdrBrand>
       <HdrGear onClick={onSettings} aria-label={t('settings')}>
