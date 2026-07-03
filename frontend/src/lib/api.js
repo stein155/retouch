@@ -171,6 +171,11 @@ export async function saveSettings(patch) {
   return send('/api/settings', 'PUT', patch);
 }
 
+// getMqttStatus returns { connected, lastError } for the Home Assistant MQTT link.
+export async function getMqttStatus() {
+  try { return await getJSON('/api/mqtt/status'); } catch { return null; }
+}
+
 // Multiroom — native Bose zone grouping. This speaker acts as the zone master;
 // other speakers on the network join it and play in sync (Bose's own setZone /
 // addZoneSlave / removeZoneSlave under the hood).

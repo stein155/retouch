@@ -81,6 +81,7 @@ type Server struct {
 	settings  *settings.Store
 	mirror    PresetMirror
 	mdns      Hostnamer
+	mqtt      MQTTBridge
 	log       *slog.Logger
 	version   string
 	homeDir   string
@@ -137,6 +138,14 @@ type Hostnamer interface {
 	SetName(name string)
 }
 
+// MQTTBridge is the Home Assistant MQTT bridge (internal/habridge). The web layer
+// only needs to nudge it to reconnect after a settings change and read its status;
+// it stays an interface so web doesn't depend on the bridge's concrete type.
+type MQTTBridge interface {
+	Reload()
+	Status() (connected bool, lastErr string)
+}
+
 // New builds a Server.
 func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Store, version, homeDir string, log *slog.Logger) *Server {
 	sub, err := fs.Sub(distFS, "dist")
@@ -181,6 +190,12 @@ func (s *Server) SetMDNS(h Hostnamer) {
 	s.mdns = h
 }
 
+// SetMQTTBridge attaches the Home Assistant MQTT bridge so settings changes can
+// trigger a reconnect and the UI can show connection status.
+func (s *Server) SetMQTTBridge(b MQTTBridge) {
+	s.mqtt = b
+}
+
 // Handler returns the HTTP mux.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -199,6 +214,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/volume", s.setVolume)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
+	mux.HandleFunc("GET /api/mqtt/status", s.mqttStatus)
 	mux.HandleFunc("GET /api/multiroom", s.multiroom)
 	mux.HandleFunc("GET /api/multiroom/speakers", s.multiroomSpeakers)
 	mux.HandleFunc("POST /api/multiroom/group", s.multiroomGroup)
@@ -593,6 +609,65 @@ func (s *Server) updateApp(w http.ResponseWriter, r *http.Request) {
 	}(s.version, target)
 
 	writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": target})
+}
+
+// UpdateInfo reports the running version, the latest available stable release, its
+// release URL, and whether updating is possible here (only on an installed speaker).
+// It backs the Home Assistant `update` entity so HA can show an update notification.
+// Off-speaker (not updatable) it reports latest == installed and skips the GitHub
+// call, so no false update is offered.
+func (s *Server) UpdateInfo(ctx context.Context) (installed, latest, releaseURL string, updatable bool, err error) {
+	installed = s.version
+	updatable = s.updatable()
+	if !updatable {
+		return installed, installed, "", false, nil
+	}
+	latest, err = s.latestRelease(ctx)
+	if err != nil {
+		return installed, "", "", true, err
+	}
+	if latest == "" {
+		latest = installed
+	}
+	if latest != installed {
+		releaseURL = "https://github.com/" + repo + "/releases/tag/" + latest
+	}
+	return installed, latest, releaseURL, true, nil
+}
+
+// UpdateToLatest installs the latest stable release and restarts, reusing the same
+// path as POST /api/update. It backs the Home Assistant update entity's Install
+// action. It returns quickly: the download + restart run in the background on success.
+func (s *Server) UpdateToLatest(ctx context.Context) error {
+	if !s.updatable() {
+		return fmt.Errorf("updates are only available on an installed speaker")
+	}
+	if !s.updateMu.TryLock() {
+		return fmt.Errorf("an update is already in progress")
+	}
+	target, err := s.latestRelease(ctx)
+	if err != nil {
+		s.updateMu.Unlock()
+		return fmt.Errorf("latest release check failed: %w", err)
+	}
+	if target == "" {
+		s.updateMu.Unlock()
+		return fmt.Errorf("latest release missing tag")
+	}
+	if target == s.version {
+		s.updateMu.Unlock()
+		return nil // already current
+	}
+	go func(from, to string) {
+		defer s.updateMu.Unlock()
+		if err := s.installRelease(context.Background(), to); err != nil {
+			s.log.Warn("self-update failed", "from", from, "to", to, "err", err)
+			return
+		}
+		s.log.Info("self-update installed; restarting", "from", from, "to", to)
+		s.restartAfterUpdate()
+	}(s.version, target)
+	return nil
 }
 
 func (s *Server) latestRelease(ctx context.Context) (string, error) {
@@ -1006,6 +1081,19 @@ func (s *Server) now(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, np)
 }
 
+// EnrichedNowPlaying returns the current now-playing with the live song/artist/
+// cover filled in from the stream metadata — the same view the web UI shows. The
+// MQTT bridge uses it so Home Assistant sees the track, not just the station name
+// (the speaker itself no longer receives track metadata; see enrichNowPlaying).
+func (s *Server) EnrichedNowPlaying(ctx context.Context) (*speaker.NowPlaying, error) {
+	np, err := s.speaker.NowPlaying(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.enrichNowPlaying(np)
+	return np, nil
+}
+
 // enrichNowPlaying fills in the song/artist/cover for a playing station. The
 // speaker no longer gets this metadata (it came from the retired Bose cloud), so
 // ReTouch reads it from the standard ICY stream metadata (see internal/icy),
@@ -1192,7 +1280,41 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	if s.mdns != nil {
 		out["host"] = s.mdns.Hostname() // friendly .local address, e.g. "keuken.local"
 	}
+	out["mqtt"] = s.mqttSettingsView()
 	writeJSON(w, 200, out)
+}
+
+// mqttSettingsView is the MQTT config as returned to the UI: the password is never
+// sent back (only whether one is set), and the live connection status is folded in.
+func (s *Server) mqttSettingsView() map[string]any {
+	m := s.settings.Get().MQTT
+	view := map[string]any{
+		"enabled":         m.Enabled,
+		"host":            m.Host,
+		"port":            m.Port,
+		"username":        m.Username,
+		"hasPassword":     m.Password != "",
+		"baseTopic":       m.BaseTopic,
+		"discoveryPrefix": m.DiscoveryPrefix,
+		"tls":             m.TLS,
+	}
+	if s.mqtt != nil {
+		connected, lastErr := s.mqtt.Status()
+		view["connected"] = connected
+		view["lastError"] = lastErr
+	}
+	return view
+}
+
+// mqttStatus reports the live broker connection state so the settings UI can show
+// whether the Home Assistant link is up.
+func (s *Server) mqttStatus(w http.ResponseWriter, r *http.Request) {
+	if s.mqtt == nil {
+		writeJSON(w, 200, map[string]any{"connected": false, "lastError": ""})
+		return
+	}
+	connected, lastErr := s.mqtt.Status()
+	writeJSON(w, 200, map[string]any{"connected": connected, "lastError": lastErr})
 }
 
 // putSettings applies any provided fields: name + bass + treble + Wi-Fi
@@ -1206,6 +1328,16 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		WifiOptimization *bool   `json:"wifiOptimization"`
 		Language         *string `json:"language"`
 		CloseTelnet      *bool   `json:"closeTelnet"`
+		MQTT             *struct {
+			Enabled         *bool   `json:"enabled"`
+			Host            *string `json:"host"`
+			Port            *int    `json:"port"`
+			Username        *string `json:"username"`
+			Password        *string `json:"password"`
+			BaseTopic       *string `json:"baseTopic"`
+			DiscoveryPrefix *string `json:"discoveryPrefix"`
+			TLS             *bool   `json:"tls"`
+		} `json:"mqtt"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.badRequest(w, "bad body", err)
@@ -1250,6 +1382,43 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		if err := s.setCloseTelnet(*body.CloseTelnet); err != nil {
 			s.fail(w, "set telnet close failed", err)
 			return
+		}
+	}
+	if body.MQTT != nil {
+		// Start from the stored config and override only the fields the UI sent, so
+		// an omitted password (never returned to the UI) is preserved.
+		cfg := s.settings.Get().MQTT
+		p := body.MQTT
+		if p.Enabled != nil {
+			cfg.Enabled = *p.Enabled
+		}
+		if p.Host != nil {
+			cfg.Host = strings.TrimSpace(*p.Host)
+		}
+		if p.Port != nil {
+			cfg.Port = *p.Port
+		}
+		if p.Username != nil {
+			cfg.Username = *p.Username
+		}
+		if p.Password != nil {
+			cfg.Password = *p.Password
+		}
+		if p.BaseTopic != nil {
+			cfg.BaseTopic = strings.TrimSpace(*p.BaseTopic)
+		}
+		if p.DiscoveryPrefix != nil {
+			cfg.DiscoveryPrefix = strings.TrimSpace(*p.DiscoveryPrefix)
+		}
+		if p.TLS != nil {
+			cfg.TLS = *p.TLS
+		}
+		if err := s.settings.SetMQTT(cfg); err != nil {
+			s.fail(w, "set mqtt failed", err)
+			return
+		}
+		if s.mqtt != nil {
+			s.mqtt.Reload() // apply the new config: reconnect (or disconnect)
 		}
 	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
