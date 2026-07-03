@@ -124,6 +124,8 @@ func (s *Speaker) Handler() http.Handler {
 	mux.HandleFunc("/audioproducttonecontrols", s.toneHandler)
 	mux.HandleFunc("/systemtimeout", s.systemTimeoutHandler)
 	mux.HandleFunc("/networkInfo", s.getNetworkInfo)
+	mux.HandleFunc("/performWirelessSiteSurvey", s.getSiteSurvey)
+	mux.HandleFunc("/addWirelessProfile", postOnly(s.postWirelessProfile))
 	mux.HandleFunc("/getZone", s.getZone)
 	// These endpoints mutate state; the real speaker only accepts them over POST and
 	// returns N/A for GET, so reject other methods to mirror that.
@@ -151,10 +153,9 @@ func postOnly(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// ServeCLI runs the :17000 diagnostic CLI on ln until ln is closed. It handles the
-// commands internal/speaker sends: "sys power" (wake/standby toggle), a Wi-Fi site
-// survey ("network wifi scan"), and joining a network ("network wifi profiles add").
-// Unknown commands are accepted and ignored, like the real CLI's prompt.
+// ServeCLI runs the :17000 diagnostic CLI on ln until ln is closed. The only command
+// the firmware sends is "sys power" (wake/standby toggle); unknown commands are
+// accepted and ignored, like the real CLI's prompt.
 func (s *Speaker) ServeCLI(ln net.Listener) {
 	for {
 		conn, err := ln.Accept()
@@ -169,41 +170,10 @@ func (s *Speaker) handleCLI(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	sc := bufio.NewScanner(conn)
 	for sc.Scan() {
-		cmd := strings.TrimSpace(sc.Text())
-		switch {
-		case cmd == "sys power":
+		if strings.TrimSpace(sc.Text()) == "sys power" {
 			s.togglePower()
-		case strings.HasPrefix(cmd, "network wifi scan"):
-			_, _ = conn.Write([]byte(s.wifiScanReply()))
-		case strings.HasPrefix(cmd, "network wifi profiles add "):
-			s.addWifiProfile(strings.TrimPrefix(cmd, "network wifi profiles add "))
 		}
 	}
-}
-
-// wifiScanReply returns a plausible site-survey response. The real firmware's wire
-// format is undocumented, so this mirrors the attribute style parseWifiScan expects.
-func (s *Speaker) wifiScanReply() string {
-	s.mu.Lock()
-	current := s.wifiSSID
-	s.mu.Unlock()
-	return `<WiFiScanResults>` +
-		`<scanResult ssid="` + esc(current) + `" signal="EXCELLENT_SIGNAL" secure="true"/>` +
-		`<scanResult ssid="Neighbour 5G" signal="GOOD_SIGNAL" secure="true"/>` +
-		`<scanResult ssid="CoffeeBar Free" signal="FAIR_SIGNAL" secure="false"/>` +
-		`</WiFiScanResults>` + "\n"
-}
-
-// addWifiProfile records a joined network so /networkInfo reflects the switch. args
-// is "<ssid> <security> [<password>]"; the SSID is the first whitespace field.
-func (s *Speaker) addWifiProfile(args string) {
-	fields := strings.Fields(args)
-	if len(fields) == 0 {
-		return
-	}
-	s.mu.Lock()
-	s.wifiSSID = fields[0]
-	s.mu.Unlock()
 }
 
 func (s *Speaker) togglePower() {
@@ -346,6 +316,38 @@ func (s *Speaker) getNetworkInfo(w http.ResponseWriter, _ *http.Request) {
 		`<interface type="WIFI_INTERFACE" name="wlan0" ssid="%s" signal="%s" ipAddress="%s" state="NETWORK_WIFI_CONNECTED"/>`+
 		`</interfaces></networkInfo>`,
 		esc(s.wifiSSID), esc(s.wifiSignal), esc(s.IP)))
+}
+
+// getSiteSurvey answers /performWirelessSiteSurvey with a few nearby networks,
+// including the one currently connected (reported at full strength).
+func (s *Speaker) getSiteSurvey(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	current := s.wifiSSID
+	s.mu.Unlock()
+	writeXML(w, `<performWirelessSiteSurvey><items>`+
+		fmt.Sprintf(`<item ssid="%s" signalStrength="82" secure="true"><securityTypes><type>wpa_or_wpa2</type></securityTypes></item>`, esc(current))+
+		`<item ssid="Neighbour 5G" signalStrength="55" secure="true"><securityTypes><type>wpa_or_wpa2</type></securityTypes></item>`+
+		`<item ssid="CoffeeBar Free" signalStrength="28" secure="false"><securityTypes/></item>`+
+		`</items></performWirelessSiteSurvey>`)
+}
+
+// postWirelessProfile records a joined network so /networkInfo reflects the switch,
+// mirroring how the firmware brings the new profile up.
+func (s *Speaker) postWirelessProfile(w http.ResponseWriter, r *http.Request) {
+	var p struct {
+		Profile struct {
+			SSID string `xml:"ssid,attr"`
+		} `xml:"profile"`
+	}
+	if !decode(w, r, &p) {
+		return
+	}
+	if p.Profile.SSID != "" {
+		s.mu.Lock()
+		s.wifiSSID = p.Profile.SSID
+		s.mu.Unlock()
+	}
+	writeXML(w, "<status>/addWirelessProfile</status>")
 }
 
 func (s *Speaker) getZone(w http.ResponseWriter, _ *http.Request) {

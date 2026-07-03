@@ -10,7 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -398,77 +398,81 @@ type WifiNetwork struct {
 	Secure bool   `json:"secure"`           // needs a password to join
 }
 
-// ScanWifi asks the speaker to survey nearby Wi-Fi networks over the :17000 CLI and
-// returns what it can parse. The scan is asynchronous, so we switch on async replies,
-// trigger the survey, and read for a short window.
-//
-// NOTE: the scan-result wire format is undocumented on real SoundTouch hardware, so
-// parseWifiScan is deliberately lenient and may need tuning against a real speaker.
-// An empty result is not an error — the UI then lets the user type in the SSID.
+// ScanWifi surveys nearby Wi-Fi networks via the native /performWirelessSiteSurvey
+// endpoint (:8090). Not every model exposes it (the firmware gates it behind its
+// supportedUris), so a device that can't survey returns an error here — the web
+// layer turns that into an empty list and the UI falls back to manual SSID entry.
 func (c *Client) ScanWifi(ctx context.Context) ([]WifiNetwork, error) {
-	reply, err := c.cliExchange(ctx, 3*time.Second, "async_responses on", "network wifi scan 40 on")
+	body, err := c.get(ctx, "/performWirelessSiteSurvey")
 	if err != nil {
 		return nil, err
 	}
-	return parseWifiScan(reply), nil
+	return parseSiteSurvey(body), nil
 }
 
-var (
-	reScanSSID     = regexp.MustCompile(`(?i)ssid="([^"]*)"`)
-	reScanSignal   = regexp.MustCompile(`(?i)signal="([^"]*)"`)
-	reScanSecure   = regexp.MustCompile(`(?i)secure="([^"]*)"`)
-	reScanSecurity = regexp.MustCompile(`(?i)security="([^"]*)"`)
-)
-
-// parseWifiScan pulls access points out of a CLI scan reply. The firmware's exact
-// format isn't documented, so we scan element by element for an ssid="…" attribute
-// and read signal/security from the same element when present. Entries without an
-// SSID (a hidden network) are skipped and duplicate SSIDs are collapsed.
-func parseWifiScan(reply string) []WifiNetwork {
+// parseSiteSurvey reads the /performWirelessSiteSurvey response:
+//
+//	<performWirelessSiteSurvey><items>
+//	  <item ssid="Home" signalStrength="72" secure="true">
+//	    <securityTypes><type>wpa_or_wpa2</type></securityTypes>
+//	  </item>
+//	</items></performWirelessSiteSurvey>
+//
+// Networks without an SSID (hidden) are skipped and duplicate SSIDs collapsed.
+func parseSiteSurvey(body []byte) []WifiNetwork {
+	var x struct {
+		Items []struct {
+			SSID           string `xml:"ssid,attr"`
+			SignalStrength string `xml:"signalStrength,attr"`
+			Secure         string `xml:"secure,attr"`
+		} `xml:"items>item"`
+	}
+	if err := xml.Unmarshal(body, &x); err != nil {
+		return nil
+	}
 	var out []WifiNetwork
 	seen := map[string]bool{}
-	for _, el := range strings.Split(reply, "<") {
-		m := reScanSSID.FindStringSubmatch(el)
-		if m == nil {
+	for _, it := range x.Items {
+		if it.SSID == "" || seen[it.SSID] {
 			continue
 		}
-		ssid := xmlUnescape(m[1])
-		if ssid == "" || seen[ssid] {
-			continue
-		}
-		seen[ssid] = true
-		n := WifiNetwork{SSID: ssid, Secure: true}
-		if s := reScanSignal.FindStringSubmatch(el); s != nil {
-			n.Signal = prettySignal(s[1])
-		}
-		if s := reScanSecure.FindStringSubmatch(el); s != nil {
-			n.Secure = !strings.EqualFold(s[1], "false") && s[1] != "0"
-		} else if s := reScanSecurity.FindStringSubmatch(el); s != nil {
-			n.Secure = s[1] != "" && !strings.EqualFold(s[1], "none")
-		}
-		out = append(out, n)
+		seen[it.SSID] = true
+		out = append(out, WifiNetwork{
+			SSID:   it.SSID,
+			Signal: signalStrengthToken(it.SignalStrength),
+			Secure: !strings.EqualFold(it.Secure, "false") && it.Secure != "0",
+		})
 	}
 	return out
 }
 
-// SetWifi joins a Wi-Fi network by adding a profile over the :17000 CLI and putting
-// the radio into auto mode so it connects. security is "none", "wep" or
-// "wpa_or_wpa2" (the default). Switching networks can briefly drop the speaker's
-// current connection, so the caller warns the user first.
-//
-// The firmware's "network wifi profiles add <ssid> <security> [<password>]" command
-// is space-delimited with no documented quoting, so an SSID that contains spaces is
-// ambiguous and can't be joined reliably through this path (scanning such an SSID
-// still works — the survey returns it as a quoted attribute).
+// signalStrengthToken buckets the survey's numeric signalStrength (0..100) into the
+// same tokens NetworkInfo uses, so the UI can localise it. Anything unparseable or
+// out of range yields "" and the UI then shows no signal label.
+func signalStrengthToken(s string) string {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 0 || n > 100 {
+		return ""
+	}
+	switch {
+	case n >= 75:
+		return "excellent"
+	case n >= 50:
+		return "good"
+	case n >= 25:
+		return "fair"
+	default:
+		return "poor"
+	}
+}
+
+// SetWifi joins a Wi-Fi network via the native /addWirelessProfile endpoint (:8090).
+// security is "none", "wep" or "wpa_or_wpa2" (the default). Switching networks can
+// briefly drop the speaker's current connection, so the caller warns the user first.
 func (c *Client) SetWifi(ctx context.Context, ssid, security, password string) error {
 	ssid = strings.TrimSpace(ssid)
 	if ssid == "" {
 		return fmt.Errorf("ssid required")
-	}
-	// SSID and password share a single CLI line, so a newline would smuggle in a
-	// second command — reject control characters outright.
-	if strings.ContainsAny(ssid, "\r\n") || strings.ContainsAny(password, "\r\n") {
-		return fmt.Errorf("ssid/password contains a control character")
 	}
 	switch security {
 	case "", "wpa_or_wpa2":
@@ -477,19 +481,9 @@ func (c *Client) SetWifi(ctx context.Context, ssid, security, password string) e
 	default:
 		return fmt.Errorf("unknown security %q", security)
 	}
-	cmd := "network wifi profiles add " + ssid + " " + security
-	if security != "none" {
-		cmd += " " + password
-	}
-	if err := c.cli(ctx, cmd); err != nil {
-		return err
-	}
-	return c.cli(ctx, "network mode auto")
-}
-
-// xmlUnescape reverses the handful of entities the firmware emits in attributes.
-func xmlUnescape(s string) string {
-	return strings.NewReplacer("&lt;", "<", "&gt;", ">", "&quot;", `"`, "&apos;", "'", "&amp;", "&").Replace(s)
+	body := fmt.Sprintf(`<AddWirelessProfile timeout="30"><profile ssid="%s" password="%s" securityType="%s"/></AddWirelessProfile>`,
+		xmlEsc(ssid), xmlEsc(password), security)
+	return c.post(ctx, "/addWirelessProfile", body)
 }
 
 // StorePreset writes a native preset on the speaker (slot 1..6) via /storePreset,
@@ -720,27 +714,4 @@ func (c *Client) cli(ctx context.Context, cmd string) error {
 	_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 	_, err = conn.Write([]byte(cmd + "\n"))
 	return err
-}
-
-// cliExchange sends one or more commands to the :17000 CLI and returns whatever the
-// speaker writes back within window. It's for commands with a reply (e.g. a Wi-Fi
-// scan, whose response is asynchronous); the plain cli helper is fire-and-forget.
-func (c *Client) cliExchange(ctx context.Context, window time.Duration, cmds ...string) (string, error) {
-	d := net.Dialer{Timeout: 3 * time.Second}
-	conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort(c.host, c.cliPort))
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = conn.Close() }()
-	_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
-	for _, cmd := range cmds {
-		if _, err := conn.Write([]byte(cmd + "\n")); err != nil {
-			return "", err
-		}
-	}
-	// Read until the window closes; the read deadline firing is the expected way the
-	// window ends (the reply trickles in asynchronously), so its error is ignored.
-	_ = conn.SetReadDeadline(time.Now().Add(window))
-	out, _ := io.ReadAll(io.LimitReader(conn, 64*1024))
-	return string(out), nil
 }

@@ -281,38 +281,35 @@ func TestScanWifi(t *testing.T) {
 
 func TestSetWifiRoundTrip(t *testing.T) {
 	_, c := newSim(t)
-	if err := c.SetWifi(ctx(), "Studio5G", "wpa_or_wpa2", "hunter2"); err != nil {
+	// SSID goes in an XML attribute, so spaces are fine (unlike the old CLI path).
+	if err := c.SetWifi(ctx(), "Studio 5G", "wpa_or_wpa2", "hunter2"); err != nil {
 		t.Fatalf("SetWifi: %v", err)
 	}
 	// The sim records the joined profile, so /networkInfo now reports the new SSID.
-	if n, _ := c.NetworkInfo(ctx()); n.SSID != "Studio5G" {
-		t.Errorf("after SetWifi, SSID = %q, want %q", n.SSID, "Studio5G")
-	}
-	// A newline in the SSID would smuggle a second CLI command — must be rejected.
-	if err := c.SetWifi(ctx(), "evil\nsys power", "none", ""); err == nil {
-		t.Error("SetWifi accepted an SSID with a newline")
+	if n, _ := c.NetworkInfo(ctx()); n.SSID != "Studio 5G" {
+		t.Errorf("after SetWifi, SSID = %q, want %q", n.SSID, "Studio 5G")
 	}
 	if err := c.SetWifi(ctx(), "x", "bogus", "pw"); err == nil {
 		t.Error("SetWifi accepted an unknown security type")
 	}
 }
 
-func TestParseWifiScan(t *testing.T) {
-	reply := `<WiFiScanResults>` +
-		`<scanResult ssid="Caf&amp;e" signal="GOOD_SIGNAL" security="wpa_or_wpa2"/>` +
-		`<scanResult ssid="Open Net" signal="POOR_SIGNAL" security="none"/>` +
-		`<scanResult ssid="Caf&amp;e" signal="GOOD_SIGNAL" security="wpa_or_wpa2"/>` + // dup
-		`<scanResult ssid="" signal="FAIR_SIGNAL"/>` + // hidden -> skipped
-		`</WiFiScanResults>`
-	got := parseWifiScan(reply)
+func TestParseSiteSurvey(t *testing.T) {
+	body := []byte(`<performWirelessSiteSurvey><items>` +
+		`<item ssid="Caf&amp;e" signalStrength="60" secure="true"><securityTypes><type>wpa_or_wpa2</type></securityTypes></item>` +
+		`<item ssid="Open Net" signalStrength="15" secure="false"><securityTypes/></item>` +
+		`<item ssid="Caf&amp;e" signalStrength="60" secure="true"/>` + // dup -> collapsed
+		`<item ssid="" signalStrength="40" secure="true"/>` + // hidden -> skipped
+		`</items></performWirelessSiteSurvey>`)
+	got := parseSiteSurvey(body)
 	if len(got) != 2 {
-		t.Fatalf("parseWifiScan = %d entries, want 2 (dedup + skip hidden): %+v", len(got), got)
+		t.Fatalf("parseSiteSurvey = %d entries, want 2 (dedup + skip hidden): %+v", len(got), got)
 	}
 	if got[0].SSID != "Caf&e" || got[0].Signal != "good" || !got[0].Secure {
 		t.Errorf("entry[0] = %+v (want unescaped SSID, good, secure)", got[0])
 	}
-	if got[1].SSID != "Open Net" || got[1].Secure {
-		t.Errorf("entry[1] = %+v (want open network)", got[1])
+	if got[1].SSID != "Open Net" || got[1].Signal != "poor" || got[1].Secure {
+		t.Errorf("entry[1] = %+v (want open network, poor)", got[1])
 	}
 }
 
