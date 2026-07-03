@@ -35,6 +35,18 @@ CFG=/opt/Bose/etc/SoundTouchSdkPrivateCfg.xml
 START=$HOME_DIR/start.sh
 
 log() { echo "[retouch] $*" >>"$LOG" 2>&1; }
+# sha256_of prints the hex SHA-256 of a file using whichever tool the firmware has.
+# BusyBox builds often ship sha256sum but not openssl (and vice versa); without this
+# a missing openssl made every update fail as a bogus "checksum mismatch".
+sha256_of() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | sed 's/ .*//'
+	elif command -v openssl >/dev/null 2>&1; then
+		openssl dgst -sha256 "$1" | sed 's/.*= //'
+	else
+		return 1
+	fi
+}
 # giveup records the TARGET tag it gave up on (not just an empty marker) so a later
 # run can tell "gave up on this exact release" from "a newer release is out, retry".
 giveup() { echo "${TAG:-}" >"$GAVEUP"; log "$*; giving up (target ${TAG:-?})"; exit 0; }
@@ -70,7 +82,9 @@ restart_agent() {
 # servers. If the rules can't be installed, the UI is still served on $WEB_LISTEN, so it
 # is never lost. iptables is volatile, so this re-applies on every boot.
 write_start_script() {
-	cat > "$START" <<STARTSCRIPT
+	# Write to a temp file and rename into place so a power loss mid-write can't leave
+	# a truncated boot launcher (rename is atomic on the same filesystem).
+	cat > "$START.new" <<STARTSCRIPT
 #!/bin/sh
 
 LOG=/tmp/retouch.log
@@ -136,7 +150,8 @@ expose_8080
 expose_speaker_auth
 $LAUNCH >>"\$LOG" 2>&1 &
 STARTSCRIPT
-	chmod 0755 "$START" 2>/dev/null
+	chmod 0755 "$START.new" 2>/dev/null
+	mv "$START.new" "$START"
 }
 
 # write_rc_local installs the NAND autostart line, which runs the boot launcher.
@@ -148,11 +163,12 @@ write_rc_local() {
 		&& [ ! -f /mnt/nv/rc.local.original ]; then
 		cp /mnt/nv/rc.local /mnt/nv/rc.local.original 2>/dev/null
 	fi
-	cat > /mnt/nv/rc.local <<RC
+	cat > /mnt/nv/rc.local.new <<RC
 #!/bin/sh
 $START >/tmp/retouch-start.log 2>&1 &
 RC
-	chmod 0755 /mnt/nv/rc.local 2>/dev/null
+	chmod 0755 /mnt/nv/rc.local.new 2>/dev/null
+	mv /mnt/nv/rc.local.new /mnt/nv/rc.local
 }
 
 # redirect_cloud rewrites the four service URLs in SoundTouchSdkPrivateCfg.xml to
@@ -246,7 +262,7 @@ DL=${RETOUCH_RELEASE_BASE:-https://github.com/$REPO/releases/download/$TAG}
 curl -fsSL -o "$BIN.new" "$DL/retouch-armv7l" || { log "download failed"; exit 0; }
 curl -fsSL -o "$HOME_DIR/SHA256SUMS" "$DL/SHA256SUMS" || { log "sums download failed"; exit 0; }
 want=$(sed -n 's/ .*retouch-armv7l$//p' "$HOME_DIR/SHA256SUMS" | head -1)
-got=$(openssl dgst -sha256 "$BIN.new" | sed 's/.*= //')
+got=$(sha256_of "$BIN.new") || { rm -f "$BIN.new"; log "no sha256 tool (sha256sum/openssl); cannot verify — will retry"; exit 0; }
 # A missing/mismatching checksum is usually transient (truncated-but-200 body, or
 # a mid-publish race while CI is still attaching assets), so it goes through the
 # same $MAX_ATTEMPTS retry budget as a failed download instead of an instant
