@@ -141,6 +141,9 @@ func Run() {
 			TLS:             m.TLS,
 		}
 	}, webSrv.UpdateToLatest, logger.With("comp", "habridge"))
+	// Feed the bridge the enriched now-playing so HA shows the live track/artist,
+	// not just the station name (the speaker no longer receives track metadata).
+	bridge.SetNowPlaying(webSrv.EnrichedNowPlaying)
 	webSrv.SetMQTTBridge(bridge)
 	go bridge.Run(ctx)
 

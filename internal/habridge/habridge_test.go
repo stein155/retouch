@@ -242,6 +242,34 @@ func TestBridgeDiscoveryAndCommands(t *testing.T) {
 	}
 }
 
+func TestBridgePublishesEnrichedTrack(t *testing.T) {
+	broker := newFakeBroker(t)
+	host, port := broker.addr()
+	sp := newSimSpeaker(t)
+
+	cfg := Config{Enabled: true, Host: host, Port: port, BaseTopic: "retouch/np", DiscoveryPrefix: "homeassistant"}
+	b := New(sp, func() Config { return cfg }, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// Enriched source: the live track the speaker's raw read never carries.
+	b.SetNowPlaying(func(context.Context) (*speaker.NowPlaying, error) {
+		return &speaker.NowPlaying{Source: "TUNEIN", Station: "Radio X", Track: "Song Y", Artist: "Artist Z", PlayStatus: "PLAY_STATE"}, nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go b.Run(ctx)
+
+	waitFor(t, "track state", func() bool {
+		v, ok := broker.published("retouch/np/track")
+		return ok && v == "Song Y"
+	})
+	if v, _ := broker.published("retouch/np/artist"); v != "Artist Z" {
+		t.Errorf("artist = %q, want Artist Z", v)
+	}
+	if v, _ := broker.published("retouch/np/station"); v != "Radio X" {
+		t.Errorf("station = %q, want Radio X", v)
+	}
+}
+
 func TestBridgeOTAButtonWhenUpdaterSet(t *testing.T) {
 	broker := newFakeBroker(t)
 	host, port := broker.addr()

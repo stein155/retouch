@@ -30,7 +30,7 @@ func (b *Bridge) refresh(ctx context.Context, client *mqtt.Client, tp topics, pu
 		send(tp.volumeState(), itoa(vol))
 	}
 
-	np, err := b.sp.NowPlaying(c)
+	np, err := b.readNowPlaying(c)
 	if err != nil {
 		return
 	}
@@ -42,6 +42,15 @@ func (b *Bridge) refresh(ctx context.Context, client *mqtt.Client, tp topics, pu
 	// The preset select reflects the current station, so it shows as "selected"
 	// in HA when the speaker is playing one of the preset stations.
 	send(tp.presetState(), np.Station)
+}
+
+// readNowPlaying prefers the enriched now-playing (live track/artist) and falls
+// back to the speaker's raw read when no enricher is wired in.
+func (b *Bridge) readNowPlaying(ctx context.Context) (*speaker.NowPlaying, error) {
+	if b.nowPlaying != nil {
+		return b.nowPlaying(ctx)
+	}
+	return b.sp.NowPlaying(ctx)
 }
 
 // handle routes one inbound command message to the speaker. It runs on its own

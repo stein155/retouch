@@ -70,7 +70,12 @@ type Bridge struct {
 	// update, when non-nil, is invoked by the OTA button. It should kick off a
 	// self-update and return quickly (the speaker restarts on success).
 	update func(context.Context) error
-	log    *slog.Logger
+	// nowPlaying, when set, returns the enriched now-playing (live track/artist
+	// from the stream metadata). The speaker's raw /now_playing only carries the
+	// station, so without this HA would never see the actual song. Falls back to
+	// the raw speaker read when nil.
+	nowPlaying func(context.Context) (*speaker.NowPlaying, error)
+	log        *slog.Logger
 
 	reload chan struct{}
 
@@ -89,6 +94,13 @@ func New(sp *speaker.Client, cfgFn func() Config, update func(context.Context) e
 		log:    log,
 		reload: make(chan struct{}, 1),
 	}
+}
+
+// SetNowPlaying supplies the enriched now-playing source (the web layer's
+// EnrichedNowPlaying), so Home Assistant sees the live track and artist, not just
+// the station. Optional; without it the bridge uses the speaker's raw read.
+func (b *Bridge) SetNowPlaying(fn func(context.Context) (*speaker.NowPlaying, error)) {
+	b.nowPlaying = fn
 }
 
 // Reload signals the run loop to drop any current connection and reconnect using

@@ -1036,6 +1036,19 @@ func (s *Server) now(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, np)
 }
 
+// EnrichedNowPlaying returns the current now-playing with the live song/artist/
+// cover filled in from the stream metadata — the same view the web UI shows. The
+// MQTT bridge uses it so Home Assistant sees the track, not just the station name
+// (the speaker itself no longer receives track metadata; see enrichNowPlaying).
+func (s *Server) EnrichedNowPlaying(ctx context.Context) (*speaker.NowPlaying, error) {
+	np, err := s.speaker.NowPlaying(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.enrichNowPlaying(np)
+	return np, nil
+}
+
 // enrichNowPlaying fills in the song/artist/cover for a playing station. The
 // speaker no longer gets this metadata (it came from the retired Bose cloud), so
 // ReTouch reads it from the standard ICY stream metadata (see internal/icy),
