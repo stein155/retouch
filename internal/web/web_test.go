@@ -76,6 +76,9 @@ func do(t *testing.T, h http.Handler, method, target string, body string) *httpt
 		r = strings.NewReader(body)
 	}
 	req := httptest.NewRequest(method, target, r)
+	// The API guard requires a Host that names the speaker (blocks DNS rebinding);
+	// httptest defaults to "example.com", so present a loopback host here.
+	req.Host = "127.0.0.1:8000"
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec

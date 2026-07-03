@@ -315,6 +315,9 @@ func isPresetStore(p string) bool {
 // TUNEIN station path the speaker will resolve itself.
 func (s *Server) updatePreset(w http.ResponseWriter, r *http.Request) {
 	btn := presetButton(r.URL.Path)
+	// Bound the body: a preset store is a few hundred bytes; cap it so a malformed
+	// or hostile request can't drive a large allocation on the speaker.
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	var in struct {
 		Name     string `xml:"name"`
 		Username string `xml:"username"`
