@@ -9,6 +9,26 @@ import (
 	"time"
 )
 
+func TestReadPacketRejectsOversize(t *testing.T) {
+	// A PUBLISH fixed header advertising a remaining length just over the cap; the
+	// body bytes need not be present — readPacket must reject before allocating.
+	var hdr []byte
+	hdr = append(hdr, pktPublish<<4)
+	hdr = appendRemainingLength(hdr, maxPacketSize+1)
+	if _, _, _, err := readPacket(bufio.NewReader(bytes.NewReader(hdr))); err == nil {
+		t.Fatalf("readPacket accepted an oversize packet; want error")
+	}
+
+	// A packet at the cap is fine (given its body follows).
+	var ok []byte
+	ok = append(ok, pktPublish<<4)
+	ok = appendRemainingLength(ok, 4)
+	ok = append(ok, 1, 2, 3, 4)
+	if _, _, body, err := readPacket(bufio.NewReader(bytes.NewReader(ok))); err != nil || len(body) != 4 {
+		t.Fatalf("readPacket(in-range) = body %v err %v, want 4 bytes no error", body, err)
+	}
+}
+
 func TestRemainingLengthRoundTrip(t *testing.T) {
 	// Boundaries of each variable-length-integer size class (MQTT §2.2.3).
 	for _, n := range []int{0, 1, 127, 128, 16383, 16384, 2097151, 2097152, 268435455} {
@@ -134,7 +154,7 @@ func TestConnectPublishSubscribe(t *testing.T) {
 		Username: "user",
 		Password: "pass",
 		Will:     &Will{Topic: "retouch/x/availability", Payload: []byte("offline"), Retain: true},
-		Handler:  func(topic string, payload []byte) { msgs <- [2]string{topic, string(payload)} },
+		Handler:  func(_ *Client, topic string, payload []byte) { msgs <- [2]string{topic, string(payload)} },
 	})
 	if err != nil {
 		t.Fatalf("connect: %v", err)

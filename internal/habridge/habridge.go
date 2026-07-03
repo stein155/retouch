@@ -215,10 +215,7 @@ func (b *Bridge) serve(ctx context.Context, cfg Config) error {
 	}
 	tp := topics{base: base}
 
-	// Declared up front so the message handler can capture it (Connect assigns it
-	// before the read loop that invokes the handler starts).
-	var client *mqtt.Client
-	client, err = mqtt.Connect(ctx, mqtt.Options{
+	client, err := mqtt.Connect(ctx, mqtt.Options{
 		Addr:      cfg.addr(),
 		ClientID:  "retouch-" + info.DeviceID,
 		Username:  cfg.Username,
@@ -226,10 +223,11 @@ func (b *Bridge) serve(ctx context.Context, cfg Config) error {
 		TLS:       cfg.TLS,
 		KeepAlive: 30 * time.Second,
 		Will:      &mqtt.Will{Topic: tp.availability(), Payload: []byte(availabilityOffline), Retain: true},
-		Handler: func(topic string, payload []byte) {
+		Handler: func(c *mqtt.Client, topic string, payload []byte) {
 			// Route on a fresh goroutine so a slow speaker call never stalls the
-			// MQTT read loop (and thus other commands / the birth message).
-			go b.handle(ctx, client, tp, disc, info, topic, string(payload))
+			// MQTT read loop (and thus other commands / the birth message). The
+			// client is passed in, so there is no race on capturing it.
+			go b.handle(ctx, c, tp, disc, info, topic, string(payload))
 		},
 	})
 	if err != nil {

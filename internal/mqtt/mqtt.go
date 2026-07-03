@@ -32,6 +32,12 @@ const (
 	protocolLevel4 = 0x04 // MQTT 3.1.1
 )
 
+// maxPacketSize caps a single inbound packet. The remaining-length field allows up
+// to ~256 MiB; on a memory-constrained speaker one corrupt or hostile length would
+// otherwise drive a huge allocation. Home Assistant discovery/state payloads are
+// well under this, so it never bites legitimate traffic.
+const maxPacketSize = 1 << 20 // 1 MiB
+
 // Will is the broker's Last Will and Testament: the message the broker publishes
 // on the client's behalf if the connection drops without a clean DISCONNECT. The
 // bridge uses it so Home Assistant sees the speaker go offline when ReTouch dies.
@@ -52,9 +58,11 @@ type Options struct {
 	TLSConfig   *tls.Config   // optional; nil uses defaults for the host
 	DialTimeout time.Duration // 0 -> 10s
 	Will        *Will         // optional LWT
-	// Handler receives every inbound PUBLISH. It runs on the read goroutine, so it
-	// must not block; hand work off to another goroutine if it might.
-	Handler func(topic string, payload []byte)
+	// Handler receives every inbound PUBLISH. The *Client is passed in (rather than
+	// captured by the caller) so a PUBLISH that arrives before Connect returns can't
+	// race the assignment of the returned client. It runs on the read goroutine, so
+	// it must not block; hand work off to another goroutine if it might.
+	Handler func(c *Client, topic string, payload []byte)
 }
 
 // Client is a live MQTT connection. It is safe for concurrent Publish/Subscribe.
@@ -63,7 +71,7 @@ type Client struct {
 	reader    *bufio.Reader // persistent so buffered bytes survive between packets
 	writeMu   sync.Mutex    // serialises writes to conn
 	keepAlive time.Duration
-	handler   func(topic string, payload []byte)
+	handler   func(c *Client, topic string, payload []byte)
 
 	nextID uint16 // packet ids for SUBSCRIBE (writeMu guards it)
 
@@ -90,7 +98,10 @@ func Connect(ctx context.Context, opts Options) (*Client, error) {
 		err  error
 	)
 	if opts.TLS {
-		conn, err = tls.DialWithDialer(&dialer, "tcp", opts.Addr, opts.TLSConfig)
+		// tls.Dialer honours ctx (unlike tls.DialWithDialer), so cancelling ctx —
+		// e.g. a shutdown mid-reconnect — aborts the handshake instead of blocking
+		// up to DialTimeout.
+		conn, err = (&tls.Dialer{NetDialer: &dialer, Config: opts.TLSConfig}).DialContext(ctx, "tcp", opts.Addr)
 	} else {
 		conn, err = dialer.DialContext(ctx, "tcp", opts.Addr)
 	}
@@ -248,7 +259,7 @@ func (c *Client) readLoop() {
 		case pktPublish:
 			topic, payload, ok := parsePublish(flags, body)
 			if ok && c.handler != nil {
-				c.handler(topic, payload)
+				c.handler(c, topic, payload)
 			}
 		case pktPingresp, pktSuback:
 			// nothing to do (QoS 0)
@@ -320,6 +331,9 @@ func readPacket(br *bufio.Reader) (typ, flags byte, body []byte, err error) {
 	n, err := readRemainingLength(br)
 	if err != nil {
 		return 0, 0, nil, err
+	}
+	if n > maxPacketSize {
+		return 0, 0, nil, fmt.Errorf("packet too large: %d bytes", n)
 	}
 	body = make([]byte, n)
 	if _, err := io.ReadFull(br, body); err != nil {
