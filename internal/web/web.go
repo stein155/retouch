@@ -5,8 +5,10 @@ package web
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -52,6 +54,18 @@ const (
 	logoMaxBytes = 2 << 20 // 2 MiB
 	repo         = "stein155/retouch"
 )
+
+// releasePublicKey is the base64-encoded ed25519 public key that release SHA256SUMS
+// files are signed with. When set, a self-update refuses to install unless the
+// release ships a valid SHA256SUMS.sig — so a checksum that merely matches the
+// (same-origin) SHA256SUMS is no longer enough; the binary must be signed by the
+// holder of the private key, closing the "compromised GitHub release → root on
+// every speaker" gap that TLS + checksum alone leave open.
+//
+// Empty (the default) keeps the prior behaviour (TLS + checksum only). To enable
+// signing, generate a keypair, put the public half here, and sign releases in CI
+// with the private half — see docs/RELEASE_SIGNING.md.
+const releasePublicKey = ""
 
 type releaseInfo struct {
 	TagName    string `json:"tag_name"`
@@ -772,6 +786,19 @@ func (s *Server) installRelease(ctx context.Context, tag string) error {
 		_ = os.Remove(newBin)
 		return err
 	}
+	// When signing is enabled, the checksums file itself must carry a valid
+	// signature before we trust any checksum in it.
+	if releasePublicKey != "" {
+		sig := filepath.Join(s.homeDir, "SHA256SUMS.sig")
+		if err := s.downloadFile(ctx, base+"/SHA256SUMS.sig", sig, 0o644); err != nil {
+			_ = os.Remove(newBin)
+			return err
+		}
+		if err := verifyReleaseSignature(releasePublicKey, sums, sig); err != nil {
+			_ = os.Remove(newBin)
+			return err
+		}
+	}
 	want, err := checksumFor(sums, "retouch-armv7l")
 	if err != nil {
 		_ = os.Remove(newBin)
@@ -786,11 +813,47 @@ func (s *Server) installRelease(ctx context.Context, tag string) error {
 		_ = os.Remove(newBin)
 		return errChecksumMismatch{want: want, got: got}
 	}
+	// Keep the outgoing binary as retouch.old so a bad release can be rolled back
+	// by hand (best-effort; a first install has none). Restore it if the swap fails,
+	// so we never leave the speaker with no binary.
+	old := bin + ".old"
+	hadOld := fileExists(bin)
+	if hadOld {
+		_ = os.Rename(bin, old)
+	}
 	if err := os.Rename(newBin, bin); err != nil {
 		_ = os.Remove(newBin)
+		if hadOld {
+			_ = os.Rename(old, bin)
+		}
 		return err
 	}
 	return os.WriteFile(filepath.Join(s.homeDir, ".version"), []byte(tag+"\n"), 0o644)
+}
+
+// verifyReleaseSignature checks that sigPath is a valid ed25519 signature (base64)
+// over the raw bytes of sumsPath, made by the private half of pubKeyB64.
+func verifyReleaseSignature(pubKeyB64, sumsPath, sigPath string) error {
+	pub, err := base64.StdEncoding.DecodeString(strings.TrimSpace(pubKeyB64))
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return fmt.Errorf("invalid release public key")
+	}
+	sums, err := os.ReadFile(sumsPath)
+	if err != nil {
+		return err
+	}
+	sigRaw, err := os.ReadFile(sigPath)
+	if err != nil {
+		return err
+	}
+	sig, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(sigRaw)))
+	if err != nil {
+		return fmt.Errorf("invalid signature encoding: %w", err)
+	}
+	if !ed25519.Verify(pub, sums, sig) {
+		return fmt.Errorf("release signature verification failed")
+	}
+	return nil
 }
 
 func (s *Server) getJSON(ctx context.Context, target string, out any) error {
