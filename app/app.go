@@ -127,7 +127,7 @@ func Run() {
 
 	// Home Assistant MQTT bridge: reads its config from the settings store on every
 	// (re)connect, so the web UI's MQTT section takes effect via bridge.Reload().
-	// The OTA button reuses the web server's self-update path.
+	// The HA update entity reuses the web server's version-check + self-update path.
 	bridge := habridge.New(bc, func() habridge.Config {
 		m := set.Get().MQTT
 		return habridge.Config{
@@ -140,7 +140,7 @@ func Run() {
 			DiscoveryPrefix: m.DiscoveryPrefix,
 			TLS:             m.TLS,
 		}
-	}, webSrv.UpdateToLatest, logger.With("comp", "habridge"))
+	}, webSrv, logger.With("comp", "habridge"))
 	// Feed the bridge the enriched now-playing so HA shows the live track/artist,
 	// not just the station name (the speaker no longer receives track metadata).
 	bridge.SetNowPlaying(webSrv.EnrichedNowPlaying)

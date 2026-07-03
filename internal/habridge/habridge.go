@@ -30,6 +30,16 @@ import (
 	"github.com/stein155/retouch/internal/speaker"
 )
 
+// Updater backs the Home Assistant `update` entity. UpdateInfo reports the running
+// version, the latest available version, a release URL, and whether updating is
+// possible here (only on an installed speaker); UpdateToLatest performs the install.
+// The web server implements this; kept as an interface so habridge doesn't depend on
+// the web package.
+type Updater interface {
+	UpdateInfo(ctx context.Context) (installed, latest, releaseURL string, updatable bool, err error)
+	UpdateToLatest(ctx context.Context) error
+}
+
 // Config is the MQTT connection configuration, sourced from the settings store.
 type Config struct {
 	Enabled         bool
@@ -61,15 +71,17 @@ const (
 	availabilityOffline = "offline"
 	pollInterval        = 5 * time.Second
 	reconnectDelay      = 15 * time.Second
+	updateCheckInterval = 6 * time.Hour
 )
 
 // Bridge runs the MQTT integration for the life of the process.
 type Bridge struct {
 	sp    *speaker.Client
 	cfgFn func() Config
-	// update, when non-nil, is invoked by the OTA button. It should kick off a
-	// self-update and return quickly (the speaker restarts on success).
-	update func(context.Context) error
+	// updater, when non-nil, backs a Home Assistant `update` entity: it reports the
+	// installed/available versions (so HA shows an update notification) and performs
+	// the install when HA asks for it.
+	updater Updater
 	// nowPlaying, when set, returns the enriched now-playing (live track/artist
 	// from the stream metadata). The speaker's raw /now_playing only carries the
 	// station, so without this HA would never see the actual song. Falls back to
@@ -85,14 +97,14 @@ type Bridge struct {
 }
 
 // New builds a Bridge. cfgFn is read on every (re)connect so a settings change is
-// picked up by Reload. update is optional (nil disables the OTA button).
-func New(sp *speaker.Client, cfgFn func() Config, update func(context.Context) error, log *slog.Logger) *Bridge {
+// picked up by Reload. updater is optional (nil disables the HA update entity).
+func New(sp *speaker.Client, cfgFn func() Config, updater Updater, log *slog.Logger) *Bridge {
 	return &Bridge{
-		sp:     sp,
-		cfgFn:  cfgFn,
-		update: update,
-		log:    log,
-		reload: make(chan struct{}, 1),
+		sp:      sp,
+		cfgFn:   cfgFn,
+		updater: updater,
+		log:     log,
+		reload:  make(chan struct{}, 1),
 	}
 }
 
@@ -237,9 +249,13 @@ func (b *Bridge) serve(ctx context.Context, cfg Config) error {
 	// retained messages are only re-sent when something actually changed.
 	published := map[string]string{}
 	b.refresh(ctx, client, tp, published)
+	b.publishUpdateState(ctx, client, tp)
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
+	// The update check hits GitHub, so it runs far less often than the state poll.
+	updateTicker := time.NewTicker(updateCheckInterval)
+	defer updateTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -250,6 +266,8 @@ func (b *Bridge) serve(ctx context.Context, cfg Config) error {
 			return client.Err()
 		case <-ticker.C:
 			b.refresh(ctx, client, tp, published)
+		case <-updateTicker.C:
+			b.publishUpdateState(ctx, client, tp)
 		}
 	}
 }

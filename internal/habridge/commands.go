@@ -78,12 +78,13 @@ func (b *Bridge) handle(ctx context.Context, client *mqtt.Client, tp topics, dis
 	case topic == tp.presetSet():
 		b.selectPreset(c, client, tp, strings.TrimSpace(payload))
 
-	case topic == tp.otaSet():
-		if b.update == nil {
+	case topic == tp.updateInstall():
+		// HA's update entity asks us to install (payload defaults to "install").
+		if b.updater == nil {
 			return
 		}
-		if err := b.update(ctx); err != nil {
-			b.log.Warn("mqtt ota trigger", "err", err)
+		if err := b.updater.UpdateToLatest(ctx); err != nil {
+			b.log.Warn("mqtt update install", "err", err)
 		}
 
 	case topic == disc+"/status":
@@ -92,6 +93,7 @@ func (b *Bridge) handle(ctx context.Context, client *mqtt.Client, tp topics, dis
 		if strings.EqualFold(strings.TrimSpace(payload), availabilityOnline) {
 			b.announce(ctx, client, tp, disc, info)
 			b.refresh(ctx, client, tp, map[string]string{})
+			b.publishUpdateState(ctx, client, tp)
 		}
 
 	default:

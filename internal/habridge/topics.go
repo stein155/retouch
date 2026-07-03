@@ -8,7 +8,7 @@ package habridge
 //	<base>/power/state    <base>/power/set
 //	<base>/preset/state   <base>/preset/set
 //	<base>/transport/<key>/set          (button: play|pause|stop|next|prev)
-//	<base>/ota/set                      (button: OTA update)
+//	<base>/update/state  <base>/update/install   (update entity)
 //	<base>/station  <base>/track  <base>/artist  <base>/status
 //	<base>/sw_version  <base>/model
 type topics struct{ base string }
@@ -25,7 +25,9 @@ func (t topics) presetState() string { return t.base + "/preset/state" }
 func (t topics) presetSet() string   { return t.base + "/preset/set" }
 
 func (t topics) transportSet(key string) string { return t.base + "/transport/" + key + "/set" }
-func (t topics) otaSet() string                 { return t.base + "/ota/set" }
+
+func (t topics) updateState() string   { return t.base + "/update/state" }
+func (t topics) updateInstall() string { return t.base + "/update/install" }
 
 func (t topics) station() string   { return t.base + "/station" }
 func (t topics) track() string     { return t.base + "/track" }

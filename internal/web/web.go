@@ -600,10 +600,33 @@ func (s *Server) updateApp(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": target})
 }
 
+// UpdateInfo reports the running version, the latest available stable release, its
+// release URL, and whether updating is possible here (only on an installed speaker).
+// It backs the Home Assistant `update` entity so HA can show an update notification.
+// Off-speaker (not updatable) it reports latest == installed and skips the GitHub
+// call, so no false update is offered.
+func (s *Server) UpdateInfo(ctx context.Context) (installed, latest, releaseURL string, updatable bool, err error) {
+	installed = s.version
+	updatable = s.updatable()
+	if !updatable {
+		return installed, installed, "", false, nil
+	}
+	latest, err = s.latestRelease(ctx)
+	if err != nil {
+		return installed, "", "", true, err
+	}
+	if latest == "" {
+		latest = installed
+	}
+	if latest != installed {
+		releaseURL = "https://github.com/" + repo + "/releases/tag/" + latest
+	}
+	return installed, latest, releaseURL, true, nil
+}
+
 // UpdateToLatest installs the latest stable release and restarts, reusing the same
-// path as POST /api/update. It backs the Home Assistant "Update ReTouch" button, so
-// an OTA update can be triggered from HA. It returns quickly: the download + restart
-// run in the background on success.
+// path as POST /api/update. It backs the Home Assistant update entity's Install
+// action. It returns quickly: the download + restart run in the background on success.
 func (s *Server) UpdateToLatest(ctx context.Context) error {
 	if !s.updatable() {
 		return fmt.Errorf("updates are only available on an installed speaker")

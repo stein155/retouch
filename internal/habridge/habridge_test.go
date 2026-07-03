@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -236,10 +237,28 @@ func TestBridgeDiscoveryAndCommands(t *testing.T) {
 		return err == nil && v == 37
 	})
 
-	// The OTA button is absent when no updater is wired in.
-	if _, ok := broker.published("homeassistant/button/" + dev + "/ota/config"); ok {
-		t.Error("ota button should not be published without an updater")
+	// The update entity is absent when no updater is wired in.
+	if _, ok := broker.published("homeassistant/update/" + dev + "/update/config"); ok {
+		t.Error("update entity should not be published without an updater")
 	}
+}
+
+// fakeUpdater implements habridge.Updater for tests.
+type fakeUpdater struct {
+	installed, latest string
+	called            chan struct{}
+}
+
+func (f *fakeUpdater) UpdateInfo(context.Context) (string, string, string, bool, error) {
+	return f.installed, f.latest, "https://example.test/tag/" + f.latest, true, nil
+}
+
+func (f *fakeUpdater) UpdateToLatest(context.Context) error {
+	select {
+	case f.called <- struct{}{}:
+	default:
+	}
+	return nil
 }
 
 func TestBridgePublishesEnrichedTrack(t *testing.T) {
@@ -270,36 +289,36 @@ func TestBridgePublishesEnrichedTrack(t *testing.T) {
 	}
 }
 
-func TestBridgeOTAButtonWhenUpdaterSet(t *testing.T) {
+func TestBridgeUpdateEntity(t *testing.T) {
 	broker := newFakeBroker(t)
 	host, port := broker.addr()
 	sp := newSimSpeaker(t)
 
-	called := make(chan struct{}, 1)
-	updater := func(context.Context) error {
-		select {
-		case called <- struct{}{}:
-		default:
-		}
-		return nil
-	}
-	cfg := Config{Enabled: true, Host: host, Port: port, BaseTopic: "retouch/ota", DiscoveryPrefix: "homeassistant"}
-	b := New(sp, func() Config { return cfg }, updater, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	up := &fakeUpdater{installed: "v1.0.0", latest: "v1.1.0", called: make(chan struct{}, 1)}
+	cfg := Config{Enabled: true, Host: host, Port: port, BaseTopic: "retouch/up", DiscoveryPrefix: "homeassistant"}
+	b := New(sp, func() Config { return cfg }, up, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go b.Run(ctx)
 
 	const dev = "F4E11E3B013F"
-	waitFor(t, "ota discovery", func() bool {
-		_, ok := broker.published("homeassistant/button/" + dev + "/ota/config")
+	waitFor(t, "update discovery", func() bool {
+		_, ok := broker.published("homeassistant/update/" + dev + "/update/config")
 		return ok
 	})
 
-	broker.send(t, "retouch/ota/ota/set", "PRESS")
+	// The state carries both versions so HA can show the update as available.
+	waitFor(t, "update state", func() bool {
+		v, ok := broker.published("retouch/up/update/state")
+		return ok && strings.Contains(v, `"installed_version":"v1.0.0"`) && strings.Contains(v, `"latest_version":"v1.1.0"`)
+	})
+
+	// Installing from HA calls through to the updater.
+	broker.send(t, "retouch/up/update/install", "install")
 	select {
-	case <-called:
+	case <-up.called:
 	case <-time.After(3 * time.Second):
-		t.Fatal("ota updater was not invoked")
+		t.Fatal("update install was not invoked")
 	}
 }

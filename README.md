@@ -60,7 +60,8 @@ takes the other route and lives on the speaker itself:
   in sync, using Bose's own native zones
 - 🏠 **Home Assistant (MQTT)** — connect the speaker to your MQTT broker and it
   appears in Home Assistant automatically, with volume, station switching, transport,
-  power on/off, and now-playing (plus software version and an over-the-air update button)
+  power on/off, and now-playing — plus a native update entity that notifies you when a
+  new ReTouch release is out and installs it over the air
 - ⚙️ **Settings** — speaker name, bass, and the app's language
 - ⬆️ **Over-the-air updates** — one tap in the app; the speaker fetches the latest
   release and relaunches ReTouch in a few seconds (no reboot)

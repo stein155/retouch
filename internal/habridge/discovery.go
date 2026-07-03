@@ -110,11 +110,16 @@ func (b *Bridge) announce(ctx context.Context, client *mqtt.Client, tp topics, d
 	sensor("Software version", "sw_version", tp.swVersion(), "", true)
 	sensor("Model", "model", tp.model(), "", true)
 
-	if b.update != nil {
-		publish("button", "ota", entity("Update ReTouch", "ota", map[string]any{
-			"command_topic":   tp.otaSet(),
+	// An `update` entity: Home Assistant shows it under Settings → Updates with a
+	// notification when a newer release is available, plus an Install button — the
+	// native update experience, not just a button on the device.
+	if b.updater != nil {
+		publish("update", "update", entity("ReTouch", "update", map[string]any{
+			"state_topic":     tp.updateState(),
+			"command_topic":   tp.updateInstall(),
+			"payload_install": "install",
+			"device_class":    "firmware",
 			"icon":            "mdi:update",
-			"entity_category": "config",
 		}))
 	}
 
@@ -124,6 +129,34 @@ func (b *Bridge) announce(ctx context.Context, client *mqtt.Client, tp topics, d
 	}
 	if info.Type != "" {
 		_ = client.Publish(tp.model(), []byte(info.Type), true)
+	}
+}
+
+// publishUpdateState publishes the HA `update` entity's JSON state (installed and
+// latest version + release URL). MQTT Update reads installed_version/latest_version
+// from this payload and raises the update notification when they differ. A transient
+// version-check failure leaves the last retained state in place rather than clearing
+// it. No-op when no updater is wired in.
+func (b *Bridge) publishUpdateState(ctx context.Context, client *mqtt.Client, tp topics) {
+	if b.updater == nil {
+		return
+	}
+	c, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	installed, latest, releaseURL, updatable, err := b.updater.UpdateInfo(c)
+	if err != nil {
+		b.log.Warn("mqtt update check", "err", err)
+		return
+	}
+	if !updatable || latest == "" {
+		latest = installed // nothing to offer -> HA shows "up to date"
+	}
+	payload := map[string]string{"installed_version": installed, "latest_version": latest}
+	if releaseURL != "" && latest != installed {
+		payload["release_url"] = releaseURL
+	}
+	if data, err := json.Marshal(payload); err == nil {
+		_ = client.Publish(tp.updateState(), data, true)
 	}
 }
 
