@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="docs/readme-header.png" width="820"
+       alt="ReTouch — for SoundTouch. Bose switched off the SoundTouch servers; ReTouch brings the radio back, running entirely on the speaker with nothing else to set up." />
+</p>
+
 # ReTouch · for SoundTouch
 
 **Your SoundTouch went quiet when Bose switched off its servers. ReTouch brings
