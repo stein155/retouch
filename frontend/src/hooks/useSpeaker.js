@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { getNowPlaying, getVolume, getPresets } from '../lib/api';
+import { getNowPlaying, getVolume, getPresets, setVolume } from '../lib/api';
 import { subscribeState } from '../lib/events';
 import { sameStation } from '../lib/station';
 
@@ -100,10 +100,32 @@ export function useSpeaker() {
     applyState(np, vol);
   }, [applyState]);
 
-  // Set volume locally and hold that value briefly against stale polls.
-  const setVolumeOptimistic = useCallback((v) => {
+  // Dragging the slider fires an onChange per pixel. Sending a POST for each one
+  // floods the speaker with out-of-order writes, so the box audibly steps and the
+  // slider jumps as stale echoes land. Instead: move the slider instantly (local),
+  // and send at most one request at a time — while one is in flight, keep only the
+  // latest value and send it next. Serialised (in order) + coalesced (skips the
+  // in-between values) + always flushes the final position.
+  const volInflightRef = useRef(false);
+  const volNextRef = useRef(null);
+  const changeVolume = useCallback((v) => {
     volumeHoldRef.current = { value: v, until: Date.now() + VOLUME_HOLD_MS };
     setVolumeState(v);
+    volNextRef.current = v;
+    if (volInflightRef.current) return;
+    const pump = async () => {
+      while (volNextRef.current != null) {
+        const val = volNextRef.current;
+        volNextRef.current = null;
+        volInflightRef.current = true;
+        // extend the hold to the value actually being sent, so a poll can't yank
+        // the slider back to a not-yet-applied reading mid-drag.
+        volumeHoldRef.current = { value: val, until: Date.now() + VOLUME_HOLD_MS };
+        try { await setVolume(val); } catch { /* poll / SSE reconciles */ }
+      }
+      volInflightRef.current = false;
+    };
+    pump();
   }, []);
 
   const refreshPresets = useCallback(async () => {
@@ -243,7 +265,7 @@ export function useSpeaker() {
     loading,
     refreshPresets,
     refreshNowPlaying: refresh,
-    setVolumeOptimistic,
+    changeVolume,
     playOptimistic,
     stopOptimistic,
     cancelPending,
