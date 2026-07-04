@@ -36,6 +36,46 @@ const ScanButton = styled(Button).attrs({ $variant: 'update' })`
   &:hover { background: var(--ink-2); }
 `;
 
+// Shown once an update lands: a blocking full-screen overlay that forces the
+// page to reload onto the new bundle. Sits above the sheet (z-index 50) so the
+// stale app can't be used in the meantime.
+const UpdateOverlay = styled.div`
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(31, 24, 20, 0.45);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+`;
+
+const UpdateCard = styled.div`
+  background: var(--bg);
+  border-radius: 22px;
+  padding: 30px 26px;
+  max-width: 320px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 30px 80px -20px rgba(31, 24, 20, 0.35);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+`;
+
+const UpdateTitle = styled.div`
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+`;
+
+const UpdateSub = styled.div`
+  font-size: 14px;
+  color: var(--ink-3);
+`;
+
 // Root settings menu: one tappable row per category, each opening its own
 // subpage. Styled to sit on the same card as the form fields it replaces.
 const MenuItem = styled.button`
@@ -406,6 +446,15 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     setSelTag(next ? (betas[0]?.tag || '') : '');
   };
 
+  // A finished update leaves this page running the old bundle, so a reload is
+  // mandatory. Trigger it automatically once the new version is being served;
+  // the overlay blocks the stale UI until the fresh page loads.
+  useEffect(() => {
+    if (upd.phase !== 'updated') return undefined;
+    const id = setTimeout(() => window.location.reload(), 2200);
+    return () => clearTimeout(id);
+  }, [upd.phase]);
+
   const updateLabel = selTag ? t('installSelected') : (ver?.version?.startsWith('beta-') ? t('installStable') : t('updateNow'));
 
   useEffect(() => {
@@ -594,51 +643,42 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
         </FieldCard>
         {ver.updatable ? (
           <>
-            {upd.phase === 'updated' ? (
-              <Button $variant="update" onClick={() => window.location.reload()}>
-                <Icon.refresh width="18" height="18" />
-                <span>{t('reloadNow')}</span>
-              </Button>
-            ) : (
+            {betas.length > 0 && (
+              <FieldCard style={{ marginTop: 8, marginBottom: 8 }}>
+                <FieldRow>
+                  <FieldRowLabel as="span">{t('betaUpdates')}</FieldRowLabel>
+                  <Toggle
+                    on={showBetas}
+                    onClick={onShowBetas}
+                    aria-label={t('betaUpdates')}
+                    style={{ marginLeft: 'auto' }}
+                  />
+                </FieldRow>
+              </FieldCard>
+            )}
+            {showBetas && betas.length > 0 && (
               <>
-                {betas.length > 0 && (
-                  <FieldCard style={{ marginTop: 8, marginBottom: 8 }}>
-                    <FieldRow>
-                      <FieldRowLabel as="span">{t('betaUpdates')}</FieldRowLabel>
-                      <Toggle
-                        on={showBetas}
-                        onClick={onShowBetas}
-                        aria-label={t('betaUpdates')}
-                        style={{ marginLeft: 'auto' }}
-                      />
-                    </FieldRow>
-                  </FieldCard>
-                )}
-                {showBetas && betas.length > 0 && (
-                  <>
-                    <SelectWrap style={{ marginBottom: 8 }}>
-                      <Select
-                        value={selTag}
-                        onChange={(e) => setSelTag(e.target.value)}
-                        disabled={upd.phase === 'busy'}
-                        aria-label={t('chooseBetaVersion')}
-                      >
-                        {betas.map((b) => (
-                          <option key={b.tag} value={b.tag}>{b.name}</option>
-                        ))}
-                      </Select>
-                      <SelectChev aria-hidden="true"><Icon.chevron width="18" height="18" /></SelectChev>
-                    </SelectWrap>
-                    <FieldHint style={{ marginBottom: 8 }}>{t('betaUpdatesHint')}</FieldHint>
-                  </>
-                )}
-                <Button $variant="update" onClick={onUpdate} disabled={upd.phase === 'busy'}>
-                  <Icon.download width="18" height="18" />
-                  <span>{updateLabel}</span>
-                </Button>
+                <SelectWrap style={{ marginBottom: 8 }}>
+                  <Select
+                    value={selTag}
+                    onChange={(e) => setSelTag(e.target.value)}
+                    disabled={upd.phase === 'busy'}
+                    aria-label={t('chooseBetaVersion')}
+                  >
+                    {betas.map((b) => (
+                      <option key={b.tag} value={b.tag}>{b.name}</option>
+                    ))}
+                  </Select>
+                  <SelectChev aria-hidden="true"><Icon.chevron width="18" height="18" /></SelectChev>
+                </SelectWrap>
+                <FieldHint style={{ marginBottom: 8 }}>{t('betaUpdatesHint')}</FieldHint>
               </>
             )}
-            {upd.text && (
+            <Button $variant="update" onClick={onUpdate} disabled={upd.phase === 'busy'}>
+              <Icon.download width="18" height="18" />
+              <span>{updateLabel}</span>
+            </Button>
+            {upd.text && upd.phase !== 'updated' && (
               <FieldHint $error={upd.phase === 'error'}>{upd.text}</FieldHint>
             )}
           </>
@@ -682,6 +722,15 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
           )}
         </SheetBody>
       </SheetEl>
+      {upd.phase === 'updated' && (
+        <UpdateOverlay role="alertdialog" aria-modal="true" onClick={() => window.location.reload()}>
+          <UpdateCard>
+            <Spinner $scan />
+            <UpdateTitle>{upd.text}</UpdateTitle>
+            <UpdateSub>{t('updateReloading')}</UpdateSub>
+          </UpdateCard>
+        </UpdateOverlay>
+      )}
     </>
   );
 }
