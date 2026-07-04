@@ -54,7 +54,7 @@ export const I18N = {
     wifiNetwork: 'Wi‑Fi network', signal: 'Signal', ipAddress: 'IP address',
     sigExcellent: 'Excellent', sigGood: 'Good', sigFair: 'Fair', sigPoor: 'Poor',
     security: 'Security', closeTelnet: 'Close telnet after boot',
-    closeTelnetHint: 'When enabled, telnet stays open for 5 minutes after reboot and then closes for LAN access.',
+    closeTelnetHint: 'ReTouch installs itself through the speaker’s open telnet service, which otherwise stays open afterwards as a security risk. When enabled, telnet stays open for 5 minutes after a reboot and then closes for network access.',
   },
   nl: {
     appTitle: 'Radio', settings: 'Instellingen', thisRadio: 'Deze radio', general: 'Algemeen', back: 'Terug',
@@ -93,7 +93,7 @@ export const I18N = {
     wifiNetwork: 'Wifi‑netwerk', signal: 'Signaal', ipAddress: 'IP‑adres',
     sigExcellent: 'Uitstekend', sigGood: 'Goed', sigFair: 'Matig', sigPoor: 'Zwak',
     security: 'Beveiliging', closeTelnet: 'Telnet sluiten na opstarten',
-    closeTelnetHint: 'Als dit aan staat, blijft telnet 5 minuten na herstart open en sluit daarna voor toegang vanaf het netwerk.',
+    closeTelnetHint: 'ReTouch wordt geïnstalleerd via de open telnet-dienst van de speaker, die anders daarna als beveiligingsrisico open blijft staan. Als dit aan staat, blijft telnet 5 minuten na herstart open en sluit daarna voor toegang vanaf het netwerk.',
   },
   de: {
     appTitle: 'Radio', settings: 'Einstellungen', thisRadio: 'Dieses Radio', general: 'Allgemein', back: 'Zurück',
@@ -132,7 +132,7 @@ export const I18N = {
     wifiNetwork: 'WLAN-Netzwerk', signal: 'Signal', ipAddress: 'IP-Adresse',
     sigExcellent: 'Ausgezeichnet', sigGood: 'Gut', sigFair: 'Mäßig', sigPoor: 'Schwach',
     security: 'Sicherheit', closeTelnet: 'Telnet nach Start schließen',
-    closeTelnetHint: 'Wenn aktiv, bleibt Telnet nach Neustart 5 Minuten offen und wird dann im Netzwerk geschlossen.',
+    closeTelnetHint: 'ReTouch wird über den offenen Telnet-Dienst des Lautsprechers installiert, der sonst danach als Sicherheitsrisiko offen bleibt. Wenn aktiv, bleibt Telnet nach Neustart 5 Minuten offen und wird dann im Netzwerk geschlossen.',
   },
   fr: {
     appTitle: 'Radio', settings: 'Réglages', thisRadio: 'Cette radio', general: 'Général', back: 'Retour',
@@ -171,7 +171,7 @@ export const I18N = {
     wifiNetwork: 'Réseau Wi‑Fi', signal: 'Signal', ipAddress: 'Adresse IP',
     sigExcellent: 'Excellent', sigGood: 'Bon', sigFair: 'Moyen', sigPoor: 'Faible',
     security: 'Sécurité', closeTelnet: 'Fermer telnet après démarrage',
-    closeTelnetHint: 'Si activé, telnet reste ouvert 5 minutes après redémarrage puis se ferme pour le réseau local.',
+    closeTelnetHint: "ReTouch s'installe via le service telnet ouvert de l'enceinte, qui reste sinon ouvert ensuite et constitue un risque de sécurité. Si activé, telnet reste ouvert 5 minutes après redémarrage puis se ferme pour le réseau local.",
   },
   es: {
     appTitle: 'Radio', settings: 'Ajustes', thisRadio: 'Esta radio', general: 'General', back: 'Atrás',
@@ -210,7 +210,7 @@ export const I18N = {
     wifiNetwork: 'Red Wi‑Fi', signal: 'Señal', ipAddress: 'Dirección IP',
     sigExcellent: 'Excelente', sigGood: 'Buena', sigFair: 'Regular', sigPoor: 'Débil',
     security: 'Seguridad', closeTelnet: 'Cerrar telnet tras iniciar',
-    closeTelnetHint: 'Si está activo, telnet queda abierto 5 minutos tras reiniciar y luego se cierra para la red local.',
+    closeTelnetHint: 'ReTouch se instala a través del servicio telnet abierto del altavoz, que de lo contrario queda abierto después como riesgo de seguridad. Si está activo, telnet queda abierto 5 minutos tras reiniciar y luego se cierra para la red local.',
   },
   af: {
     appTitle: 'Radio', settings: 'Instellings', thisRadio: 'Hierdie radio', general: 'Algemeen', back: 'Terug',
@@ -249,7 +249,7 @@ export const I18N = {
     wifiNetwork: 'Wi‑Fi-netwerk', signal: 'Sein', ipAddress: 'IP-adres',
     sigExcellent: 'Uitstekend', sigGood: 'Goed', sigFair: 'Redelik', sigPoor: 'Swak',
     security: 'Sekuriteit', closeTelnet: 'Maak telnet toe ná begin',
-    closeTelnetHint: 'Wanneer aan, bly telnet 5 minute ná herbegin oop en sluit dan vir LAN-toegang.',
+    closeTelnetHint: "ReTouch word geïnstalleer via die luidspreker se oop telnet-diens, wat andersins daarna as 'n sekuriteitsrisiko oop bly. Wanneer aan, bly telnet 5 minute ná herbegin oop en sluit dan vir LAN-toegang.",
   },
 };
 
