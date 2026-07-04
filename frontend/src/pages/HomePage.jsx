@@ -155,10 +155,15 @@ export default function HomePage() {
   }, []);
 
   // Reflect the speaker's name in the browser tab, e.g. "Living Room · ReTouch",
-  // falling back to plain "ReTouch" before the name loads.
+  // falling back to plain "ReTouch" before the name loads. The iOS home-screen
+  // shortcut takes its label from apple-mobile-web-app-title (read when the user
+  // taps "Add to Home Screen"), so set that to the bare radio name — a pinned
+  // tile then reads e.g. "Keuken" instead of "ReTouch".
   useEffect(() => {
     const nm = clean(speakerName);
     document.title = nm ? `${nm} · ReTouch` : 'ReTouch';
+    const meta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    if (meta) meta.setAttribute('content', nm || 'ReTouch');
   }, [speakerName]);
 
   const handleSetLang = useCallback((code) => {
