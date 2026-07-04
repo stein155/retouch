@@ -309,7 +309,6 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
   const [wifiOpt, setWifiOpt] = useState(null);          // null = unsupported/hidden
   const [closeTelnet, setCloseTelnet] = useState(false);
   const [network, setNetwork] = useState(null);          // { type, ssid, signal, ip }
-  const [host, setHost] = useState('');                  // friendly .local address
   const [ver, setVer] = useState(null);                  // { version, updatable }
   const [betas, setBetas] = useState([]);                // open-PR beta builds
   const [showBetas, setShowBetas] = useState(() => localStorage.getItem(betaUpdatesKey) === '1');
@@ -327,7 +326,6 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
       setLoading(false);
       if (!s) return;
       if (typeof s.name === 'string') setName(s.name);
-      if (typeof s.host === 'string') setHost(s.host);
       if (s.bass) {
         setBass(s.bass.actual ?? 0);
         setCaps({ min: s.bass.min ?? -9, max: s.bass.max ?? 0, default: s.bass.default ?? 0 });
@@ -479,9 +477,6 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
             />
           </FieldRow>
         </FieldCard>
-        {host && (
-          <FieldHint>{t('reachableAt')} <b>{host}</b></FieldHint>
-        )}
 
         <FormSection style={{ marginTop: 22 }}>{t('language')}</FormSection>
         <SelectWrap>
