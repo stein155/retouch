@@ -16,6 +16,22 @@ const HdrBrand = styled.div`
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+`;
+
+const HdrText = styled.div`
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+`;
+
+const HdrEyebrow = styled.span`
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  line-height: 1.3;
 `;
 
 const HdrBlob = styled.span`
@@ -37,6 +53,10 @@ const HdrTitle = styled.span`
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 `;
 
 const HdrGear = styled.button`
@@ -55,14 +75,18 @@ const HdrGear = styled.button`
 `;
 
 // Single speaker driven through the on-box STLocal agent (runs on the speaker
-// itself and serves this UI at /). The speaker name comes from its own settings.
-export function Header({ onSettings }) {
+// itself and serves this UI at /). The speaker name comes from its own settings;
+// once known it becomes the headline, with the app name kept as a small eyebrow.
+export function Header({ onSettings, speakerName }) {
   const { t } = useI18n();
   return (
     <Hdr>
       <HdrBrand>
         <HdrBlob aria-hidden="true">📻</HdrBlob>
-        <HdrTitle>{t('appTitle')}</HdrTitle>
+        <HdrText>
+          {speakerName && <HdrEyebrow>{t('appTitle')}</HdrEyebrow>}
+          <HdrTitle>{speakerName || t('appTitle')}</HdrTitle>
+        </HdrText>
       </HdrBrand>
       <HdrGear onClick={onSettings} aria-label={t('settings')}>
         <Icon.settings width="22" height="22" />

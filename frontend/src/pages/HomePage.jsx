@@ -71,7 +71,10 @@ function HomeBody({
 
   return (
     <Shell>
-      <Header onSettings={() => setSettingsOpen(true)} />
+      <Header
+        onSettings={() => setSettingsOpen(true)}
+        speakerName={settingsLoaded ? speakerName : ''}
+      />
 
       <ShellScroll>
         <PresetGrid

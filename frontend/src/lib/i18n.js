@@ -18,7 +18,7 @@ export const DEFAULT_LANG = 'nl';
 
 export const I18N = {
   en: {
-    appTitle: 'Radio', settings: 'Settings', thisRadio: 'This radio',
+    appTitle: 'Radio', settings: 'Settings', thisRadio: 'This radio', general: 'General', back: 'Back',
     name: 'Name', namePlaceholder: 'E.g. Living room',
     sound: 'Sound', bass: 'Bass', bassHint: 'Adjust the low end to taste.', language: 'Language',
     yourStations: 'Your stations', tapToPlay: 'tap to play',
@@ -57,7 +57,7 @@ export const I18N = {
     closeTelnetHint: 'When enabled, telnet stays open for 5 minutes after reboot and then closes for LAN access.',
   },
   nl: {
-    appTitle: 'Radio', settings: 'Instellingen', thisRadio: 'Deze radio',
+    appTitle: 'Radio', settings: 'Instellingen', thisRadio: 'Deze radio', general: 'Algemeen', back: 'Terug',
     name: 'Naam', namePlaceholder: 'Bijv. Woonkamer',
     sound: 'Geluid', bass: 'Bas', bassHint: 'Pas de lage tonen aan naar smaak.', language: 'Taal',
     yourStations: 'Jouw zenders', tapToPlay: 'tik om af te spelen',
@@ -96,7 +96,7 @@ export const I18N = {
     closeTelnetHint: 'Als dit aan staat, blijft telnet 5 minuten na herstart open en sluit daarna voor toegang vanaf het netwerk.',
   },
   de: {
-    appTitle: 'Radio', settings: 'Einstellungen', thisRadio: 'Dieses Radio',
+    appTitle: 'Radio', settings: 'Einstellungen', thisRadio: 'Dieses Radio', general: 'Allgemein', back: 'Zurück',
     name: 'Name', namePlaceholder: 'z. B. Wohnzimmer',
     sound: 'Klang', bass: 'Bass', bassHint: 'Passe die Tiefen nach Belieben an.', language: 'Sprache',
     yourStations: 'Deine Sender', tapToPlay: 'zum Abspielen tippen',
@@ -135,7 +135,7 @@ export const I18N = {
     closeTelnetHint: 'Wenn aktiv, bleibt Telnet nach Neustart 5 Minuten offen und wird dann im Netzwerk geschlossen.',
   },
   fr: {
-    appTitle: 'Radio', settings: 'Réglages', thisRadio: 'Cette radio',
+    appTitle: 'Radio', settings: 'Réglages', thisRadio: 'Cette radio', general: 'Général', back: 'Retour',
     name: 'Nom', namePlaceholder: 'Ex. Salon',
     sound: 'Son', bass: 'Basses', bassHint: 'Ajustez les basses à votre goût.', language: 'Langue',
     yourStations: 'Vos stations', tapToPlay: 'appuyez pour écouter',
@@ -174,7 +174,7 @@ export const I18N = {
     closeTelnetHint: 'Si activé, telnet reste ouvert 5 minutes après redémarrage puis se ferme pour le réseau local.',
   },
   es: {
-    appTitle: 'Radio', settings: 'Ajustes', thisRadio: 'Esta radio',
+    appTitle: 'Radio', settings: 'Ajustes', thisRadio: 'Esta radio', general: 'General', back: 'Atrás',
     name: 'Nombre', namePlaceholder: 'Ej. Salón',
     sound: 'Sonido', bass: 'Graves', bassHint: 'Ajusta los graves a tu gusto.', language: 'Idioma',
     yourStations: 'Tus emisoras', tapToPlay: 'toca para reproducir',
@@ -213,7 +213,7 @@ export const I18N = {
     closeTelnetHint: 'Si está activo, telnet queda abierto 5 minutos tras reiniciar y luego se cierra para la red local.',
   },
   af: {
-    appTitle: 'Radio', settings: 'Instellings', thisRadio: 'Hierdie radio',
+    appTitle: 'Radio', settings: 'Instellings', thisRadio: 'Hierdie radio', general: 'Algemeen', back: 'Terug',
     name: 'Naam', namePlaceholder: 'Bv. Sitkamer',
     sound: 'Klank', bass: 'Bas', bassHint: 'Pas die lae tone na smaak aan.', language: 'Taal',
     yourStations: 'Jou stasies', tapToPlay: 'tik om te speel',
