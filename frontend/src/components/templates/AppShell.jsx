@@ -34,6 +34,9 @@ export const ShellScroll = styled.div`
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
+  /* Clear the absolutely-positioned header (see Header's Hdr): its height is
+     the safe-area top inset + ~58px, floored at 74px. */
+  padding-top: max(74px, calc(env(safe-area-inset-top) + 58px));
   padding-bottom: max(140px, calc(env(safe-area-inset-bottom) + 130px));
   scrollbar-width: thin;
   scrollbar-color: rgba(31, 24, 20, 0.15) transparent;

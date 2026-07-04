@@ -18,7 +18,7 @@ import {
 import { useI18n, LANGS } from '../../lib/i18n';
 import {
   getSettings, saveSettings, getVersion, getReleases, startUpdate,
-  findSpeakers, groupSpeaker, ungroupSpeaker,
+  findSpeakers, groupSpeaker, ungroupSpeaker, getMqttStatus,
 } from '../../lib/api';
 
 const fmtBass = (v) => (v > 0 ? '+' + v : String(v));
@@ -136,6 +136,138 @@ function MultiroomSection({ open }) {
         {scanning ? <Spinner $scan /> : <Icon.search width="18" height="18" />}
         <span>{t('findSpeakers')}</span>
       </ScanButton>
+    </>
+  );
+}
+
+// MQTT / Home Assistant: connect this speaker to a broker so it appears in Home
+// Assistant (via the on-box bridge, internal/habridge). The form is self-contained
+// — it loads the stored config from /api/settings, saves the whole block on demand
+// (a reconnect churns the broker link, so it's a deliberate action, not per-key),
+// and polls the live connection status while enabled. The password is never sent
+// back to the browser, so an empty password field keeps the stored one.
+function MqttSection({ open }) {
+  const { t } = useI18n();
+  const [cfg, setCfg] = useState(null);        // null until loaded
+  const [hasPassword, setHasPassword] = useState(false);
+  const [status, setStatus] = useState({ connected: false, lastError: '' });
+  const [saving, setSaving] = useState(false);
+  const pollRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    getSettings().then((s) => {
+      const m = (s && s.mqtt) || {};
+      setCfg({
+        enabled: !!m.enabled,
+        host: m.host || '',
+        port: m.port || 1883,
+        username: m.username || '',
+        password: '',
+        baseTopic: m.baseTopic || '',
+        discoveryPrefix: m.discoveryPrefix || 'homeassistant',
+        tls: !!m.tls,
+      });
+      setHasPassword(!!m.hasPassword);
+      setStatus({ connected: !!m.connected, lastError: m.lastError || '' });
+    });
+  }, [open]);
+
+  // Poll the live broker status while the section is open and enabled.
+  useEffect(() => {
+    clearInterval(pollRef.current);
+    if (!open || !cfg?.enabled) return undefined;
+    pollRef.current = setInterval(async () => {
+      const s = await getMqttStatus();
+      if (s) setStatus(s);
+    }, 4000);
+    return () => clearInterval(pollRef.current);
+  }, [open, cfg?.enabled]);
+
+  if (!cfg) return null;
+  const set = (k, v) => setCfg((c) => ({ ...c, [k]: v }));
+
+  const save = async () => {
+    setSaving(true);
+    const patch = {
+      enabled: cfg.enabled,
+      host: cfg.host.trim(),
+      port: Number(cfg.port) || 0,
+      username: cfg.username,
+      baseTopic: cfg.baseTopic.trim(),
+      discoveryPrefix: cfg.discoveryPrefix.trim(),
+      tls: cfg.tls,
+    };
+    if (cfg.password) patch.password = cfg.password; // blank keeps the stored one
+    try {
+      await saveSettings({ mqtt: patch });
+      if (cfg.password) setHasPassword(true);
+      set('password', '');
+      setTimeout(async () => { const s = await getMqttStatus(); if (s) setStatus(s); }, 1200);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const dot = {
+    display: 'inline-block', width: 8, height: 8, borderRadius: 99,
+    marginRight: 6, verticalAlign: 'middle',
+    background: status.connected ? '#2ecc71' : 'var(--muted, #9aa0a6)',
+  };
+
+  return (
+    <>
+      <FieldHint style={{ marginTop: 0, marginBottom: 8 }}>{t('mqttHint')}</FieldHint>
+      <FieldCard>
+        <FieldRow>
+          <FieldRowLabel as="span">{t('mqttEnable')}</FieldRowLabel>
+          <Toggle on={cfg.enabled} onClick={() => set('enabled', !cfg.enabled)} aria-label={t('mqttEnable')} style={{ marginLeft: 'auto' }} />
+        </FieldRow>
+      </FieldCard>
+      {cfg.enabled && (
+        <>
+          <FieldCard style={{ marginTop: 12 }}>
+            <FieldRow>
+              <FieldRowLabel htmlFor="mqtt-host">{t('mqttHost')}</FieldRowLabel>
+              <FieldRowInput id="mqtt-host" type="text" value={cfg.host} onChange={(e) => set('host', e.target.value)} placeholder="192.168.1.10" autoComplete="off" />
+            </FieldRow>
+            <FieldRow>
+              <FieldRowLabel htmlFor="mqtt-port">{t('mqttPort')}</FieldRowLabel>
+              <FieldRowInput id="mqtt-port" type="number" value={cfg.port} onChange={(e) => set('port', e.target.value)} placeholder="1883" />
+            </FieldRow>
+            <FieldRow>
+              <FieldRowLabel htmlFor="mqtt-user">{t('mqttUsername')}</FieldRowLabel>
+              <FieldRowInput id="mqtt-user" type="text" value={cfg.username} onChange={(e) => set('username', e.target.value)} autoComplete="off" />
+            </FieldRow>
+            <FieldRow>
+              <FieldRowLabel htmlFor="mqtt-pass">{t('mqttPassword')}</FieldRowLabel>
+              <FieldRowInput id="mqtt-pass" type="password" value={cfg.password} onChange={(e) => set('password', e.target.value)} placeholder={hasPassword ? '••••••••' : ''} autoComplete="new-password" />
+            </FieldRow>
+            <FieldRow>
+              <FieldRowLabel as="span">{t('mqttTls')}</FieldRowLabel>
+              <Toggle on={cfg.tls} onClick={() => set('tls', !cfg.tls)} aria-label={t('mqttTls')} style={{ marginLeft: 'auto' }} />
+            </FieldRow>
+            <FieldRow>
+              <FieldRowLabel htmlFor="mqtt-base">{t('mqttBaseTopic')}</FieldRowLabel>
+              <FieldRowInput id="mqtt-base" type="text" value={cfg.baseTopic} onChange={(e) => set('baseTopic', e.target.value)} placeholder="retouch/…" autoComplete="off" />
+            </FieldRow>
+            <FieldRow>
+              <FieldRowLabel htmlFor="mqtt-disc">{t('mqttDiscoveryPrefix')}</FieldRowLabel>
+              <FieldRowInput id="mqtt-disc" type="text" value={cfg.discoveryPrefix} onChange={(e) => set('discoveryPrefix', e.target.value)} placeholder="homeassistant" autoComplete="off" />
+            </FieldRow>
+          </FieldCard>
+          {hasPassword && !cfg.password && <FieldHint>{t('mqttPasswordSet')}</FieldHint>}
+          <Button $variant="update" onClick={save} disabled={saving || !cfg.host.trim()} style={{ marginTop: 8 }}>
+            {saving ? <Spinner $scan /> : <Icon.check width="18" height="18" />}
+            <span>{t('mqttSave')}</span>
+          </Button>
+          <FieldHint style={{ marginTop: 8 }}>
+            <span style={dot} />
+            {status.connected ? t('mqttConnected') : t('mqttDisconnected')}
+            {status.lastError ? ` — ${status.lastError}` : ''}
+          </FieldHint>
+        </>
+      )}
     </>
   );
 }
@@ -344,6 +476,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     { key: 'sound', icon: Icon.volume },
     (wifiOpt !== null || network) && { key: 'network', icon: Icon.wifi },
     { key: 'multiroom', icon: Icon.layers },
+    { key: 'mqtt', icon: Icon.globe },
     { key: 'security', icon: Icon.shield },
     ver && { key: 'software', icon: Icon.download },
   ].filter(Boolean);
@@ -460,6 +593,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
       </>
     ),
     multiroom: <MultiroomSection open={open && page === 'multiroom'} />,
+    mqtt: <MqttSection open={open && page === 'mqtt'} />,
     security: (
       <>
         <FieldCard>

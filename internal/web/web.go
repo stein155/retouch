@@ -5,8 +5,10 @@ package web
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -23,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"encoding/json"
@@ -51,6 +54,18 @@ const (
 	logoMaxBytes = 2 << 20 // 2 MiB
 	repo         = "stein155/retouch"
 )
+
+// releasePublicKey is the base64-encoded ed25519 public key that release SHA256SUMS
+// files are signed with. When set, a self-update refuses to install unless the
+// release ships a valid SHA256SUMS.sig — so a checksum that merely matches the
+// (same-origin) SHA256SUMS is no longer enough; the binary must be signed by the
+// holder of the private key, closing the "compromised GitHub release → root on
+// every speaker" gap that TLS + checksum alone leave open.
+//
+// Empty (the default) keeps the prior behaviour (TLS + checksum only). To enable
+// signing, generate a keypair, put the public half here, and sign releases in CI
+// with the private half — see docs/RELEASE_SIGNING.md.
+const releasePublicKey = ""
 
 type releaseInfo struct {
 	TagName    string `json:"tag_name"`
@@ -81,6 +96,7 @@ type Server struct {
 	settings  *settings.Store
 	mirror    PresetMirror
 	mdns      Hostnamer
+	mqtt      MQTTBridge
 	log       *slog.Logger
 	version   string
 	homeDir   string
@@ -89,6 +105,7 @@ type Server struct {
 	ui        http.Handler // serves the embedded dist bundle
 	proxy     *http.Client // for the same-origin TuneIn / logo proxies + artwork
 	stream    *http.Client // reads ICY metadata off the audio stream
+	hub       *hub         // pushes live state to browsers over SSE (/api/events)
 
 	npMu       sync.Mutex                // guards npCache and streamURLs
 	npCache    map[string]npCacheEntry   // now-playing, keyed by station id
@@ -115,6 +132,8 @@ type streamURLEntry struct {
 // minutes, so a short cache keeps the line current without per-poll stream reads.
 const npTTL = 15 * time.Second
 
+const updateDownloadTimeout = 5 * time.Minute
+
 // streamURLTTL is how long a resolved stream URL is reused before re-resolving.
 const streamURLTTL = 5 * time.Minute
 
@@ -134,6 +153,14 @@ type Hostnamer interface {
 	SetName(name string)
 }
 
+// MQTTBridge is the Home Assistant MQTT bridge (internal/habridge). The web layer
+// only needs to nudge it to reconnect after a settings change and read its status;
+// it stays an interface so web doesn't depend on the bridge's concrete type.
+type MQTTBridge interface {
+	Reload()
+	Status() (connected bool, lastErr string)
+}
+
 // New builds a Server.
 func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Store, version, homeDir string, log *slog.Logger) *Server {
 	sub, err := fs.Sub(distFS, "dist")
@@ -151,13 +178,20 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		homeDir:    homeDir,
 		startedAt:  time.Now(),
 		ui:         http.FileServer(http.FS(sub)),
-		proxy:      &http.Client{Timeout: 12 * time.Second},
+		proxy:      &http.Client{Timeout: 12 * time.Second, Transport: publicOnlyTransport()},
 		stream:     &http.Client{Timeout: 12 * time.Second},
 		npCache:    map[string]npCacheEntry{},
 		streamURLs: map[string]streamURLEntry{},
 	}
+	srv.hub = newHub(srv.pollState, log.With("comp", "events"))
 	srv.scheduleTelnetClose()
 	return srv
+}
+
+// Run drives the background services the Server owns — currently the SSE hub's
+// speaker poll loop — until ctx is cancelled. Call it once, in a goroutine.
+func (s *Server) Run(ctx context.Context) {
+	s.hub.run(ctx)
 }
 
 // SetPresetMirror attaches the local cloud preset store after both servers exist.
@@ -169,6 +203,12 @@ func (s *Server) SetPresetMirror(m PresetMirror) {
 // renames re-advertise it.
 func (s *Server) SetMDNS(h Hostnamer) {
 	s.mdns = h
+}
+
+// SetMQTTBridge attaches the Home Assistant MQTT bridge so settings changes can
+// trigger a reconnect and the UI can show connection status.
+func (s *Server) SetMQTTBridge(b MQTTBridge) {
+	s.mqtt = b
 }
 
 // Handler returns the HTTP mux.
@@ -184,10 +224,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/play", s.playStation)
 	mux.HandleFunc("POST /api/stop", s.stop)
 	mux.HandleFunc("GET /api/now", s.now)
+	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/volume", s.getVolume)
 	mux.HandleFunc("POST /api/volume", s.setVolume)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
+	mux.HandleFunc("GET /api/mqtt/status", s.mqttStatus)
 	mux.HandleFunc("GET /api/multiroom", s.multiroom)
 	mux.HandleFunc("GET /api/multiroom/speakers", s.multiroomSpeakers)
 	mux.HandleFunc("POST /api/multiroom/group", s.multiroomGroup)
@@ -199,7 +241,65 @@ func (s *Server) Handler() http.Handler {
 	// Everything else is the embedded single-page UI. More specific /api/...
 	// patterns above win; this serves index.html, assets and icons.
 	mux.HandleFunc("GET /", s.serveUI)
-	return mux
+	return s.guard(mux)
+}
+
+// maxRequestBody caps the body of a mutating request. The JSON/XML we accept is
+// tiny (a few settings fields, a station id); anything larger is a mistake or an
+// attempt to drive a large allocation on the memory-constrained speaker.
+const maxRequestBody = 64 << 10
+
+// guard wraps the API with the only access controls a LAN-only, login-less service
+// still needs: it blocks DNS-rebinding (a Host that isn't this speaker) and CSRF (a
+// cross-origin mutating request), and bounds request bodies. Without these, a web
+// page a LAN user merely visits could drive POST/PUT endpoints — e.g. repoint the
+// speaker at an attacker's MQTT broker via PUT /api/settings, or force a downgrade
+// via POST /api/update — from a single drive-by.
+func (s *Server) guard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !hostAllowed(r.Host) {
+			// A rebinding attack reaches us under the attacker's own hostname; a
+			// legitimate client uses the speaker's IP or its <name>.local.
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
+			// Browsers send Origin on every cross-origin mutating request (including
+			// "simple" text/plain POSTs), so a mismatch means CSRF. Sec-Fetch-Site is
+			// the belt to Origin's braces on browsers that send it.
+			if origin := r.Header.Get("Origin"); origin != "" {
+				u, err := url.Parse(origin)
+				if err != nil || u.Host != r.Host {
+					http.Error(w, "cross-origin request refused", http.StatusForbidden)
+					return
+				}
+			} else if sfs := r.Header.Get("Sec-Fetch-Site"); sfs != "" && sfs != "same-origin" && sfs != "none" {
+				http.Error(w, "cross-site request refused", http.StatusForbidden)
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// hostAllowed reports whether the request's Host names this speaker: an IP literal,
+// localhost (the on-speaker agent), or a <name>.local mDNS address. A real public
+// domain is rejected, which is what defeats DNS rebinding.
+func hostAllowed(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(host, ".")
+	if host == "" {
+		return false
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	return net.ParseIP(host) != nil
 }
 
 // multiroom returns this speaker's identity and its current multiroom zone, so
@@ -571,7 +671,15 @@ func (s *Server) updateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func(from, to string) {
+	s.startUpdate(s.version, target)
+	writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": target})
+}
+
+// startUpdate installs release `to` and restarts, in the background. The caller must
+// already hold updateMu (via TryLock); startUpdate hands the lock off to the
+// goroutine and releases it when the install finishes or fails.
+func (s *Server) startUpdate(from, to string) {
+	go func() {
 		defer s.updateMu.Unlock()
 		if err := s.installRelease(context.Background(), to); err != nil {
 			s.log.Warn("self-update failed", "from", from, "to", to, "err", err)
@@ -579,9 +687,58 @@ func (s *Server) updateApp(w http.ResponseWriter, r *http.Request) {
 		}
 		s.log.Info("self-update installed; restarting", "from", from, "to", to)
 		s.restartAfterUpdate()
-	}(s.version, target)
+	}()
+}
 
-	writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": target})
+// UpdateInfo reports the running version, the latest available stable release, its
+// release URL, and whether updating is possible here (only on an installed speaker).
+// It backs the Home Assistant `update` entity so HA can show an update notification.
+// Off-speaker (not updatable) it reports latest == installed and skips the GitHub
+// call, so no false update is offered.
+func (s *Server) UpdateInfo(ctx context.Context) (installed, latest, releaseURL string, updatable bool, err error) {
+	installed = s.version
+	updatable = s.updatable()
+	if !updatable {
+		return installed, installed, "", false, nil
+	}
+	latest, err = s.latestRelease(ctx)
+	if err != nil {
+		return installed, "", "", true, err
+	}
+	if latest == "" {
+		latest = installed
+	}
+	if latest != installed {
+		releaseURL = "https://github.com/" + repo + "/releases/tag/" + latest
+	}
+	return installed, latest, releaseURL, true, nil
+}
+
+// UpdateToLatest installs the latest stable release and restarts, reusing the same
+// path as POST /api/update. It backs the Home Assistant update entity's Install
+// action. It returns quickly: the download + restart run in the background on success.
+func (s *Server) UpdateToLatest(ctx context.Context) error {
+	if !s.updatable() {
+		return fmt.Errorf("updates are only available on an installed speaker")
+	}
+	if !s.updateMu.TryLock() {
+		return fmt.Errorf("an update is already in progress")
+	}
+	target, err := s.latestRelease(ctx)
+	if err != nil {
+		s.updateMu.Unlock()
+		return fmt.Errorf("latest release check failed: %w", err)
+	}
+	if target == "" {
+		s.updateMu.Unlock()
+		return fmt.Errorf("latest release missing tag")
+	}
+	if target == s.version {
+		s.updateMu.Unlock()
+		return nil // already current
+	}
+	s.startUpdate(s.version, target)
+	return nil
 }
 
 func (s *Server) latestRelease(ctx context.Context) (string, error) {
@@ -627,6 +784,19 @@ func (s *Server) installRelease(ctx context.Context, tag string) error {
 		_ = os.Remove(newBin)
 		return err
 	}
+	// When signing is enabled, the checksums file itself must carry a valid
+	// signature before we trust any checksum in it.
+	if releasePublicKey != "" {
+		sig := filepath.Join(s.homeDir, "SHA256SUMS.sig")
+		if err := s.downloadFile(ctx, base+"/SHA256SUMS.sig", sig, 0o644); err != nil {
+			_ = os.Remove(newBin)
+			return err
+		}
+		if err := verifyReleaseSignature(releasePublicKey, sums, sig); err != nil {
+			_ = os.Remove(newBin)
+			return err
+		}
+	}
 	want, err := checksumFor(sums, "retouch-armv7l")
 	if err != nil {
 		_ = os.Remove(newBin)
@@ -641,11 +811,47 @@ func (s *Server) installRelease(ctx context.Context, tag string) error {
 		_ = os.Remove(newBin)
 		return errChecksumMismatch{want: want, got: got}
 	}
+	// Keep the outgoing binary as retouch.old so a bad release can be rolled back
+	// by hand (best-effort; a first install has none). Restore it if the swap fails,
+	// so we never leave the speaker with no binary.
+	old := bin + ".old"
+	hadOld := fileExists(bin)
+	if hadOld {
+		_ = os.Rename(bin, old)
+	}
 	if err := os.Rename(newBin, bin); err != nil {
 		_ = os.Remove(newBin)
+		if hadOld {
+			_ = os.Rename(old, bin)
+		}
 		return err
 	}
 	return os.WriteFile(filepath.Join(s.homeDir, ".version"), []byte(tag+"\n"), 0o644)
+}
+
+// verifyReleaseSignature checks that sigPath is a valid ed25519 signature (base64)
+// over the raw bytes of sumsPath, made by the private half of pubKeyB64.
+func verifyReleaseSignature(pubKeyB64, sumsPath, sigPath string) error {
+	pub, err := base64.StdEncoding.DecodeString(strings.TrimSpace(pubKeyB64))
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return fmt.Errorf("invalid release public key")
+	}
+	sums, err := os.ReadFile(sumsPath)
+	if err != nil {
+		return err
+	}
+	sigRaw, err := os.ReadFile(sigPath)
+	if err != nil {
+		return err
+	}
+	sig, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(sigRaw)))
+	if err != nil {
+		return fmt.Errorf("invalid signature encoding: %w", err)
+	}
+	if !ed25519.Verify(pub, sums, sig) {
+		return fmt.Errorf("release signature verification failed")
+	}
+	return nil
 }
 
 func (s *Server) getJSON(ctx context.Context, target string, out any) error {
@@ -666,12 +872,16 @@ func (s *Server) getJSON(ctx context.Context, target string, out any) error {
 }
 
 func (s *Server) downloadFile(ctx context.Context, target, path string, mode fs.FileMode) error {
+	ctx, cancel := context.WithTimeout(ctx, updateDownloadTimeout)
+	defer cancel()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "ReTouch/"+s.version)
-	resp, err := s.proxy.Do(req)
+	client := &http.Client{Timeout: updateDownloadTimeout}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -686,7 +896,11 @@ func (s *Server) downloadFile(ctx context.Context, target, path string, mode fs.
 	_, copyErr := io.Copy(f, resp.Body)
 	closeErr := f.Close()
 	if copyErr != nil {
+		_ = os.Remove(path)
 		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(path)
 	}
 	return closeErr
 }
@@ -807,19 +1021,53 @@ func (s *Server) logoProxy(w http.ResponseWriter, r *http.Request) {
 
 // publicHost reports whether host resolves exclusively to globally routable
 // addresses — i.e. it is not loopback, RFC1918/ULA, link-local or unspecified.
+// It is a fast up-front reject; publicOnlyTransport is the authoritative guard
+// (it re-checks the actual address dialed, so a redirect or a DNS rebind between
+// this check and the connection can't slip a private target through).
 func publicHost(ctx context.Context, host string) bool {
 	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil || len(ips) == 0 {
 		return false
 	}
 	for _, ip := range ips {
-		a := ip.IP
-		if a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() ||
-			a.IsLinkLocalMulticast() || a.IsMulticast() || a.IsUnspecified() {
+		if !publicIP(ip.IP) {
 			return false
 		}
 	}
 	return true
+}
+
+func publicIP(a net.IP) bool {
+	return !(a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() ||
+		a.IsLinkLocalMulticast() || a.IsMulticast() || a.IsUnspecified())
+}
+
+// publicOnlyTransport is the transport for the outbound proxy client (logo/TuneIn
+// mirrors, artwork + GitHub lookups). Its dialer rejects the connection if the
+// resolved address is not globally routable — checked per hop, so it closes the
+// SSRF holes that a pre-flight hostname check alone leaves open (302 to loopback,
+// DNS rebinding). All legitimate targets are public, so nothing else is affected.
+func publicOnlyTransport() *http.Transport {
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout: 10 * time.Second,
+			Control: func(_, address string, _ syscall.RawConn) error {
+				host, _, err := net.SplitHostPort(address)
+				if err != nil {
+					return err
+				}
+				if ip := net.ParseIP(host); ip == nil || !publicIP(ip) {
+					return fmt.Errorf("refusing to connect to non-public address %s", address)
+				}
+				return nil
+			},
+		}).DialContext,
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        10,
+		IdleConnTimeout:     30 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
 }
 
 // relay performs a bounded upstream GET and copies the response back. fallbackCT
@@ -932,6 +1180,7 @@ func (s *Server) playPreset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("play preset", "slot", slot)
+	s.hub.nudge() // push the new playback state to browsers at once
 	writeJSON(w, 200, map[string]int{"playing": slot})
 }
 
@@ -959,6 +1208,7 @@ func (s *Server) playStationID(w http.ResponseWriter, r *http.Request, stationID
 		return
 	}
 	s.log.Info("play", "station", stationID, "name", name)
+	s.hub.nudge() // push the new playback state to browsers at once
 	writeJSON(w, 200, map[string]string{"status": "playing", "station": stationID})
 }
 
@@ -969,6 +1219,7 @@ func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "stop failed", err)
 		return
 	}
+	s.hub.nudge() // push the stopped state to browsers at once
 	writeJSON(w, 200, map[string]string{"status": "stopped"})
 }
 
@@ -982,6 +1233,19 @@ func (s *Server) now(w http.ResponseWriter, r *http.Request) {
 	}
 	s.enrichNowPlaying(np)
 	writeJSON(w, 200, np)
+}
+
+// EnrichedNowPlaying returns the current now-playing with the live song/artist/
+// cover filled in from the stream metadata — the same view the web UI shows. The
+// MQTT bridge uses it so Home Assistant sees the track, not just the station name
+// (the speaker itself no longer receives track metadata; see enrichNowPlaying).
+func (s *Server) EnrichedNowPlaying(ctx context.Context) (*speaker.NowPlaying, error) {
+	np, err := s.speaker.NowPlaying(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.enrichNowPlaying(np)
+	return np, nil
 }
 
 // enrichNowPlaying fills in the song/artist/cover for a playing station. The
@@ -1135,6 +1399,7 @@ func (s *Server) setVolume(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "set volume failed", err)
 		return
 	}
+	s.hub.nudge() // push the new volume to other browsers at once
 	writeJSON(w, 200, map[string]int{"volume": body.Volume})
 }
 
@@ -1169,7 +1434,41 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	if s.mdns != nil {
 		out["host"] = s.mdns.Hostname() // friendly .local address, e.g. "keuken.local"
 	}
+	out["mqtt"] = s.mqttSettingsView()
 	writeJSON(w, 200, out)
+}
+
+// mqttSettingsView is the MQTT config as returned to the UI: the password is never
+// sent back (only whether one is set), and the live connection status is folded in.
+func (s *Server) mqttSettingsView() map[string]any {
+	m := s.settings.Get().MQTT
+	view := map[string]any{
+		"enabled":         m.Enabled,
+		"host":            m.Host,
+		"port":            m.Port,
+		"username":        m.Username,
+		"hasPassword":     m.Password != "",
+		"baseTopic":       m.BaseTopic,
+		"discoveryPrefix": m.DiscoveryPrefix,
+		"tls":             m.TLS,
+	}
+	if s.mqtt != nil {
+		connected, lastErr := s.mqtt.Status()
+		view["connected"] = connected
+		view["lastError"] = lastErr
+	}
+	return view
+}
+
+// mqttStatus reports the live broker connection state so the settings UI can show
+// whether the Home Assistant link is up.
+func (s *Server) mqttStatus(w http.ResponseWriter, r *http.Request) {
+	if s.mqtt == nil {
+		writeJSON(w, 200, map[string]any{"connected": false, "lastError": ""})
+		return
+	}
+	connected, lastErr := s.mqtt.Status()
+	writeJSON(w, 200, map[string]any{"connected": connected, "lastError": lastErr})
 }
 
 // putSettings applies any provided fields: name + bass + treble + Wi-Fi
@@ -1183,6 +1482,16 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		WifiOptimization *bool   `json:"wifiOptimization"`
 		Language         *string `json:"language"`
 		CloseTelnet      *bool   `json:"closeTelnet"`
+		MQTT             *struct {
+			Enabled         *bool   `json:"enabled"`
+			Host            *string `json:"host"`
+			Port            *int    `json:"port"`
+			Username        *string `json:"username"`
+			Password        *string `json:"password"`
+			BaseTopic       *string `json:"baseTopic"`
+			DiscoveryPrefix *string `json:"discoveryPrefix"`
+			TLS             *bool   `json:"tls"`
+		} `json:"mqtt"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.badRequest(w, "bad body", err)
@@ -1227,6 +1536,43 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		if err := s.setCloseTelnet(*body.CloseTelnet); err != nil {
 			s.fail(w, "set telnet close failed", err)
 			return
+		}
+	}
+	if body.MQTT != nil {
+		// Start from the stored config and override only the fields the UI sent, so
+		// an omitted password (never returned to the UI) is preserved.
+		cfg := s.settings.Get().MQTT
+		p := body.MQTT
+		if p.Enabled != nil {
+			cfg.Enabled = *p.Enabled
+		}
+		if p.Host != nil {
+			cfg.Host = strings.TrimSpace(*p.Host)
+		}
+		if p.Port != nil {
+			cfg.Port = *p.Port
+		}
+		if p.Username != nil {
+			cfg.Username = *p.Username
+		}
+		if p.Password != nil {
+			cfg.Password = *p.Password
+		}
+		if p.BaseTopic != nil {
+			cfg.BaseTopic = strings.TrimSpace(*p.BaseTopic)
+		}
+		if p.DiscoveryPrefix != nil {
+			cfg.DiscoveryPrefix = strings.TrimSpace(*p.DiscoveryPrefix)
+		}
+		if p.TLS != nil {
+			cfg.TLS = *p.TLS
+		}
+		if err := s.settings.SetMQTT(cfg); err != nil {
+			s.fail(w, "set mqtt failed", err)
+			return
+		}
+		if s.mqtt != nil {
+			s.mqtt.Reload() // apply the new config: reconnect (or disconnect)
 		}
 	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})

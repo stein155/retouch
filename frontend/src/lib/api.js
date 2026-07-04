@@ -32,23 +32,28 @@ const clean = (value) => (typeof value === 'string' ? value.trim() : '');
 
 // Now playing — STLocal returns {source,track,artist,station,stationId,art,playStatus}.
 // Normalised to the shape the UI expects (standby / stationName / tuneInId).
+// Shared by both the /api/now fetch and the /api/events push stream (see events.js).
+export function normalizeNowPlaying(np) {
+  if (!np) return null;
+  const source = clean(np.source);
+  if (!source || source === 'STANDBY' || source === 'INVALID_SOURCE') {
+    return { standby: true };
+  }
+  return {
+    standby: false,
+    source,
+    stationName: clean(np.station) || clean(np.track),
+    track: clean(np.track),
+    artist: clean(np.artist),
+    playStatus: clean(np.playStatus),
+    art: clean(np.art),
+    tuneInId: clean(np.stationId) || null,
+  };
+}
+
 export async function getNowPlaying() {
   try {
-    const np = await getJSON('/api/now');
-    const source = clean(np.source);
-    if (!source || source === 'STANDBY' || source === 'INVALID_SOURCE') {
-      return { standby: true };
-    }
-    return {
-      standby: false,
-      source,
-      stationName: clean(np.station) || clean(np.track),
-      track: clean(np.track),
-      artist: clean(np.artist),
-      playStatus: clean(np.playStatus),
-      art: clean(np.art),
-      tuneInId: clean(np.stationId) || null,
-    };
+    return normalizeNowPlaying(await getJSON('/api/now'));
   } catch {
     return null;
   }
@@ -164,6 +169,11 @@ export async function getSettings() {
 // saveSettings applies any subset of { name, bass, language } (live-apply).
 export async function saveSettings(patch) {
   return send('/api/settings', 'PUT', patch);
+}
+
+// getMqttStatus returns { connected, lastError } for the Home Assistant MQTT link.
+export async function getMqttStatus() {
+  try { return await getJSON('/api/mqtt/status'); } catch { return null; }
 }
 
 // Multiroom — native Bose zone grouping. This speaker acts as the zone master;

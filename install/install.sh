@@ -481,6 +481,14 @@ latest_tag() {
 	return 1
 }
 
+# These operator-supplied vars get spliced verbatim into the root boot command sent
+# to the speaker (see the envswitch line below). Same trust domain as whoever runs
+# the installer, but reject anything outside a safe URL/tag charset so a stray space
+# or ';' fails loudly here instead of producing a broken boot command on the speaker.
+case "${RETOUCH_NETINSTALL_URL:-}" in *[!A-Za-z0-9:/._~-]*) die "RETOUCH_NETINSTALL_URL has invalid characters" ;; esac
+case "${RETOUCH_RELEASE_BASE:-}"  in *[!A-Za-z0-9:/._~-]*) die "RETOUCH_RELEASE_BASE has invalid characters" ;; esac
+case "${RETOUCH_TARGET_TAG:-}"    in *[!A-Za-z0-9._-]*)    die "RETOUCH_TARGET_TAG has invalid characters" ;; esac
+
 TARGET_TAG=$(latest_tag)
 [ -n "$TARGET_TAG" ] || die "could not determine the latest ReTouch release. Check your internet connection and try again."
 
