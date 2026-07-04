@@ -102,7 +102,7 @@ export const I18N = {
     wifiNetwork: 'Wifi‑netwerk', signal: 'Signaal', ipAddress: 'IP‑adres',
     sigExcellent: 'Uitstekend', sigGood: 'Goed', sigFair: 'Matig', sigPoor: 'Zwak',
     security: 'Beveiliging', closeTelnet: 'Telnet sluiten na opstarten',
-    closeTelnetHint: 'Omdat de Telnet-dienst van de SoundTouch gebruikt kan worden om scripts naar de speaker te uploaden en uit te voeren, schakelt deze optie de netwerktoegang tot Telnet vijf minuten na het opstarten uit om de veiligheid te verbeteren. Telnet is alleen nodig voor de eerste installatie van ReTouch en daarna niet meer.',
+    closeTelnetHint: 'Omdat Telnet op SoundTouch kan worden gebruikt om scripts op de speaker te plaatsen en uit te voeren, kan de netwerktoegang tot Telnet vijf minuten na het opstarten automatisch worden uitgeschakeld om de beveiliging te verbeteren. Telnet is alleen nodig tijdens de eerste installatie van ReTouch en is daarna niet meer vereist.',
     mqtt: 'Home Assistant (MQTT)',
     mqttHint: 'Koppel deze speaker via MQTT aan Home Assistant. Hij verschijnt daar als apparaat met volume, zender wisselen, bediening, aan/uit en wat er speelt.',
     mqttEnable: 'Inschakelen',
