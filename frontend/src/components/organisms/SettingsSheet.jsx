@@ -275,40 +275,19 @@ function MqttSection({ open }) {
 // Shimmering placeholder shown while the sheet's first settings fetch is in
 // flight. Mirrors the real form's section rhythm so the layout doesn't jump
 // when the data lands.
+// Mirrors the category menu the sheet opens on: a card of icon + label + chevron rows.
 function SettingsSkeleton() {
-  const section = { marginTop: 22 };
+  const labelWidths = ['38%', '30%', '44%', '34%', '48%', '40%'];
   return (
     <Form aria-hidden="true">
-      <FormSection><Skeleton style={{ width: '30%', height: 12 }} $radius="6px" /></FormSection>
       <FieldCard>
-        <FieldRow>
-          <Skeleton style={{ width: 72, height: 14 }} $radius="6px" />
-          <Skeleton style={{ width: '40%', height: 14, marginLeft: 'auto' }} $radius="6px" />
-        </FieldRow>
-      </FieldCard>
-
-      <FormSection style={section}><Skeleton style={{ width: '26%', height: 12 }} $radius="6px" /></FormSection>
-      <BassCard>
-        <BassHead>
-          <Skeleton style={{ width: 64, height: 15 }} $radius="6px" />
-          <Skeleton style={{ width: 28, height: 15 }} $radius="6px" />
-        </BassHead>
-        <Skeleton style={{ width: '100%', height: 8 }} $radius="4px" />
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 9 }}>
-          <Skeleton style={{ width: 24, height: 11 }} $radius="6px" />
-          <Skeleton style={{ width: 24, height: 11 }} $radius="6px" />
-        </div>
-      </BassCard>
-
-      <FormSection style={section}><Skeleton style={{ width: '34%', height: 12 }} $radius="6px" /></FormSection>
-      <Skeleton style={{ width: '100%', height: 49 }} $radius="14px" />
-
-      <FormSection style={section}><Skeleton style={{ width: '28%', height: 12 }} $radius="6px" /></FormSection>
-      <FieldCard>
-        <FieldRow>
-          <Skeleton style={{ width: '55%', height: 14 }} $radius="6px" />
-          <Skeleton style={{ width: 42, height: 24, marginLeft: 'auto' }} $radius="12px" />
-        </FieldRow>
+        {labelWidths.map((w, i) => (
+          <MenuItem as="div" key={i} style={{ cursor: 'default' }}>
+            <Skeleton style={{ width: 34, height: 34 }} $radius="11px" />
+            <Skeleton style={{ width: w, height: 14 }} $radius="6px" />
+            <Skeleton style={{ width: 20, height: 20, marginLeft: 'auto' }} $radius="6px" />
+          </MenuItem>
+        ))}
       </FieldCard>
     </Form>
   );
