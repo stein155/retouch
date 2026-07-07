@@ -98,12 +98,12 @@ type Server struct {
 	homeDir   string
 	startedAt time.Time
 	updateMu  sync.Mutex
-	ui        http.Handler    // serves the embedded dist bundle
-	proxy     *http.Client    // for the same-origin TuneIn / logo proxies + artwork
-	stream    *http.Client    // reads ICY metadata off the audio stream
-	hub       *hub            // pushes live state to browsers over SSE (/api/events)
+	ui        http.Handler     // serves the embedded dist bundle
+	proxy     *http.Client     // for the same-origin TuneIn / logo proxies + artwork
+	stream    *http.Client     // reads ICY metadata off the audio stream
+	hub       *hub             // pushes live state to browsers over SSE (/api/events)
 	plugins   *plugins.Manager // installs/supervises/proxies plugins; nil off-speaker
-	sideload  bool            // allow unverified plugin uploads (-allow-sideload)
+	sideload  bool             // allow unverified plugin uploads (-allow-sideload)
 
 	npMu       sync.Mutex                // guards npCache and streamURLs
 	npCache    map[string]npCacheEntry   // now-playing, keyed by station id

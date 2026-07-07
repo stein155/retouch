@@ -95,10 +95,10 @@ type Manager struct {
 	// writing into the installed binary AFTER the winner verified its checksum.
 	installMu sync.Mutex
 
-	mu      sync.Mutex
-	runCtx  context.Context // set once Run starts; parent for per-plugin supervisors
-	state   []Installed
-	procs   map[string]*proc
+	mu     sync.Mutex
+	runCtx context.Context // set once Run starts; parent for per-plugin supervisors
+	state  []Installed
+	procs  map[string]*proc
 }
 
 // New opens (or starts) the plugin store rooted at dir. It reads plugins.json but
