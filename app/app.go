@@ -12,6 +12,7 @@ import (
 	"flag"
 	"hash/fnv"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,6 +26,7 @@ import (
 	"github.com/stein155/retouch/internal/habridge"
 	"github.com/stein155/retouch/internal/marge"
 	"github.com/stein155/retouch/internal/mdns"
+	"github.com/stein155/retouch/internal/plugins"
 	"github.com/stein155/retouch/internal/settings"
 	"github.com/stein155/retouch/internal/speaker"
 	"github.com/stein155/retouch/internal/store"
@@ -54,6 +56,7 @@ func Run() {
 	presets := flag.String("presets", "presets.json", "path to the presets JSON file")
 	accountID := flag.String("account-id", "", "marge account UUID to keep the speaker paired to (default: whatever the speaker reports); enables autopair")
 	pairEvery := flag.Duration("pair-interval", 5*time.Minute, "how often autopair re-checks the speaker's association")
+	sideload := flag.Bool("allow-sideload", false, "allow installing plugin binaries uploaded through the web UI without release verification (anyone on the LAN can then run code on the speaker; leave off unless you are developing a plugin)")
 	verbose := flag.Bool("v", false, "verbose: log every speaker request to the pairing stub")
 	flag.Parse()
 
@@ -163,6 +166,26 @@ func Run() {
 				logger.Warn("mdns responder stopped", "err", err)
 			}
 		}()
+	}
+
+	// Plugin host: downloads/verifies plugin binaries (reusing the OTA path), then
+	// supervises each as a child process and reverse-proxies its config API under
+	// /api/plugins/<name>/. Plugins reach the speaker's local API and call back to
+	// this web server. Lives under the same home dir as the presets/state.
+	speakerAddr := *host
+	if _, _, err := net.SplitHostPort(speakerAddr); err != nil {
+		speakerAddr = net.JoinHostPort(*host, "8090")
+	}
+	webHost := *listen
+	if strings.HasPrefix(webHost, ":") {
+		webHost = "127.0.0.1" + webHost
+	}
+	pm, err := plugins.New(filepath.Join(filepath.Dir(*presets), "plugins"), speakerAddr, "http://"+webHost, "ReTouch/"+version, logger.With("comp", "plugins"))
+	if err != nil {
+		logger.Warn("plugin host disabled", "err", err)
+	} else {
+		webSrv.SetPlugins(pm, *sideload)
+		go pm.Run(ctx)
 	}
 
 	// Push live playback/volume state to browsers over SSE (/api/events).

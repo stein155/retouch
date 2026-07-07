@@ -7,6 +7,7 @@ import { Button } from '../atoms/Button';
 import { Toggle } from '../atoms/Toggle';
 import { BassSlider } from '../molecules/BassSlider';
 import { SpeakerRow } from '../molecules/SpeakerRow';
+import { PluginsSection } from './PluginsSection';
 import {
   SheetScrim, SheetEl, SheetHandle, SheetBody, SheetHeader,
 } from '../molecules/Sheet';
@@ -562,6 +563,8 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
             <MultiroomSection open={open} />
 
             <MqttSection open={open} />
+
+            <PluginsSection open={open} />
 
             {ver && (
               <>

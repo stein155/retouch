@@ -216,6 +216,52 @@ export async function getReleases() {
   try { return await getJSON('/api/releases'); } catch { return null; }
 }
 
+// --- Plugins --------------------------------------------------------------
+// Plugins are separate binaries the speaker downloads, verifies and supervises.
+// getPlugins returns { installed: [{name,version,running,lastErr,sideloaded,...}],
+// catalog: [{name,title,description,...}] }. Each installed plugin serves its own
+// settings UI as a "manifest" that ReTouch proxies under /api/plugins/<name>/.
+
+export async function getPlugins() {
+  try { return await getJSON('/api/plugins'); } catch { return null; }
+}
+
+export async function installPlugin(name, tag) {
+  return send(`/api/plugins/${encodeURIComponent(name)}/install`, 'POST', tag ? { tag } : undefined);
+}
+
+export async function removePlugin(name) {
+  return send(`/api/plugins/${encodeURIComponent(name)}`, 'DELETE');
+}
+
+// uploadPlugin sideloads a locally-built binary (multipart), for a plugin whose
+// release repo is still private.
+export async function uploadPlugin(name, file) {
+  const fd = new FormData();
+  fd.append('binary', file);
+  const r = await fetch(`/api/plugins/${encodeURIComponent(name)}/upload`, { method: 'POST', body: fd });
+  if (!r.ok) {
+    let msg = `upload -> ${r.status}`;
+    try { msg = (await r.json()).error || msg; } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+  return r.json().catch(() => null);
+}
+
+// getPluginManifest fetches the plugin's current settings UI (a server-driven
+// schema: { title, status, sections:[{fields,rows,actions}] }). Returns null if
+// the plugin isn't running yet.
+export async function getPluginManifest(name) {
+  try { return await getJSON(`/api/plugins/${encodeURIComponent(name)}/manifest`); } catch { return null; }
+}
+
+// pluginAction performs a manifest action (e.g. log in, submit a 2FA code, save
+// devices). The plugin replies with the NEW manifest, which the UI re-renders —
+// that's how multi-step flows like 2FA fall out without any plugin-specific code.
+export async function pluginAction(name, id, body) {
+  return send(`/api/plugins/${encodeURIComponent(name)}/action/${encodeURIComponent(id)}`, 'POST', body || {});
+}
+
 // startUpdate asks the speaker to fetch a release and replace itself. With no tag
 // it installs the latest stable; pass a beta tag (e.g. "beta-pr-12") to install
 // that one instead. On a real update the speaker restarts, so the next

@@ -76,6 +76,15 @@ if [ -f /mnt/nv/rc.local.original ]; then
 elif [ -f /mnt/nv/rc.local ]; then
 	rm -f /mnt/nv/rc.local && log "removed /mnt/nv/rc.local"
 fi
+# Plugins run as children of the agent and normally die with it, but an orphaned one
+# (agent crashed, child survived) runs as "$HOME_DIR/plugins/<name>/bin" — a name
+# pidof can't find. Match by executable path before removing the dir.
+for p in /proc/[0-9]*; do
+	exe=$(readlink "$p/exe" 2>/dev/null) || continue
+	case "$exe" in
+	"$HOME_DIR/plugins/"*) kill "${p#/proc/}" 2>/dev/null && log "stopped plugin ${p#/proc/}" ;;
+	esac
+done
 [ -d "$HOME_DIR" ] && { rm -rf "$HOME_DIR" && log "removed $HOME_DIR"; }
 
 log "done. Reboot the speaker (':17000 sys reboot' or power-cycle) to read the restored config."
