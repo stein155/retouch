@@ -92,11 +92,16 @@ describe('App integration', () => {
     render(<App />);
     await screen.findByText('Radio Foo');
     await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    // Settings headline + version (from getVersion) appear.
+    // The sheet opens on the category menu.
     expect(await screen.findByText('Settings')).toBeInTheDocument();
+
+    // The Software subpage shows the version (from getVersion).
+    await userEvent.click(screen.getByRole('button', { name: 'Software' }));
     await waitFor(() => expect(screen.getByText('1.2.3')).toBeInTheDocument());
 
-    // Change language -> persists via saveSettings.
+    // Back to the menu, then into General to change the language -> persists.
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await userEvent.click(screen.getByRole('button', { name: 'General' }));
     const select = screen.getByLabelText('Language');
     await userEvent.selectOptions(select, 'de');
     expect(api.saveSettings).toHaveBeenCalledWith({ language: 'de' });

@@ -4,7 +4,7 @@ import { Spinner } from '../atoms/Spinner';
 import { Button } from '../atoms/Button';
 import { Toggle } from '../atoms/Toggle';
 import {
-  FormSection, FieldHint, FieldCard, FieldRow, FieldRowLabel, FieldRowInput, FieldRowValue,
+  FieldHint, FieldCard, FieldRow, FieldRowLabel, FieldRowInput, FieldRowValue,
 } from '../molecules/Field';
 import { useI18n } from '../../lib/i18n';
 import {
@@ -270,7 +270,6 @@ export function PluginsSection({ open }) {
 
   return (
     <>
-      <FormSection style={{ marginTop: 22 }}>{t('plugins')}</FormSection>
       <FieldHint style={{ marginTop: 0, marginBottom: 8 }}>{t('pluginsHint')}</FieldHint>
       {!onSpeaker && <FieldHint>{t('pluginsOnSpeaker')}</FieldHint>}
       {installed.map((p) => (
