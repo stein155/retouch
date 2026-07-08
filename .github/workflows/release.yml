@@ -2,26 +2,31 @@ name: Release
 
 # Build the web UI, cross-compile the armv7l agent, and attach the binary +
 # checksums to the GitHub release. Runs when a release is published (incl. when a
-# Release Drafter draft is published) or a v* tag is pushed; also on demand.
+# Release Drafter draft is published), or on demand.
 on:
   release:
     types: [published]
-  push:
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Routed through env so it can be tested in a step `if:` (secrets can't be).
+    env:
+      RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -33,23 +38,38 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.22'
+          go-version: "1.22"
 
       - name: Cross-compile agent (armv7l)
         env:
           GOOS: linux
           GOARCH: arm
-          GOARM: '7'
-          CGO_ENABLED: '0'
+          GOARM: "7"
+          CGO_ENABLED: "0"
         run: go build -ldflags "-s -w -X main.version=${{ github.event.release.tag_name || github.ref_name }}" -o retouch-armv7l .
 
       - name: Checksums
         run: sha256sum retouch-armv7l > SHA256SUMS
 
+      # Sign the checksums so the agent's self-update can verify authenticity, not
+      # just integrity. Dormant until the RELEASE_SIGNING_KEY secret is set AND the
+      # matching public key is compiled into the agent (releasePublicKey in
+      # internal/web/web.go). See docs/RELEASE_SIGNING.md.
+      - name: Sign checksums (ed25519)
+        if: ${{ env.RELEASE_SIGNING_KEY != '' }}
+        run: |
+          printf '%s' "$RELEASE_SIGNING_KEY" | base64 -d > ed25519.pem
+          openssl pkeyutl -sign -inkey ed25519.pem -rawin -in SHA256SUMS -out sig.raw
+          base64 -w0 sig.raw > SHA256SUMS.sig
+          rm -f ed25519.pem sig.raw
+
       - name: Attach binary + checksums to the release
-        uses: softprops/action-gh-release@v3
+        # Pinned to a commit SHA: this action holds contents:write, so a retagged
+        # v3 must not be able to silently change what runs in the release job.
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
           tag_name: ${{ github.event.release.tag_name || github.ref_name }}
           files: |
             retouch-armv7l
             SHA256SUMS
+            SHA256SUMS.sig

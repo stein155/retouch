@@ -1,8 +1,10 @@
 import styled from 'styled-components';
 import { StationLogo } from '../atoms/StationLogo';
+import { Marquee } from '../atoms/Marquee';
 import { VolumeSlider } from '../molecules/VolumeSlider';
 import { Icon } from '../atoms/Icon';
 import { LiveDot } from '../atoms/LiveDot';
+import { Skeleton } from '../atoms/Skeleton';
 import { useI18n } from '../../lib/i18n';
 import { mpfade } from '../../theme/keyframes';
 
@@ -121,24 +123,18 @@ const MpMeta = styled.div`
   min-width: 0;
 `;
 
-const MpName = styled.div`
+const MpName = styled(Marquee)`
   font-size: 15.5px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   animation: ${mpfade} 320ms cubic-bezier(.34,.78,.18,1);
 
   @media (prefers-reduced-motion: reduce) { animation: none; }
 `;
 
-const MpSub = styled.div`
+const MpSub = styled(Marquee)`
   font-size: 12px;
   color: var(--ink-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   margin-top: 2px;
   font-weight: 500;
 `;
@@ -191,9 +187,37 @@ const MpVolVal = styled.span`
   font-variant-numeric: tabular-nums;
 `;
 
-export function MiniPlayer({ player, volume, speakerName, onStop, onVolume }) {
+// Skeleton shown while the first now-playing / volume read is in flight, so the
+// player doesn't flash its idle "choose a station" state before we know if
+// something is already playing.
+function MiniPlayerSkeleton() {
+  return (
+    <Mp aria-hidden="true">
+      <MpTop>
+        <MpArt>
+          <Skeleton style={{ width: '100%', height: '100%' }} $radius="14px" />
+        </MpArt>
+        <MpMeta>
+          <Skeleton style={{ width: '60%', height: 15 }} $radius="6px" />
+          <Skeleton style={{ width: '40%', height: 12, marginTop: 8 }} $radius="6px" />
+        </MpMeta>
+        <Skeleton style={{ width: 42, height: 42, flexShrink: 0 }} $radius="50%" />
+      </MpTop>
+      <MpVol>
+        <Skeleton style={{ width: 28, height: 28, flexShrink: 0 }} $radius="8px" />
+        <Skeleton style={{ flex: 1, height: 8 }} $radius="99px" />
+        <Skeleton style={{ width: 30, height: 12, flexShrink: 0 }} $radius="6px" />
+      </MpVol>
+    </Mp>
+  );
+}
+
+export function MiniPlayer({ player, volume, speakerName, loading, onStop, onVolume }) {
   const { t } = useI18n();
   const { status, station } = player;
+
+  if (loading) return <MiniPlayerSkeleton />;
+
   const active = status !== 'idle' && !!station;
   const playing = status === 'playing';
   const displayName = clean(station?.name) || clean(station?.track) || '?';
@@ -228,12 +252,14 @@ export function MiniPlayer({ player, volume, speakerName, onStop, onVolume }) {
               )}
             </MpArt>
             <MpMeta>
-              <MpName key={displayName}>{displayName}</MpName>
-              <MpSub>
-                {playing
-                  ? `${showNow ? `${nowLine} · ` : ''}${t('on')} ${speaker}`
-                  : `${statusLabel} · ${speaker}`}
-              </MpSub>
+              <MpName key={displayName} text={displayName} />
+              <MpSub
+                text={
+                  playing
+                    ? `${showNow ? `${nowLine} · ` : ''}${t('on')} ${speaker}`
+                    : `${statusLabel} · ${speaker}`
+                }
+              />
             </MpMeta>
             <MpStop aria-label={t('stop')} onClick={onStop}>
               <Icon.stop width="18" height="18" />

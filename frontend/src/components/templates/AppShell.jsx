@@ -2,8 +2,11 @@ import styled from 'styled-components';
 
 // .shell — the phone-sized app frame, centred with a device-like card on desktop.
 export const Shell = styled.div`
-  width: 100%;
-  max-width: var(--shell-max);
+  /* Definite width, not width:100% — on desktop the body is a centring grid whose
+     item shrink-wraps to content, so a percentage width collapses to the content
+     width and the frame resizes as content changes. A fixed basis keeps it steady. */
+  width: var(--shell-max);
+  max-width: 100%;
   height: 100dvh;
   margin: 0 auto;
   position: relative;
@@ -31,6 +34,9 @@ export const ShellScroll = styled.div`
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
+  /* Clear the absolutely-positioned header (see Header's Hdr): its height is
+     the safe-area top inset + ~58px, floored at 74px. */
+  padding-top: max(74px, calc(env(safe-area-inset-top) + 58px));
   padding-bottom: max(140px, calc(env(safe-area-inset-bottom) + 130px));
   scrollbar-width: thin;
   scrollbar-color: rgba(31, 24, 20, 0.15) transparent;

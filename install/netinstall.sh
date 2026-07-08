@@ -20,6 +20,7 @@ BIN=$HOME_DIR/retouch
 VERSION=$HOME_DIR/.version      # installed release tag
 GAVEUP=$HOME_DIR/.gaveup
 ATTEMPTS=$HOME_DIR/.attempts
+TELNET_CLOSE=$HOME_DIR/.close-telnet
 LOCK=/tmp/retouch-install.lock
 LOG=/tmp/retouch-install.log
 MAX_ATTEMPTS=5
@@ -27,14 +28,35 @@ MAX_ATTEMPTS=5
 # Where the speaker reaches the on-speaker pairing stub and web UI.
 MARGE_BASE=http://127.0.0.1:9080
 WEB_LISTEN=:8000
-MARGE_LISTEN=:9080
+# Bind the pairing stub to loopback only: the speaker reaches it on 127.0.0.1, so it
+# never needs to be on the LAN (where it would expose the cloud-emulation API).
+MARGE_LISTEN=127.0.0.1:9080
 CFG=/opt/Bose/etc/SoundTouchSdkPrivateCfg.xml
 START=$HOME_DIR/start.sh
 
 log() { echo "[retouch] $*" >>"$LOG" 2>&1; }
+# sha256_of prints the hex SHA-256 of a file using whichever tool the firmware has.
+# BusyBox builds often ship sha256sum but not openssl (and vice versa); without this
+# a missing openssl made every update fail as a bogus "checksum mismatch".
+sha256_of() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | sed 's/ .*//'
+	elif command -v openssl >/dev/null 2>&1; then
+		openssl dgst -sha256 "$1" | sed 's/.*= //'
+	else
+		return 1
+	fi
+}
 # giveup records the TARGET tag it gave up on (not just an empty marker) so a later
 # run can tell "gave up on this exact release" from "a newer release is out, retry".
 giveup() { echo "${TAG:-}" >"$GAVEUP"; log "$*; giving up (target ${TAG:-?})"; exit 0; }
+
+# RETOUCH_RELEASE_BASE / RETOUCH_TARGET_TAG are injected by install.sh into the root
+# boot command and then spliced into the download URLs below. install.sh already
+# charset-checks them, but re-validate here (defense in depth) so a tampered boot
+# command can't feed shell metacharacters or a malformed value into curl/sed.
+case "${RETOUCH_RELEASE_BASE:-}" in *[!A-Za-z0-9:/._~-]*) log "RETOUCH_RELEASE_BASE has invalid characters; ignoring update"; exit 0 ;; esac
+case "${RETOUCH_TARGET_TAG:-}"   in *[!A-Za-z0-9._-]*)    log "RETOUCH_TARGET_TAG has invalid characters; ignoring update"; exit 0 ;; esac
 
 # HomeKit bridge: expose the speaker to Apple Home. It is turned on/off from the
 # settings page (persisted, so it survives reboots and OTA updates) — these flags
@@ -54,7 +76,16 @@ start_agent() {
 # restart_agent stops a running agent (e.g. the old version started at boot) and
 # launches the freshly installed binary. Used after an install/update.
 restart_agent() {
-	pid=$(pidof retouch 2>/dev/null) && [ -n "$pid" ] && { kill $pid 2>/dev/null; sleep 1; }
+	pid=$(pidof retouch 2>/dev/null)
+	if [ -n "$pid" ]; then
+		kill $pid 2>/dev/null
+		# wait until the old process is really gone, or a second instance can end
+		# up running next to the new one; force it after a few seconds
+		t=0
+		while pidof retouch >/dev/null 2>&1 && [ "$t" -lt 5 ]; do sleep 1; t=$((t + 1)); done
+		pid=$(pidof retouch 2>/dev/null)
+		[ -n "$pid" ] && { kill -9 $pid 2>/dev/null; sleep 1; }
+	fi
 	[ -x "$START" ] && "$START" >/tmp/retouch-start.log 2>&1 &
 }
 
@@ -64,11 +95,14 @@ restart_agent() {
 # servers. If the rules can't be installed, the UI is still served on $WEB_LISTEN, so it
 # is never lost. iptables is volatile, so this re-applies on every boot.
 write_start_script() {
-	cat > "$START" <<STARTSCRIPT
+	# Write to a temp file and rename into place so a power loss mid-write can't leave
+	# a truncated boot launcher (rename is atomic on the same filesystem).
+	cat > "$START.new" <<STARTSCRIPT
 #!/bin/sh
 
 LOG=/tmp/retouch.log
-APP_PORT=${WEB_LISTEN#:}
+APP_PORT=${WEB_LISTEN##*:}
+MARGE_PORT=${MARGE_LISTEN##*:}
 
 log() { echo "[retouch-start] \$*" >>"\$LOG" 2>&1; }
 
@@ -98,20 +132,56 @@ expose_8080() {
 	fi
 }
 
+# /speaker notifications validate app_key by calling Bose's hardcoded audio
+# notification auth host on port 80. ReTouch already serves the auth stub on
+# marge (:9080); route that firmware call there on every boot.
+expose_speaker_auth() {
+	# /etc/hosts usually lives on the read-only rootfs, so remount rw around the
+	# append (same dance the installer does for the cfg XML), or the entry
+	# silently never lands and the auth host resolves past the local stub.
+	need=""
+	for h in audionotification.api.bosecm.com dev-audionotification.api.bosecm.com; do
+		grep -q "127.0.0.1[[:space:]].*\$h" /etc/hosts 2>/dev/null || need="\$need \$h"
+	done
+	if [ -n "\$need" ]; then
+		mount / -o rw,remount 2>/dev/null || mount -o remount,rw / 2>/dev/null
+		for h in \$need; do
+			echo "127.0.0.1 \$h" >> /etc/hosts 2>>"\$LOG" || log "could not add \$h to /etc/hosts"
+		done
+		mount / -o ro,remount 2>/dev/null
+	fi
+	command -v iptables >/dev/null 2>&1 || { log "no iptables; /speaker auth route not installed"; return 0; }
+	iptables -t nat -C OUTPUT -p tcp -d 127.0.0.1 --dport 80 -j REDIRECT --to-ports "\$MARGE_PORT" 2>/dev/null && return 0
+	if iptables -t nat -I OUTPUT 1 -p tcp -d 127.0.0.1 --dport 80 -j REDIRECT --to-ports "\$MARGE_PORT" 2>>"\$LOG"; then
+		log "redirected local :80 audio-notification auth -> :\$MARGE_PORT"
+	else
+		log "could not redirect local :80 audio-notification auth -> :\$MARGE_PORT"
+	fi
+}
+
 expose_8080
+expose_speaker_auth
 $LAUNCH >>"\$LOG" 2>&1 &
 STARTSCRIPT
-	chmod 0755 "$START" 2>/dev/null
+	chmod 0755 "$START.new" 2>/dev/null
+	mv "$START.new" "$START"
 }
 
 # write_rc_local installs the NAND autostart line, which runs the boot launcher.
+# A pre-existing rc.local that isn't ours is backed up once, so uninstall.sh can
+# put it back instead of deleting it.
 write_rc_local() {
 	write_start_script
-	cat > /mnt/nv/rc.local <<RC
+	if [ -f /mnt/nv/rc.local ] && ! grep -q "$START" /mnt/nv/rc.local 2>/dev/null \
+		&& [ ! -f /mnt/nv/rc.local.original ]; then
+		cp /mnt/nv/rc.local /mnt/nv/rc.local.original 2>/dev/null
+	fi
+	cat > /mnt/nv/rc.local.new <<RC
 #!/bin/sh
 $START >/tmp/retouch-start.log 2>&1 &
 RC
-	chmod 0755 /mnt/nv/rc.local 2>/dev/null
+	chmod 0755 /mnt/nv/rc.local.new 2>/dev/null
+	mv /mnt/nv/rc.local.new /mnt/nv/rc.local
 }
 
 # redirect_cloud rewrites the four service URLs in SoundTouchSdkPrivateCfg.xml to
@@ -136,6 +206,14 @@ mkdir "$LOCK" 2>/dev/null || { log "locked"; exit 0; }
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
 mkdir -p "$HOME_DIR" 2>/dev/null
+
+# Closing telnet is applied by install.sh over the web API once the install is
+# fully done — ReTouch now closes the port the moment the marker exists, and
+# install.sh still needs the :17000 CLI for its final cleanup + reboot. Only the
+# explicit opt-out (clearing a marker left by an earlier install) happens here.
+case "${RETOUCH_CLOSE_TELNET:-}" in
+	0|false|no|off) rm -f "$TELNET_CLOSE" ;;
+esac
 
 # Resolve the target release tag (pinned, else the latest GitHub release). At boot
 # the injected run can fire BEFORE the network/DNS is ready, so the latest-release
@@ -200,10 +278,17 @@ DL=${RETOUCH_RELEASE_BASE:-https://github.com/$REPO/releases/download/$TAG}
 curl -fsSL -o "$BIN.new" "$DL/retouch-armv7l" || { log "download failed"; exit 0; }
 curl -fsSL -o "$HOME_DIR/SHA256SUMS" "$DL/SHA256SUMS" || { log "sums download failed"; exit 0; }
 want=$(sed -n 's/ .*retouch-armv7l$//p' "$HOME_DIR/SHA256SUMS" | head -1)
-got=$(openssl dgst -sha256 "$BIN.new" | sed 's/.*= //')
-[ -n "$want" ] || giveup "no checksum in SHA256SUMS"
-[ "$want" = "$got" ] || giveup "checksum mismatch ($got != $want)"
-chmod 0755 "$BIN.new" && mv "$BIN.new" "$BIN"
+got=$(sha256_of "$BIN.new") || { rm -f "$BIN.new"; log "no sha256 tool (sha256sum/openssl); cannot verify — will retry"; exit 0; }
+# A missing/mismatching checksum is usually transient (truncated-but-200 body, or
+# a mid-publish race while CI is still attaching assets), so it goes through the
+# same $MAX_ATTEMPTS retry budget as a failed download instead of an instant
+# give-up that dead-ends the tag on its first hiccup.
+[ -n "$want" ] || { rm -f "$BIN.new"; log "no checksum in SHA256SUMS; will retry"; exit 0; }
+[ "$want" = "$got" ] || { rm -f "$BIN.new"; log "checksum mismatch ($got != $want); will retry"; exit 0; }
+# Record the new version only once the binary is actually in place — otherwise a
+# failed mv leaves .version claiming a release that was never installed and every
+# later run short-circuits on "already up to date".
+{ chmod 0755 "$BIN.new" && mv "$BIN.new" "$BIN"; } || { rm -f "$BIN.new"; log "could not install binary; will retry"; exit 0; }
 echo "$TAG" > "$VERSION"
 rm -f "$ATTEMPTS"
 log "installed $TAG"

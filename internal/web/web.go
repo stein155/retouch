@@ -5,9 +5,8 @@ package web
 
 import (
 	"context"
-	"crypto/sha256"
 	"embed"
-	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -25,9 +24,11 @@ import (
 	"sync"
 	"time"
 
-	"encoding/json"
-
+	"github.com/stein155/retouch/internal/artwork"
 	"github.com/stein155/retouch/internal/discover"
+	"github.com/stein155/retouch/internal/icy"
+	"github.com/stein155/retouch/internal/plugins"
+	"github.com/stein155/retouch/internal/release"
 	"github.com/stein155/retouch/internal/settings"
 	"github.com/stein155/retouch/internal/speaker"
 	"github.com/stein155/retouch/internal/store"
@@ -49,6 +50,18 @@ const (
 	logoMaxBytes = 2 << 20 // 2 MiB
 	repo         = "stein155/retouch"
 )
+
+// releasePublicKey is the base64-encoded ed25519 public key that release SHA256SUMS
+// files are signed with. When set, a self-update refuses to install unless the
+// release ships a valid SHA256SUMS.sig — so a checksum that merely matches the
+// (same-origin) SHA256SUMS is no longer enough; the binary must be signed by the
+// holder of the private key, closing the "compromised GitHub release → root on
+// every speaker" gap that TLS + checksum alone leave open.
+//
+// Empty (the default) keeps the prior behaviour (TLS + checksum only). To enable
+// signing, generate a keypair, put the public half here, and sign releases in CI
+// with the private half — see docs/RELEASE_SIGNING.md.
+const releasePublicKey = "vmNYVuOZnDN7P7ipK43aJNZ2R6tT1IRX6TXvw7+IvX8="
 
 type releaseInfo struct {
 	TagName    string `json:"tag_name"`
@@ -80,28 +93,51 @@ type Server struct {
 	mirror    PresetMirror
 	homekit   HomeKitController // controls/reports the HomeKit bridge; nil if unsupported
 	mdns      Hostnamer
+	mqtt      MQTTBridge
+	telnetFW  func(closed bool) error // applies/removes the LAN block on :17000
+	sessions  *sessionStore           // settings-login sessions (see auth.go)
+	loginMu   sync.Mutex              // serializes password verifies (see verifyPassword)
 	log       *slog.Logger
 	version   string
 	homeDir   string
 	startedAt time.Time
 	updateMu  sync.Mutex
-	ui        http.Handler // serves the embedded dist bundle
-	proxy     *http.Client // for the same-origin TuneIn / logo proxies
+	ui        http.Handler     // serves the embedded dist bundle
+	proxy     *http.Client     // for the same-origin TuneIn / logo proxies + artwork
+	stream    *http.Client     // reads ICY metadata off the audio stream
+	hub       *hub             // pushes live state to browsers over SSE (/api/events)
+	plugins   *plugins.Manager // installs/supervises/proxies plugins; nil off-speaker
+	sideload  bool             // allow unverified plugin uploads (-allow-sideload)
 
-	npMu    sync.Mutex              // guards npCache
-	npCache map[string]npCacheEntry // TuneIn now-playing, keyed by station id
+	npMu       sync.Mutex                // guards npCache and streamURLs
+	npCache    map[string]npCacheEntry   // now-playing, keyed by station id
+	streamURLs map[string]streamURLEntry // resolved stream URL, keyed by station id
 }
 
-// npCacheEntry is a TuneIn now-playing lookup cached briefly so the UI's poll
-// (every few seconds) doesn't hammer Describe.ashx for the same station.
+// npCacheEntry is a now-playing lookup cached briefly so the UI's poll (every
+// few seconds) doesn't re-read the stream for the same station. fetching guards
+// against launching a second background refresh while one is already in flight.
 type npCacheEntry struct {
-	track tunein.Track
-	at    time.Time
+	song, artist, art string
+	at                time.Time
+	fetching          bool
 }
 
-// npTTL is how long a TuneIn now-playing lookup stays fresh. Songs change every
-// few minutes, so a short cache keeps the line current without per-poll fetches.
+// streamURLEntry caches the stream URL resolved from TuneIn so each poll doesn't
+// re-hit Tune.ashx; the URL (and any embedded token) is stable for a while.
+type streamURLEntry struct {
+	url string
+	at  time.Time
+}
+
+// npTTL is how long a now-playing lookup stays fresh. Songs change every few
+// minutes, so a short cache keeps the line current without per-poll stream reads.
 const npTTL = 15 * time.Second
+
+const updateDownloadTimeout = 5 * time.Minute
+
+// streamURLTTL is how long a resolved stream URL is reused before re-resolving.
+const streamURLTTL = 5 * time.Minute
 
 // PresetMirror receives successful direct speaker preset writes so the local cloud
 // emulation cannot later sync stale presets back to the speaker.
@@ -117,6 +153,14 @@ type Hostnamer interface {
 	SetName(name string)
 }
 
+// MQTTBridge is the Home Assistant MQTT bridge (internal/habridge). The web layer
+// only needs to nudge it to reconnect after a settings change and read its status;
+// it stays an interface so web doesn't depend on the bridge's concrete type.
+type MQTTBridge interface {
+	Reload()
+	Status() (connected bool, lastErr string)
+}
+
 // New builds a Server.
 func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Store, version, homeDir string, log *slog.Logger) *Server {
 	sub, err := fs.Sub(distFS, "dist")
@@ -124,19 +168,46 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		// dist is embedded at build time; this only fails if the build is broken.
 		panic("web: embedded dist missing: " + err.Error())
 	}
-	return &Server{
-		tunein:    tc,
-		speaker:   b,
-		store:     s,
-		settings:  set,
-		log:       log,
-		version:   version,
-		homeDir:   homeDir,
-		startedAt: time.Now(),
-		ui:        http.FileServer(http.FS(sub)),
-		proxy:     &http.Client{Timeout: 12 * time.Second},
-		npCache:   map[string]npCacheEntry{},
+	srv := &Server{
+		tunein:     tc,
+		speaker:    b,
+		store:      s,
+		settings:   set,
+		log:        log,
+		version:    version,
+		homeDir:    homeDir,
+		startedAt:  time.Now(),
+		ui:         http.FileServer(http.FS(sub)),
+		proxy:      &http.Client{Timeout: 12 * time.Second, Transport: publicOnlyTransport()},
+		stream:     &http.Client{Timeout: 12 * time.Second, Transport: publicOnlyTransport()},
+		npCache:    map[string]npCacheEntry{},
+		streamURLs: map[string]streamURLEntry{},
 	}
+	srv.hub = newHub(srv.pollState, log.With("comp", "events"))
+	srv.telnetFW = telnetFirewall
+	srv.sessions = openSessions(filepath.Join(homeDir, ".sessions"))
+	return srv
+}
+
+// SetTelnetFirewall overrides how the :17000 LAN block is applied/removed.
+// Tests inject a fake so toggling the setting never runs iptables.
+func (s *Server) SetTelnetFirewall(f func(closed bool) error) {
+	s.telnetFW = f
+}
+
+// Run drives the background services the Server owns — currently the SSE hub's
+// speaker poll loop — until ctx is cancelled. Call it once, in a goroutine.
+func (s *Server) Run(ctx context.Context) {
+	// Re-apply the telnet block right away on every start: the iptables rule does
+	// not survive a reboot, only the marker file does.
+	if fileExists(filepath.Join(s.homeDir, ".close-telnet")) {
+		if err := s.telnetFW(true); err != nil {
+			s.log.Warn("close telnet at startup failed", "err", err)
+		} else {
+			s.log.Info("closed LAN telnet", "port", 17000)
+		}
+	}
+	s.hub.run(ctx)
 }
 
 // SetPresetMirror attaches the local cloud preset store after both servers exist.
@@ -174,6 +245,23 @@ func (s *Server) SetMDNS(h Hostnamer) {
 	s.mdns = h
 }
 
+// SetMQTTBridge attaches the Home Assistant MQTT bridge so settings changes can
+// trigger a reconnect and the UI can show connection status.
+func (s *Server) SetMQTTBridge(b MQTTBridge) {
+	s.mqtt = b
+}
+
+// SetPlugins attaches the plugin host so the UI can list/install/remove plugins and
+// their config APIs can be reverse-proxied. Nil (the default, off-speaker) disables
+// the plugin endpoints. allowSideload additionally enables installing an uploaded,
+// UNVERIFIED binary; it must only be set from an explicit start-up flag — never from
+// a runtime setting, which the same LAN attacker it defends against could flip.
+// Call before Handler().
+func (s *Server) SetPlugins(m *plugins.Manager, allowSideload bool) {
+	s.plugins = m
+	s.sideload = allowSideload
+}
+
 // Handler returns the HTTP mux.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -187,25 +275,113 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/play", s.playStation)
 	mux.HandleFunc("POST /api/stop", s.stop)
 	mux.HandleFunc("GET /api/now", s.now)
+	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/volume", s.getVolume)
 	mux.HandleFunc("POST /api/volume", s.setVolume)
+	mux.HandleFunc("GET /api/auth", s.getAuth)
+	mux.HandleFunc("POST /api/auth/login", s.login)
+	mux.HandleFunc("POST /api/auth/logout", s.logout)
+	mux.HandleFunc("POST /api/auth/password", s.requireAuth(s.setPassword))
+	// The settings side of the API sits behind the admin password (when one is
+	// set): everything reachable from the settings sheet that can change the
+	// speaker's configuration or leak network details. Playback, presets, volume
+	// and multiroom stay open — the radio keeps working without a login.
 	mux.HandleFunc("GET /api/settings", s.getSettings)
-	mux.HandleFunc("PUT /api/settings", s.putSettings)
+	mux.HandleFunc("PUT /api/settings", s.requireAuth(s.putSettings))
+	mux.HandleFunc("GET /api/mqtt/status", s.requireAuth(s.mqttStatus))
 	mux.HandleFunc("GET /api/multiroom", s.multiroom)
 	mux.HandleFunc("GET /api/multiroom/speakers", s.multiroomSpeakers)
 	mux.HandleFunc("POST /api/multiroom/group", s.multiroomGroup)
 	mux.HandleFunc("POST /api/multiroom/ungroup", s.multiroomUngroup)
 	mux.HandleFunc("GET /api/homekit", s.homeKitInfo)
-	mux.HandleFunc("POST /api/homekit", s.setHomeKit)
-	mux.HandleFunc("POST /api/homekit/reset", s.resetHomeKit)
+	mux.HandleFunc("POST /api/homekit", s.requireAuth(s.setHomeKit))
+	mux.HandleFunc("POST /api/homekit/reset", s.requireAuth(s.resetHomeKit))
 	mux.HandleFunc("GET /api/version", s.versionInfo)
 	mux.HandleFunc("GET /api/releases", s.releases)
-	mux.HandleFunc("GET /api/debug", s.debugBundle)
-	mux.HandleFunc("POST /api/update", s.updateApp)
+	mux.HandleFunc("GET /api/debug", s.requireAuth(s.debugBundle))
+	mux.HandleFunc("POST /api/update", s.requireAuth(s.updateApp))
+
+	// Plugins: list/install/remove, plus a reverse proxy of every other subpath to
+	// the plugin's own loopback API. The install/remove verbs are more specific than
+	// the {path...} catch-all, so the mux routes them first; the plugin's manifest,
+	// health and config endpoints all fall through to the proxy. The proxy is
+	// registered per method (not as an all-method catch-all) so its pattern stays
+	// comparable to "GET /" — an all-method catch-all conflicts with it and panics.
+	mux.HandleFunc("GET /api/plugins", s.listPlugins)
+	mux.HandleFunc("POST /api/plugins/{name}/install", s.installPlugin)
+	mux.HandleFunc("POST /api/plugins/{name}/upload", s.uploadPlugin)
+	mux.HandleFunc("DELETE /api/plugins/{name}", s.removePlugin)
+	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
+		mux.HandleFunc(method+" /api/plugins/{name}/{path...}", s.proxyPlugin)
+	}
 	// Everything else is the embedded single-page UI. More specific /api/...
 	// patterns above win; this serves index.html, assets and icons.
 	mux.HandleFunc("GET /", s.serveUI)
-	return mux
+	return s.guard(mux)
+}
+
+// maxRequestBody caps the body of a mutating request. The JSON/XML we accept is
+// tiny (a few settings fields, a station id); anything larger is a mistake or an
+// attempt to drive a large allocation on the memory-constrained speaker.
+const maxRequestBody = 64 << 10
+
+// guard wraps the API with the only access controls a LAN-only, login-less service
+// still needs: it blocks DNS-rebinding (a Host that isn't this speaker) and CSRF (a
+// cross-origin mutating request), and bounds request bodies. Without these, a web
+// page a LAN user merely visits could drive POST/PUT endpoints — e.g. repoint the
+// speaker at an attacker's MQTT broker via PUT /api/settings, or force a downgrade
+// via POST /api/update — from a single drive-by.
+func (s *Server) guard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !hostAllowed(r.Host) {
+			// A rebinding attack reaches us under the attacker's own hostname; a
+			// legitimate client uses the speaker's IP or its <name>.local.
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
+			// Browsers send Origin on every cross-origin mutating request (including
+			// "simple" text/plain POSTs), so a mismatch means CSRF. Sec-Fetch-Site is
+			// the belt to Origin's braces on browsers that send it.
+			if origin := r.Header.Get("Origin"); origin != "" {
+				u, err := url.Parse(origin)
+				if err != nil || u.Host != r.Host {
+					http.Error(w, "cross-origin request refused", http.StatusForbidden)
+					return
+				}
+			} else if sfs := r.Header.Get("Sec-Fetch-Site"); sfs != "" && sfs != "same-origin" && sfs != "none" {
+				http.Error(w, "cross-site request refused", http.StatusForbidden)
+				return
+			}
+			// A sideloaded plugin binary is multi-MB; every other mutating request is
+			// tiny. Cap the upload generously but bound everything else tightly.
+			limit := int64(maxRequestBody)
+			if strings.HasPrefix(r.URL.Path, "/api/plugins/") && strings.HasSuffix(r.URL.Path, "/upload") {
+				limit = pluginUploadMax
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// hostAllowed reports whether the request's Host names this speaker: an IP literal,
+// localhost (the on-speaker agent), or a <name>.local mDNS address. A real public
+// domain is rejected, which is what defeats DNS rebinding.
+func hostAllowed(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(host, ".")
+	if host == "" {
+		return false
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	return net.ParseIP(host) != nil
 }
 
 // multiroom returns this speaker's identity and its current multiroom zone, so
@@ -334,6 +510,12 @@ func (s *Server) multiroomUngroup(w http.ResponseWriter, r *http.Request) {
 			slave.DeviceID = info.DeviceID
 		}
 	}
+	if slave.DeviceID == "" {
+		// Without a device id the firmware ignores the removal; don't report
+		// "ungrouped" for a speaker that was never removed.
+		s.fail(w, "could not identify that speaker", nil)
+		return
+	}
 	master := speaker.Member{DeviceID: self.DeviceID, IP: self.IP}
 	if err := s.speaker.RemoveZoneSlave(ctx, master, []speaker.Member{slave}); err != nil {
 		s.fail(w, "ungrouping failed", err)
@@ -350,7 +532,7 @@ func (s *Server) zoneTargetIP(w http.ResponseWriter, r *http.Request) (string, b
 		IP string `json:"ip"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		s.fail(w, "bad body", err)
+		s.badRequest(w, "bad body", err)
 		return "", false
 	}
 	ip := strings.TrimSpace(body.IP)
@@ -425,6 +607,7 @@ func (s *Server) debugBundle(w http.ResponseWriter, r *http.Request) {
 	b.WriteString("\n== installer state (persistent; survives reboots) ==\n")
 	fmt.Fprintf(&b, ".version   : %s\n", readFileLine(filepath.Join(s.homeDir, ".version")))
 	fmt.Fprintf(&b, ".attempts  : %s\n", readFileLine(filepath.Join(s.homeDir, ".attempts")))
+	fmt.Fprintf(&b, ".close-telnet: %v\n", fileExists(filepath.Join(s.homeDir, ".close-telnet")))
 	gaveUp := fileExists(filepath.Join(s.homeDir, ".gaveup"))
 	fmt.Fprintf(&b, ".gaveup    : %v", gaveUp)
 	if gaveUp {
@@ -570,7 +753,15 @@ func (s *Server) updateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func(from, to string) {
+	s.startUpdate(s.version, target)
+	writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": target})
+}
+
+// startUpdate installs release `to` and restarts, in the background. The caller must
+// already hold updateMu (via TryLock); startUpdate hands the lock off to the
+// goroutine and releases it when the install finishes or fails.
+func (s *Server) startUpdate(from, to string) {
+	go func() {
 		defer s.updateMu.Unlock()
 		if err := s.installRelease(context.Background(), to); err != nil {
 			s.log.Warn("self-update failed", "from", from, "to", to, "err", err)
@@ -578,9 +769,58 @@ func (s *Server) updateApp(w http.ResponseWriter, r *http.Request) {
 		}
 		s.log.Info("self-update installed; restarting", "from", from, "to", to)
 		s.restartAfterUpdate()
-	}(s.version, target)
+	}()
+}
 
-	writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": target})
+// UpdateInfo reports the running version, the latest available stable release, its
+// release URL, and whether updating is possible here (only on an installed speaker).
+// It backs the Home Assistant `update` entity so HA can show an update notification.
+// Off-speaker (not updatable) it reports latest == installed and skips the GitHub
+// call, so no false update is offered.
+func (s *Server) UpdateInfo(ctx context.Context) (installed, latest, releaseURL string, updatable bool, err error) {
+	installed = s.version
+	updatable = s.updatable()
+	if !updatable {
+		return installed, installed, "", false, nil
+	}
+	latest, err = s.latestRelease(ctx)
+	if err != nil {
+		return installed, "", "", true, err
+	}
+	if latest == "" {
+		latest = installed
+	}
+	if latest != installed {
+		releaseURL = "https://github.com/" + repo + "/releases/tag/" + latest
+	}
+	return installed, latest, releaseURL, true, nil
+}
+
+// UpdateToLatest installs the latest stable release and restarts, reusing the same
+// path as POST /api/update. It backs the Home Assistant update entity's Install
+// action. It returns quickly: the download + restart run in the background on success.
+func (s *Server) UpdateToLatest(ctx context.Context) error {
+	if !s.updatable() {
+		return fmt.Errorf("updates are only available on an installed speaker")
+	}
+	if !s.updateMu.TryLock() {
+		return fmt.Errorf("an update is already in progress")
+	}
+	target, err := s.latestRelease(ctx)
+	if err != nil {
+		s.updateMu.Unlock()
+		return fmt.Errorf("latest release check failed: %w", err)
+	}
+	if target == "" {
+		s.updateMu.Unlock()
+		return fmt.Errorf("latest release missing tag")
+	}
+	if target == s.version {
+		s.updateMu.Unlock()
+		return nil // already current
+	}
+	s.startUpdate(s.version, target)
+	return nil
 }
 
 func (s *Server) latestRelease(ctx context.Context) (string, error) {
@@ -626,98 +866,73 @@ func (s *Server) installRelease(ctx context.Context, tag string) error {
 		_ = os.Remove(newBin)
 		return err
 	}
-	want, err := checksumFor(sums, "retouch-armv7l")
+	// When signing is enabled, the checksums file itself must carry a valid
+	// signature before we trust any checksum in it. Betas are exempt: they are
+	// built from PR code by the Beta Build workflow, which must never be given
+	// the release signing key, so a beta ships no SHA256SUMS.sig. Betas stay
+	// gated by being maintainer-triggered, opt-in prereleases over TLS + checksum.
+	if _, isBeta := betaPR(tag); releasePublicKey != "" && !isBeta {
+		sig := filepath.Join(s.homeDir, "SHA256SUMS.sig")
+		if err := s.downloadFile(ctx, base+"/SHA256SUMS.sig", sig, 0o644); err != nil {
+			_ = os.Remove(newBin)
+			return err
+		}
+		if err := verifyReleaseSignature(releasePublicKey, sums, sig); err != nil {
+			_ = os.Remove(newBin)
+			return err
+		}
+	}
+	want, err := release.ChecksumFor(sums, "retouch-armv7l")
 	if err != nil {
 		_ = os.Remove(newBin)
 		return err
 	}
-	got, err := sha256File(newBin)
-	if err != nil {
+	if err := release.VerifyChecksum(newBin, want); err != nil {
 		_ = os.Remove(newBin)
 		return err
 	}
-	if want != got {
-		_ = os.Remove(newBin)
-		return errChecksumMismatch{want: want, got: got}
+	// Keep the outgoing binary as retouch.old so a bad release can be rolled back
+	// by hand (best-effort; a first install has none). Restore it if the swap fails,
+	// so we never leave the speaker with no binary.
+	old := bin + ".old"
+	hadOld := fileExists(bin)
+	if hadOld {
+		_ = os.Rename(bin, old)
 	}
 	if err := os.Rename(newBin, bin); err != nil {
 		_ = os.Remove(newBin)
+		if hadOld {
+			_ = os.Rename(old, bin)
+		}
 		return err
 	}
 	return os.WriteFile(filepath.Join(s.homeDir, ".version"), []byte(tag+"\n"), 0o644)
 }
 
+// verifyReleaseSignature is a thin alias over release.VerifySignature (kept so the
+// on-speaker OTA reads naturally at the call site and the signature test targets it).
+func verifyReleaseSignature(pubKeyB64, sumsPath, sigPath string) error {
+	return release.VerifySignature(pubKeyB64, sumsPath, sigPath)
+}
+
 func (s *Server) getJSON(ctx context.Context, target string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", "ReTouch/"+s.version)
-	resp, err := s.proxy.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return errHTTPStatus{url: target, status: resp.StatusCode}
-	}
-	return json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(out)
+	return release.GetJSON(ctx, s.proxy, "ReTouch/"+s.version, target, out)
 }
 
 func (s *Server) downloadFile(ctx context.Context, target, path string, mode fs.FileMode) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", "ReTouch/"+s.version)
-	resp, err := s.proxy.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return errHTTPStatus{url: target, status: resp.StatusCode}
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-	if err != nil {
-		return err
-	}
-	_, copyErr := io.Copy(f, resp.Body)
-	closeErr := f.Close()
-	if copyErr != nil {
-		return copyErr
-	}
-	return closeErr
-}
-
-func checksumFor(path, name string) (string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[1] == name {
-			return strings.ToLower(fields[0]), nil
-		}
-	}
-	return "", errMissingChecksum{name: name}
-}
-
-func sha256File(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = f.Close() }()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	ctx, cancel := context.WithTimeout(ctx, updateDownloadTimeout)
+	defer cancel()
+	client := &http.Client{Timeout: updateDownloadTimeout}
+	return release.Download(ctx, client, "ReTouch/"+s.version, target, path, mode)
 }
 
 func (s *Server) restartAfterUpdate() {
+	// Stop plugin children first: os.Exit skips context cancellation, so without
+	// this they'd be orphaned to init and duplicated by the relaunched ReTouch
+	// (two Ring agents then invalidate each other's rotating refresh token).
+	if s.plugins != nil {
+		s.plugins.Shutdown(3 * time.Second)
+	}
 	start := filepath.Join(s.homeDir, "start.sh")
 	if fileExists(start) {
 		cmd := exec.Command("sh", "-c", "sleep 1; "+shellQuote(start)+" >/tmp/retouch-start.log 2>&1 &")
@@ -734,21 +949,6 @@ func (s *Server) restartAfterUpdate() {
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
-
-type errHTTPStatus struct {
-	url    string
-	status int
-}
-
-func (e errHTTPStatus) Error() string { return e.url + " status " + strconv.Itoa(e.status) }
-
-type errMissingChecksum struct{ name string }
-
-func (e errMissingChecksum) Error() string { return "missing checksum for " + e.name }
-
-type errChecksumMismatch struct{ want, got string }
-
-func (e errChecksumMismatch) Error() string { return "checksum mismatch " + e.got + " != " + e.want }
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
@@ -795,8 +995,37 @@ func (s *Server) logoProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad url", http.StatusBadRequest)
 		return
 	}
+	// Logos live on public CDNs. Refuse loopback/LAN targets so the proxy can't
+	// be used to reach the loopback-only marge stub or other LAN-internal hosts.
+	if !publicHost(r.Context(), u.Hostname()) {
+		http.Error(w, "bad url", http.StatusBadRequest)
+		return
+	}
 	s.relay(w, r, u.String(), "image/png", logoMaxBytes)
 }
+
+// publicHost reports whether host resolves exclusively to globally routable
+// addresses — i.e. it is not loopback, RFC1918/ULA, link-local or unspecified.
+// It is a fast up-front reject; publicOnlyTransport is the authoritative guard
+// (it re-checks the actual address dialed, so a redirect or a DNS rebind between
+// this check and the connection can't slip a private target through).
+func publicHost(ctx context.Context, host string) bool {
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return false
+	}
+	for _, ip := range ips {
+		if !release.PublicIP(ip.IP) {
+			return false
+		}
+	}
+	return true
+}
+
+// publicOnlyTransport is the transport for the outbound proxy client (logo/TuneIn
+// mirrors, artwork + GitHub lookups): its dialer rejects any non-public address,
+// per hop, closing the SSRF holes a pre-flight hostname check alone leaves open.
+func publicOnlyTransport() *http.Transport { return release.SafeTransport() }
 
 // relay performs a bounded upstream GET and copies the response back. fallbackCT
 // is used only when the upstream omits a Content-Type.
@@ -815,11 +1044,20 @@ func (s *Server) relay(w http.ResponseWriter, r *http.Request, target, fallbackC
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	} else {
-		w.Header().Set("Content-Type", fallbackCT)
+	// Never reflect the upstream Content-Type verbatim: this proxy fetches
+	// attacker-chosen public URLs, and echoing e.g. "text/html" back on the
+	// speaker's own origin would let a crafted logo URL execute script here.
+	// Keep the upstream type only when it stays within the expected family
+	// (e.g. image/jpeg for a logo), otherwise fall back to the safe default,
+	// and forbid MIME sniffing so the declared type is authoritative.
+	ct := fallbackCT
+	if up := resp.Header.Get("Content-Type"); up != "" {
+		if fam := fallbackCT[:strings.IndexByte(fallbackCT, '/')+1]; strings.HasPrefix(up, fam) {
+			ct = up
+		}
 	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, io.LimitReader(resp.Body, max))
 }
@@ -846,8 +1084,8 @@ func (s *Server) setPreset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p store.Preset
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil || p.StationID == "" {
-		s.fail(w, "stationId required", err)
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil || !validStationID(p.StationID) {
+		s.badRequest(w, "valid stationId required", err)
 		return
 	}
 	p.Slot = slot
@@ -860,6 +1098,11 @@ func (s *Server) setPreset(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.mirror != nil {
 		s.mirror.MirrorPreset(slot, p.Name, loc, p.Logo)
+	}
+	// Keep the local store in sync: it is the fallback GET /api/presets serves
+	// when the speaker is unreachable, so it must reflect edits made here.
+	if err := s.store.Set(p); err != nil {
+		s.log.Warn("mirror preset to local store", "err", err)
 	}
 	s.log.Info("store preset", "slot", slot, "station", p.StationID, "name", p.Name)
 	writeJSON(w, 200, p)
@@ -879,6 +1122,9 @@ func (s *Server) delPreset(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.mirror != nil {
 		s.mirror.RemovePreset(slot)
+	}
+	if err := s.store.Remove(slot); err != nil {
+		s.log.Warn("remove preset from local store", "err", err)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -900,6 +1146,7 @@ func (s *Server) playPreset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("play preset", "slot", slot)
+	s.hub.nudge() // push the new playback state to browsers at once
 	writeJSON(w, 200, map[string]int{"playing": slot})
 }
 
@@ -908,8 +1155,8 @@ func (s *Server) playStation(w http.ResponseWriter, r *http.Request) {
 		StationID string `json:"stationId"`
 		Name      string `json:"name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.StationID == "" {
-		s.fail(w, "stationId required", err)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !validStationID(body.StationID) {
+		s.badRequest(w, "valid stationId required", err)
 		return
 	}
 	s.playStationID(w, r, body.StationID, body.Name)
@@ -927,6 +1174,7 @@ func (s *Server) playStationID(w http.ResponseWriter, r *http.Request, stationID
 		return
 	}
 	s.log.Info("play", "station", stationID, "name", name)
+	s.hub.nudge() // push the new playback state to browsers at once
 	writeJSON(w, 200, map[string]string{"status": "playing", "station": stationID})
 }
 
@@ -937,6 +1185,7 @@ func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "stop failed", err)
 		return
 	}
+	s.hub.nudge() // push the stopped state to browsers at once
 	writeJSON(w, 200, map[string]string{"status": "stopped"})
 }
 
@@ -1014,60 +1263,147 @@ func (s *Server) now(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "now failed", err)
 		return
 	}
-	s.enrichTuneIn(ctx, np)
+	s.enrichNowPlaying(np)
 	writeJSON(w, 200, np)
 }
 
-// enrichTuneIn fills in the song/artist/cover for a TuneIn station. The speaker
-// itself no longer gets this metadata (it came from the retired Bose cloud), so
-// ReTouch asks TuneIn directly and fills only the fields the speaker left blank.
-// Best-effort and cached: any failure leaves np untouched.
-func (s *Server) enrichTuneIn(ctx context.Context, np *speaker.NowPlaying) {
+// EnrichedNowPlaying returns the current now-playing with the live song/artist/
+// cover filled in from the stream metadata — the same view the web UI shows. The
+// MQTT bridge uses it so Home Assistant sees the track, not just the station name
+// (the speaker itself no longer receives track metadata; see enrichNowPlaying).
+func (s *Server) EnrichedNowPlaying(ctx context.Context) (*speaker.NowPlaying, error) {
+	np, err := s.speaker.NowPlaying(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.enrichNowPlaying(np)
+	return np, nil
+}
+
+// enrichNowPlaying fills in the song/artist/cover for a playing station. The
+// speaker no longer gets this metadata (it came from the retired Bose cloud), so
+// ReTouch reads it from the standard ICY stream metadata (see internal/icy),
+// falling back to TuneIn, and looks up cover art generically (see
+// internal/artwork). The read happens in the
+// background so the poll stays fast; this call only applies whatever is cached
+// and kicks off a refresh when the entry is stale. Best-effort: with nothing
+// cached yet the UI just shows the station until the next poll fills it in.
+func (s *Server) enrichNowPlaying(np *speaker.NowPlaying) {
 	if np == nil || !strings.HasPrefix(np.StationID, "s") {
 		return
 	}
 	if np.PlayStatus != "" && np.PlayStatus != "PLAY_STATE" && np.PlayStatus != "BUFFERING_STATE" {
 		return // nothing is playing — don't show a stale song
 	}
-	t, ok := s.cachedNowPlaying(ctx, np.StationID)
+	id := np.StationID
+	s.npMu.Lock()
+	e, ok := s.npCache[id]
+	if (!ok || time.Since(e.at) >= npTTL) && !e.fetching {
+		e.fetching = true
+		s.npCache[id] = e
+		go s.refreshNowPlaying(id)
+	}
+	s.npMu.Unlock()
+
 	if !ok {
 		return
 	}
-	// For TuneIn radio the speaker fills Track with the station name as a
-	// placeholder and never knows the artist (that came from the Bose cloud), so
-	// TuneIn's live song wins whenever it has one. When TuneIn has no song we
-	// leave the speaker's value alone — the UI then just shows the station.
-	if t.Song != "" {
-		np.Track = t.Song
-		np.Artist = t.Artist
-	}
-	if np.Art == "" {
-		if t.Art != "" {
-			np.Art = t.Art
-		} else {
-			np.Art = t.Logo
+	// The speaker fills Track with the station name as a placeholder and never
+	// knows the artist, so the stream's live song wins whenever it has one.
+	if e.song != "" {
+		np.Track = e.song
+		np.Artist = e.artist
+		// Some streams (e.g. NPO) put the programme name where the artist goes;
+		// when that just repeats the station, drop it rather than show it twice.
+		if strings.EqualFold(strings.TrimSpace(np.Artist), strings.TrimSpace(np.Station)) {
+			np.Artist = ""
 		}
+		// The speaker's own art is the generic station logo; our track cover is
+		// more specific, so it takes priority when we have one.
+		if e.art != "" {
+			np.Art = e.art
+		}
+	} else if np.Art == "" && e.art != "" {
+		np.Art = e.art
 	}
 }
 
-// cachedNowPlaying returns the TuneIn now-playing for a station, served from a
-// short-lived cache so repeated polls don't re-hit TuneIn for every request.
-func (s *Server) cachedNowPlaying(ctx context.Context, stationID string) (tunein.Track, bool) {
+// refreshNowPlaying reads the current track off the station's stream and looks
+// up cover art, then stores the result. Runs in its own goroutine off a fresh
+// context (the request that triggered it has already returned). Any failure
+// caches an empty entry so the poll doesn't retry until the TTL lapses.
+func (s *Server) refreshNowPlaying(id string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+
+	var e npCacheEntry
+	// Primary: the standard ICY metadata in the stream itself.
+	if url := s.streamURL(ctx, id); url != "" {
+		if title, err := icy.StreamTitle(ctx, s.stream, url); err != nil {
+			s.invalidateStreamURL(id) // stale URL / expired token — re-resolve next time
+		} else {
+			e.artist, e.song = icy.SplitArtistTitle(title)
+		}
+	}
+	// Fallback: TuneIn's Describe when the stream carried no track metadata.
+	if e.song == "" {
+		if t, err := s.tunein.NowPlaying(ctx, id); err == nil && t.Song != "" {
+			e.song, e.artist, e.art = t.Song, t.Artist, t.Art
+		}
+	}
+	// Cover art for whatever we found: look it up generically when we don't
+	// already have one (ICY carries none; TuneIn sometimes does).
+	if e.song != "" && e.art == "" {
+		term := strings.TrimSpace(e.artist + " " + e.song)
+		if art, err := artwork.Search(ctx, s.proxy, term); err == nil {
+			e.art = art
+		}
+	}
+	e.at = time.Now()
+
 	s.npMu.Lock()
-	if e, ok := s.npCache[stationID]; ok && time.Since(e.at) < npTTL {
+	// The cache only needs the stations currently on screen; drop expired
+	// entries once it grows past that so it can't accumulate for months.
+	if len(s.npCache) > 64 {
+		for k, v := range s.npCache {
+			if k != id && time.Since(v.at) >= npTTL && !v.fetching {
+				delete(s.npCache, k)
+			}
+		}
+	}
+	s.npCache[id] = e
+	s.npMu.Unlock()
+}
+
+// streamURL returns the station's playable stream URL, resolved via TuneIn and
+// cached so each poll doesn't re-resolve. Empty on failure.
+func (s *Server) streamURL(ctx context.Context, id string) string {
+	s.npMu.Lock()
+	if e, ok := s.streamURLs[id]; ok && time.Since(e.at) < streamURLTTL {
 		s.npMu.Unlock()
-		return e.track, true
+		return e.url
 	}
 	s.npMu.Unlock()
 
-	t, err := s.tunein.NowPlaying(ctx, stationID)
+	urls, err := s.tunein.Resolve(ctx, id)
 	if err != nil {
-		return tunein.Track{}, false
+		return ""
+	}
+	u := tunein.PlayableURL(urls)
+	if u == "" {
+		return ""
 	}
 	s.npMu.Lock()
-	s.npCache[stationID] = npCacheEntry{track: t, at: time.Now()}
+	s.streamURLs[id] = streamURLEntry{url: u, at: time.Now()}
 	s.npMu.Unlock()
-	return t, true
+	return u
+}
+
+// invalidateStreamURL drops a cached stream URL so it is re-resolved next time.
+func (s *Server) invalidateStreamURL(id string) {
+	s.npMu.Lock()
+	delete(s.streamURLs, id)
+	s.npMu.Unlock()
 }
 
 func (s *Server) getVolume(w http.ResponseWriter, r *http.Request) {
@@ -1086,7 +1422,7 @@ func (s *Server) setVolume(w http.ResponseWriter, r *http.Request) {
 		Volume int `json:"volume"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		s.fail(w, "bad body", err)
+		s.badRequest(w, "bad body", err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
@@ -1095,6 +1431,7 @@ func (s *Server) setVolume(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "set volume failed", err)
 		return
 	}
+	s.hub.nudge() // push the new volume to other browsers at once
 	writeJSON(w, 200, map[string]int{"volume": body.Volume})
 }
 
@@ -1104,9 +1441,25 @@ func (s *Server) setVolume(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	out := map[string]any{"language": s.settings.Get().Language}
-	if info, err := s.speaker.Info(ctx); err == nil {
+	authorized := s.authorized(r)
+	out := map[string]any{
+		"language":      s.settings.Get().Language,
+		"hasPassword":   s.settings.Get().Auth.PasswordHash != "",
+		"authenticated": authorized,
+	}
+	info, infoErr := s.speaker.Info(ctx)
+	if infoErr == nil {
 		out["name"] = info.Name
+	}
+	if !authorized {
+		// Not logged in: only what the app itself needs at startup (language +
+		// speaker name). Everything else — network details, MQTT config, telnet
+		// state — waits behind the login.
+		writeJSON(w, 200, out)
+		return
+	}
+	out["closeTelnet"] = fileExists(filepath.Join(s.homeDir, ".close-telnet"))
+	if infoErr == nil {
 		out["model"] = info.Type // device model, e.g. "SoundTouch 10"
 	}
 	if b, err := s.speaker.Bass(ctx); err == nil {
@@ -1126,7 +1479,41 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	if s.mdns != nil {
 		out["host"] = s.mdns.Hostname() // friendly .local address, e.g. "keuken.local"
 	}
+	out["mqtt"] = s.mqttSettingsView()
 	writeJSON(w, 200, out)
+}
+
+// mqttSettingsView is the MQTT config as returned to the UI: the password is never
+// sent back (only whether one is set), and the live connection status is folded in.
+func (s *Server) mqttSettingsView() map[string]any {
+	m := s.settings.Get().MQTT
+	view := map[string]any{
+		"enabled":         m.Enabled,
+		"host":            m.Host,
+		"port":            m.Port,
+		"username":        m.Username,
+		"hasPassword":     m.Password != "",
+		"baseTopic":       m.BaseTopic,
+		"discoveryPrefix": m.DiscoveryPrefix,
+		"tls":             m.TLS,
+	}
+	if s.mqtt != nil {
+		connected, lastErr := s.mqtt.Status()
+		view["connected"] = connected
+		view["lastError"] = lastErr
+	}
+	return view
+}
+
+// mqttStatus reports the live broker connection state so the settings UI can show
+// whether the Home Assistant link is up.
+func (s *Server) mqttStatus(w http.ResponseWriter, r *http.Request) {
+	if s.mqtt == nil {
+		writeJSON(w, 200, map[string]any{"connected": false, "lastError": ""})
+		return
+	}
+	connected, lastErr := s.mqtt.Status()
+	writeJSON(w, 200, map[string]any{"connected": connected, "lastError": lastErr})
 }
 
 // putSettings applies any provided fields: name + bass + treble + Wi-Fi
@@ -1139,9 +1526,20 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		Treble           *int    `json:"treble"`
 		WifiOptimization *bool   `json:"wifiOptimization"`
 		Language         *string `json:"language"`
+		CloseTelnet      *bool   `json:"closeTelnet"`
+		MQTT             *struct {
+			Enabled         *bool   `json:"enabled"`
+			Host            *string `json:"host"`
+			Port            *int    `json:"port"`
+			Username        *string `json:"username"`
+			Password        *string `json:"password"`
+			BaseTopic       *string `json:"baseTopic"`
+			DiscoveryPrefix *string `json:"discoveryPrefix"`
+			TLS             *bool   `json:"tls"`
+		} `json:"mqtt"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		s.fail(w, "bad body", err)
+		s.badRequest(w, "bad body", err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
@@ -1179,8 +1577,95 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if body.CloseTelnet != nil {
+		if err := s.setCloseTelnet(*body.CloseTelnet); err != nil {
+			s.fail(w, "set telnet close failed", err)
+			return
+		}
+	}
+	if body.MQTT != nil {
+		// Start from the stored config and override only the fields the UI sent, so
+		// an omitted password (never returned to the UI) is preserved.
+		cfg := s.settings.Get().MQTT
+		p := body.MQTT
+		if p.Enabled != nil {
+			cfg.Enabled = *p.Enabled
+		}
+		if p.Host != nil {
+			cfg.Host = strings.TrimSpace(*p.Host)
+		}
+		if p.Port != nil {
+			cfg.Port = *p.Port
+		}
+		if p.Username != nil {
+			cfg.Username = *p.Username
+		}
+		if p.Password != nil {
+			cfg.Password = *p.Password
+		}
+		if p.BaseTopic != nil {
+			cfg.BaseTopic = strings.TrimSpace(*p.BaseTopic)
+		}
+		if p.DiscoveryPrefix != nil {
+			cfg.DiscoveryPrefix = strings.TrimSpace(*p.DiscoveryPrefix)
+		}
+		if p.TLS != nil {
+			cfg.TLS = *p.TLS
+		}
+		if err := s.settings.SetMQTT(cfg); err != nil {
+			s.fail(w, "set mqtt failed", err)
+			return
+		}
+		if s.mqtt != nil {
+			s.mqtt.Reload() // apply the new config: reconnect (or disconnect)
+		}
+	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
+
+// setCloseTelnet applies the toggle immediately: the marker file only makes the
+// choice survive a reboot, the firewall rule is what actually closes the port.
+// Enabling is open to anyone; disabling goes through the settings login (the PUT
+// handler is auth-gated), which is what makes "close telnet" trustworthy.
+func (s *Server) setCloseTelnet(on bool) error {
+	path := filepath.Join(s.homeDir, ".close-telnet")
+	if on {
+		if err := os.WriteFile(path, []byte("1\n"), 0o644); err != nil {
+			return err
+		}
+		if err := s.telnetFW(true); err != nil {
+			return err
+		}
+		s.log.Info("closed LAN telnet", "port", 17000)
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := s.telnetFW(false); err != nil {
+		return err
+	}
+	s.log.Info("reopened LAN telnet", "port", 17000)
+	return nil
+}
+
+// telnetFirewall installs or removes the raw-table DROP that hides the :17000
+// diagnostic CLI from the LAN (loopback stays open), de-duplicating any earlier
+// copies first.
+func telnetFirewall(closed bool) error {
+	script := "while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 17000 -j DROP 2>/dev/null; do :; done"
+	if closed {
+		script += "; iptables -t raw -I PREROUTING 1 ! -i lo -p tcp --dport 17000 -j DROP"
+	}
+	return exec.Command("sh", "-c", script).Run()
+}
+
+// stationIDRe matches a TuneIn guide id (e.g. "s6712"). The id is interpolated
+// into the ContentItem location and, via marge, into the upstream Tune.ashx
+// query, so anything beyond plain alphanumerics is rejected up front.
+var stationIDRe = regexp.MustCompile(`^[A-Za-z0-9]{1,64}$`)
+
+func validStationID(id string) bool { return stationIDRe.MatchString(id) }
 
 func slotOf(w http.ResponseWriter, r *http.Request) (int, bool) {
 	slot, err := strconv.Atoi(r.PathValue("slot"))
@@ -1202,4 +1687,13 @@ func (s *Server) fail(w http.ResponseWriter, msg string, err error) {
 		s.log.Warn(msg, "err", err.Error())
 	}
 	writeJSON(w, http.StatusBadGateway, map[string]string{"error": msg})
+}
+
+// badRequest reports a client error (malformed body, missing field) as a 400,
+// so callers can tell their own mistakes apart from speaker/upstream failures.
+func (s *Server) badRequest(w http.ResponseWriter, msg string, err error) {
+	if err != nil {
+		s.log.Warn(msg, "err", err.Error())
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 }

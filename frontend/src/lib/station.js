@@ -11,5 +11,18 @@ export function sameStation(a, b) {
   const y = normName(b);
   if (!x || !y) return false;
   if (x === y) return true;
-  return x.length > 2 && y.length > 2 && (x.includes(y) || y.includes(x));
+  if (x.length <= 2 || y.length <= 2) return false;
+  return containsWord(x, y) || containsWord(y, x);
+}
+
+// Containment counts only on word boundaries, so "radio 1" matches
+// "npo radio 1" but never "radio 10".
+const alnum = /[a-z0-9]/;
+function containsWord(long, short) {
+  for (let i = long.indexOf(short); i !== -1; i = long.indexOf(short, i + 1)) {
+    const okBefore = i === 0 || !alnum.test(long[i - 1]);
+    const okAfter = i + short.length === long.length || !alnum.test(long[i + short.length]);
+    if (okBefore && okAfter) return true;
+  }
+  return false;
 }

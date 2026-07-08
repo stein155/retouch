@@ -1,7 +1,10 @@
 package web_test
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -11,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stein155/retouch/internal/settings"
 	"github.com/stein155/retouch/internal/sim"
@@ -29,6 +33,21 @@ import (
 // tests make no outbound network calls.
 func newServer(t *testing.T) (http.Handler, *sim.Speaker) {
 	t.Helper()
+	srv, sp, _ := newServerSrv(t)
+	return srv.Handler(), sp
+}
+
+// newServerSrv is newServer but hands back the *web.Server itself (for tests
+// that need to drive its background loop, Run) plus its home/state dir.
+func newServerSrv(t *testing.T) (*web.Server, *sim.Speaker, string) {
+	t.Helper()
+	return newServerAt(t, t.TempDir())
+}
+
+// newServerAt is newServerSrv over a caller-owned state dir, so a test can
+// build a second server over the same dir to simulate a restart.
+func newServerAt(t *testing.T, dir string) (*web.Server, *sim.Speaker, string) {
+	t.Helper()
 	sp := sim.New()
 
 	ts := httptest.NewServer(sp.Handler())
@@ -41,7 +60,6 @@ func newServer(t *testing.T) (http.Handler, *sim.Speaker) {
 	host := net.JoinHostPort(u.Hostname(), u.Port())
 	sc := speaker.New(host)
 
-	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "presets.json"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -53,7 +71,10 @@ func newServer(t *testing.T) (http.Handler, *sim.Speaker) {
 	// /api/version reports updatable:false and /api/update returns 409 without
 	// ever reaching GitHub.
 	srv := web.New(tunein.New(), sc, st, set, "test", dir, log)
-	return srv.Handler(), sp
+	// Toggling closeTelnet applies a firewall rule immediately; stub it out so
+	// tests never run iptables.
+	srv.SetTelnetFirewall(func(bool) error { return nil })
+	return srv, sp, dir
 }
 
 // do runs a request against the handler and returns the recorder.
@@ -64,6 +85,9 @@ func do(t *testing.T, h http.Handler, method, target string, body string) *httpt
 		r = strings.NewReader(body)
 	}
 	req := httptest.NewRequest(method, target, r)
+	// The API guard requires a Host that names the speaker (blocks DNS rebinding);
+	// httptest defaults to "example.com", so present a loopback host here.
+	req.Host = "127.0.0.1:8000"
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
@@ -169,8 +193,8 @@ func TestPresetBadSlot(t *testing.T) {
 func TestPresetMissingStationID(t *testing.T) {
 	h, _ := newServer(t)
 	rec := do(t, h, "PUT", "/api/presets/1", `{"name":"no id"}`)
-	if rec.Code != http.StatusBadGateway {
-		t.Errorf("PUT without stationId: code %d, want 502", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("PUT without stationId: code %d, want 400", rec.Code)
 	}
 }
 
@@ -254,6 +278,9 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if got["language"] != "en" {
 		t.Errorf("language = %v, want en", got["language"])
 	}
+	if got["closeTelnet"] != false {
+		t.Errorf("closeTelnet = %v, want false", got["closeTelnet"])
+	}
 	// bass comes back as an object (target/actual/min/max).
 	if _, ok := got["bass"]; !ok {
 		t.Errorf("settings missing bass: %+v", got)
@@ -283,6 +310,20 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 	if bass["target"].(float64) != -4 || bass["actual"].(float64) != -4 {
 		t.Errorf("bass after set = %+v, want target/actual -4", bass)
+	}
+
+	rec = do(t, h, "PUT", "/api/settings", `{"closeTelnet":true}`)
+	if rec.Code != 200 {
+		t.Fatalf("PUT closeTelnet on: %d (%s)", rec.Code, rec.Body)
+	}
+	rec = do(t, h, "GET", "/api/settings", "")
+	decodeBody(t, rec, &got)
+	if got["closeTelnet"] != true {
+		t.Errorf("closeTelnet after on = %v, want true", got["closeTelnet"])
+	}
+	rec = do(t, h, "PUT", "/api/settings", `{"closeTelnet":false}`)
+	if rec.Code != 200 {
+		t.Fatalf("PUT closeTelnet off: %d (%s)", rec.Code, rec.Body)
 	}
 }
 
@@ -335,8 +376,8 @@ func TestDeviceSettingsRoundTrip(t *testing.T) {
 func TestSettingsBadBody(t *testing.T) {
 	h, _ := newServer(t)
 	rec := do(t, h, "PUT", "/api/settings", `not json`)
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("PUT bad body: %d, want 502", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT bad body: %d, want 400", rec.Code)
 	}
 	var got struct {
 		Error string `json:"error"`
@@ -410,5 +451,103 @@ func TestUpdateUnavailable(t *testing.T) {
 	decodeBody(t, rec, &got)
 	if got.Error == "" {
 		t.Errorf("expected error message, got %q", rec.Body.String())
+	}
+}
+
+// TestEventsStream drives the SSE endpoint end to end: it runs the server's
+// background hub, puts the sim into a known playing state, connects to
+// /api/events and verifies a live "state" push carrying the now-playing +
+// volume the browser would otherwise have to poll for.
+func TestEventsStream(t *testing.T) {
+	srv, _, _ := newServerSrv(t)
+	h := srv.Handler()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go srv.Run(ctx) // the hub's poll loop; without it nothing is pushed
+
+	ts := httptest.NewServer(h)
+	t.Cleanup(ts.Close)
+
+	// A known playing state so the push has content to assert on.
+	if rec := do(t, h, "POST", "/api/play", `{"stationId":"p100","name":"Local FM"}`); rec.Code != 200 {
+		t.Fatalf("play: %d (%s)", rec.Code, rec.Body)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", ts.URL+"/api/events", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET events: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("events status %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("content-type = %q, want text/event-stream", ct)
+	}
+
+	var snap struct {
+		Now *speaker.NowPlaying `json:"now"`
+		Vol *int                `json:"volume"`
+	}
+	if err := readStateEvent(cancel, resp.Body, 5*time.Second, &snap); err != nil {
+		t.Fatalf("read state event: %v", err)
+	}
+	if snap.Now == nil {
+		t.Fatal("state push carried no now-playing")
+	}
+	if snap.Now.Source != "TUNEIN" || snap.Now.Station != "Local FM" {
+		t.Errorf("pushed now-playing = %+v", snap.Now)
+	}
+	if snap.Vol == nil || *snap.Vol != 25 {
+		t.Errorf("pushed volume = %v, want 25", snap.Vol)
+	}
+}
+
+// readStateEvent reads the SSE stream until the first "state" event and decodes
+// its data into out. It cancels the request and fails if none arrives in time,
+// so a broken stream can't hang the test.
+func readStateEvent(cancel context.CancelFunc, body io.Reader, timeout time.Duration, out any) error {
+	type result struct {
+		data string
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		sc := bufio.NewScanner(body)
+		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+		event := ""
+		for sc.Scan() {
+			line := sc.Text()
+			switch {
+			case strings.HasPrefix(line, "event: "):
+				event = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: "):
+				if event == "state" {
+					ch <- result{data: strings.TrimPrefix(line, "data: ")}
+					return
+				}
+			case line == "":
+				event = ""
+			}
+		}
+		ch <- result{err: sc.Err()}
+	}()
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			return r.err
+		}
+		if r.data == "" {
+			return fmt.Errorf("stream ended before a state event")
+		}
+		return json.Unmarshal([]byte(r.data), out)
+	case <-time.After(timeout):
+		cancel()
+		return fmt.Errorf("timed out waiting for state event")
 	}
 }

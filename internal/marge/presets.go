@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/stein155/retouch/internal/atomicjson"
 )
 
 // presetSlot is one of the speaker's six native TUNEIN preset buttons.
@@ -117,12 +119,7 @@ func (p *presets) persistLocked() {
 		list = append(list, s)
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Button < list[j].Button })
-	if data, err := json.MarshalIndent(list, "", "  "); err == nil {
-		tmp := p.path + ".tmp"
-		if os.WriteFile(tmp, data, 0o644) == nil {
-			_ = os.Rename(tmp, p.path)
-		}
-	}
+	_ = atomicjson.Write(p.path, list, 0o644) // best-effort; caller holds p.mu
 }
 
 // set writes a button through and persists. button must be 1..6.

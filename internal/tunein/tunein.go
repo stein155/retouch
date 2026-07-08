@@ -1,7 +1,8 @@
 // Package tunein is a tiny client for TuneIn's public OPML API
-// (opml.radiotime.com): search for stations and resolve a station id to its
-// playable stream URLs. No key, no account. This is the only external service
-// ReTouch talks to.
+// (opml.radiotime.com): search for stations, resolve a station id to its
+// playable stream URLs, and describe the track currently playing. No key, no
+// account. Now-playing is read primarily from the standard ICY stream metadata
+// (internal/icy); NowPlaying here is the fallback for streams that carry none.
 package tunein
 
 import (
@@ -124,8 +125,8 @@ type Track struct {
 }
 
 // NowPlaying returns the track currently playing on a station via Describe.ashx.
-// Bose's cloud used to feed this metadata to the speaker; since the shutdown the
-// speaker only knows the station name, so ReTouch fetches it from TuneIn instead.
+// It is the fallback for the ICY stream reader (internal/icy): many stations
+// carry no in-stream metadata, and TuneIn sometimes still knows the song.
 // Best-effort: returns a zero Track (no error) when nothing is available.
 func (c *Client) NowPlaying(ctx context.Context, stationID string) (Track, error) {
 	u := fmt.Sprintf("%s/Describe.ashx?id=%s&render=json", base, urlQueryEscape(stationID))
@@ -165,7 +166,7 @@ func (c *Client) NowPlaying(ctx context.Context, stationID string) (Track, error
 
 // Resolve returns the stream URLs for a station id, in TuneIn's order.
 func (c *Client) Resolve(ctx context.Context, stationID string) ([]string, error) {
-	u := fmt.Sprintf("%s/Tune.ashx?id=%s&formats=%s", base, stationID, formats)
+	u := fmt.Sprintf("%s/Tune.ashx?id=%s&formats=%s", base, urlQueryEscape(stationID), formats)
 	body, err := c.get(ctx, u)
 	if err != nil {
 		return nil, err
@@ -177,6 +178,9 @@ func (c *Client) Resolve(ctx context.Context, stationID string) ([]string, error
 		if strings.HasPrefix(line, "http://") || strings.HasPrefix(line, "https://") {
 			urls = append(urls, line)
 		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("tunein: read streams for %s: %w", stationID, err)
 	}
 	if len(urls) == 0 {
 		return nil, fmt.Errorf("tunein: no streams for %s", stationID)
@@ -220,8 +224,10 @@ func (c *Client) get(ctx context.Context, u string) ([]byte, error) {
 }
 
 // urlQueryEscape is a minimal query escaper (avoids importing net/url just for
-// one call and keeps spaces/'&' safe).
+// one call and keeps spaces/'&' safe). '%' must be escaped too, or a literal
+// percent in the query (e.g. "100% NL") yields an invalid escape sequence;
+// Replacer works in a single pass, so the '%' of the other replacements is safe.
 func urlQueryEscape(s string) string {
-	r := strings.NewReplacer(" ", "%20", "&", "%26", "?", "%3F", "#", "%23", "+", "%2B")
+	r := strings.NewReplacer("%", "%25", " ", "%20", "&", "%26", "?", "%3F", "#", "%23", "+", "%2B", "=", "%3D")
 	return r.Replace(s)
 }

@@ -1,4 +1,17 @@
+<p align="center">
+  <img src="docs/readme-header.png" width="820"
+       alt="ReTouch — for SoundTouch. Bose switched off the SoundTouch servers; ReTouch brings the radio back, running entirely on the speaker with nothing else to set up." />
+</p>
+
 # ReTouch · for SoundTouch
+
+<p>
+  <a href="https://github.com/stein155/retouch/releases"><img src="https://img.shields.io/github/v/release/stein155/retouch?color=c47a52&label=release&cacheSeconds=300" alt="Latest release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/stein155/retouch?color=c47a52" alt="License: MIT" /></a>
+  <img src="https://img.shields.io/github/go-mod/go-version/stein155/retouch?color=c47a52&logo=go&logoColor=white" alt="Go version" />
+  <img src="https://img.shields.io/badge/frontend-React%20%2B%20Vite-c47a52?logo=react&logoColor=white" alt="Frontend: React + Vite" />
+  <img src="https://img.shields.io/badge/runs%20on-SoundTouch%20speaker-c47a52" alt="Runs on the SoundTouch speaker" />
+</p>
 
 **Your SoundTouch went quiet when Bose switched off its servers. ReTouch brings
 the radio back — running entirely on the speaker, with nothing else to set up.**
@@ -10,6 +23,15 @@ for multiroom, and keep it updated — all from your phone.
 > "SoundTouch" and "Bose" are trademarks of Bose Corporation. ReTouch is an
 > unofficial community project — use at your own risk.
 
+### Is this you?
+
+If Bose shutting down the SoundTouch servers left you with any of these, ReTouch fixes it:
+
+- Internet radio stopped working and your presets play nothing
+- The SoundTouch app can't find or add music sources anymore
+- The speaker still powers on and plays Bluetooth/AUX, but the "smart" half is dead
+- You looked into a Raspberry Pi or always-on server as a workaround and would rather not
+
 ## No extra hardware. No cloud. No fuss.
 
 The whole thing is one tiny program that lives on a speaker you already own. There
@@ -20,6 +42,21 @@ is nothing else to buy, run, or keep powered on:
 - ❌ **No VPS, no cloud, no account** — nothing leaves your home network
 - ❌ **No desktop app** — after the one-time install you never touch a terminal again
 - 📱 **It's just a web page** — open the link, *Add to Home Screen*, and use it like any app
+
+### How that compares to the usual approach
+
+Most ways to revive a SoundTouch put a second box on your network — a Raspberry Pi
+or an always-on computer that has to keep running for the speaker to work. ReTouch
+takes the other route and lives on the speaker itself:
+
+| | The usual approach | **ReTouch** |
+|---|---|---|
+| Where it runs | A separate Pi / PC / server | **On the speaker itself** |
+| Extra hardware to buy | Usually yes | **None** |
+| Something always-on | Yes — if it's off, the radio's off | **No — just the speaker** |
+| Where your data goes | Often via an external box or account | **Stays on your home network** |
+| Setup | Flash an image, wire it up, maintain it | **One install line, then a web app** |
+| Reversible | Varies | **Yes — one uninstall script** |
 
 ## Screenshots
 
@@ -36,6 +73,10 @@ is nothing else to buy, run, or keep powered on:
   in sync, using Bose's own native zones
 - 🏠 **Apple Home (HomeKit)** — the speaker shows up in the Home app and Siri as a
   radio you can turn on/off, set the volume on, and pick a preset/station on
+- 🏠 **Home Assistant (MQTT)** — connect the speaker to your MQTT broker and it
+  appears in Home Assistant automatically, with volume, station switching, transport,
+  power on/off, and now-playing — plus a native update entity that notifies you when a
+  new ReTouch release is out and installs it over the air
 - ⚙️ **Settings** — speaker name, bass, and the app's language
 - ⬆️ **Over-the-air updates** — one tap in the app; the speaker fetches the latest
   release and relaunches ReTouch in a few seconds (no reboot)
@@ -80,6 +121,15 @@ speaker, and enter the **setup code** shown in ReTouch's Settings (also availabl
 This only stands in for HomeKit — the speaker still plays radio itself, exactly as
 before. It uses one Go dependency (`github.com/brutella/hap`) for the HomeKit protocol;
 the rest of ReTouch stays dependency-free.
+
+## Home Assistant (MQTT)
+
+**Home Assistant** is optional. Turn it on under Settings → Home Assistant (MQTT),
+point it at your broker, and ReTouch publishes MQTT discovery so the speaker shows
+up in Home Assistant as one device — no YAML. Home Assistant has no MQTT
+media_player, so the speaker is exposed as a set of standard entities (a volume
+number, a preset selector, transport buttons, a power switch, and now-playing
+sensors) grouped under the one device.
 
 ## Set it up once
 
