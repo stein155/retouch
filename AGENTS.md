@@ -32,6 +32,8 @@ internal/mqtt/       tiny stdlib-only MQTT 3.1.1 client (publish / subscribe, Qo
 internal/habridge/   Home Assistant MQTT bridge: models the speaker as an HA device
 internal/auth/       password hashing (stdlib PBKDF2) + session tokens for the settings login
 internal/settings/   persisted app settings (name, bass, language, MQTT config, settings password)
+internal/release/    shared release fetch+verify (download, SHA256SUMS, ed25519 sig, SSRF-safe transport)
+internal/plugins/    plugin host: download/verify/supervise plugin binaries; reverse-proxy their config API
 internal/store/      small on-disk state (presets, etc.)
 internal/web/        JSON API + the embedded web app (built from frontend/)
 internal/sim/        SoundTouch speaker simulator (REST :8090 + CLI :17000) for tests
