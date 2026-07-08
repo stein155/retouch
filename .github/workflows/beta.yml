@@ -171,7 +171,9 @@ jobs:
 
       - name: Comment install hint
         run: |
-          gh pr comment "$PR" --body "🧪 Beta built for this PR. On a speaker already running ReTouch, open the app → **Settings → Updates**, pick **PR #${PR}**, and update — no computer needed. Comment \`/beta\` again to rebuild after new pushes; the beta is removed when the PR closes."
+          # --repo is required: this job never checks out the repo, so gh has no
+          # git remote to infer it from and would fail with "not a git repository".
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "🧪 Beta built for this PR. On a speaker already running ReTouch, open the app → **Settings → Updates**, pick **PR #${PR}**, and update — no computer needed. Comment \`/beta\` again to rebuild after new pushes; the beta is removed when the PR closes."
 
   # Tear down the beta when the PR closes so stale prereleases don't pile up.
   cleanup:
