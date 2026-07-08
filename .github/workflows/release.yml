@@ -64,7 +64,9 @@ jobs:
           rm -f ed25519.pem sig.raw
 
       - name: Attach binary + checksums to the release
-        uses: softprops/action-gh-release@v3
+        # Pinned to a commit SHA: this action holds contents:write, so a retagged
+        # v3 must not be able to silently change what runs in the release job.
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
           tag_name: ${{ github.event.release.tag_name || github.ref_name }}
           files: |
