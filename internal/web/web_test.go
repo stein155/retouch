@@ -33,13 +33,20 @@ import (
 // tests make no outbound network calls.
 func newServer(t *testing.T) (http.Handler, *sim.Speaker) {
 	t.Helper()
-	srv, sp := newServerSrv(t)
+	srv, sp, _ := newServerSrv(t)
 	return srv.Handler(), sp
 }
 
-// newServerSrv is newServer but hands back the *web.Server itself, for tests
-// that need to drive its background loop (Run) as well as its HTTP handler.
-func newServerSrv(t *testing.T) (*web.Server, *sim.Speaker) {
+// newServerSrv is newServer but hands back the *web.Server itself (for tests
+// that need to drive its background loop, Run) plus its home/state dir.
+func newServerSrv(t *testing.T) (*web.Server, *sim.Speaker, string) {
+	t.Helper()
+	return newServerAt(t, t.TempDir())
+}
+
+// newServerAt is newServerSrv over a caller-owned state dir, so a test can
+// build a second server over the same dir to simulate a restart.
+func newServerAt(t *testing.T, dir string) (*web.Server, *sim.Speaker, string) {
 	t.Helper()
 	sp := sim.New()
 
@@ -53,7 +60,6 @@ func newServerSrv(t *testing.T) (*web.Server, *sim.Speaker) {
 	host := net.JoinHostPort(u.Hostname(), u.Port())
 	sc := speaker.New(host)
 
-	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "presets.json"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -65,7 +71,10 @@ func newServerSrv(t *testing.T) (*web.Server, *sim.Speaker) {
 	// /api/version reports updatable:false and /api/update returns 409 without
 	// ever reaching GitHub.
 	srv := web.New(tunein.New(), sc, st, set, "test", dir, log)
-	return srv, sp
+	// Toggling closeTelnet applies a firewall rule immediately; stub it out so
+	// tests never run iptables.
+	srv.SetTelnetFirewall(func(bool) error { return nil })
+	return srv, sp, dir
 }
 
 // do runs a request against the handler and returns the recorder.
@@ -450,7 +459,7 @@ func TestUpdateUnavailable(t *testing.T) {
 // /api/events and verifies a live "state" push carrying the now-playing +
 // volume the browser would otherwise have to poll for.
 func TestEventsStream(t *testing.T) {
-	srv, _ := newServerSrv(t)
+	srv, _, _ := newServerSrv(t)
 	h := srv.Handler()
 
 	ctx, cancel := context.WithCancel(context.Background())

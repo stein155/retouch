@@ -24,7 +24,8 @@ beforeEach(() => {
   api.getNowPlaying.mockResolvedValue({ standby: true });
   api.getVolume.mockResolvedValue(30);
   api.getPresets.mockResolvedValue(PRESETS);
-  // HomePage + SettingsSheet read settings.
+  // HomePage + SettingsSheet read settings; the sheet checks the login first.
+  api.getAuth.mockResolvedValue({ hasPassword: false, authenticated: true });
   api.getSettings.mockResolvedValue({ name: 'Kitchen', model: 'ST20', language: 'en', host: 'kitchen.local', bass: { actual: 0, min: -9, max: 0, default: 0 } });
   api.getVersion.mockResolvedValue({ version: '1.2.3', updatable: false });
   // SettingsSheet also fetches beta builds on open.

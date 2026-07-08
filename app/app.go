@@ -133,7 +133,16 @@ func Run() {
 	defer stop()
 
 	// Keep the speaker paired to our marge account so native sources stay enabled.
-	go autopair.New(bc, info.Account, autopair.DefaultAuthToken, *pairEvery, logger.With("comp", "autopair")).Run(ctx)
+	pairer := autopair.New(bc, info.Account, autopair.DefaultAuthToken, *pairEvery, logger.With("comp", "autopair"))
+	// A speaker that lost its pairing was factory-reset (physical access): that is
+	// the recovery path for a forgotten settings password — clear it and reopen
+	// telnet before re-pairing.
+	pairer.OnFactoryReset(func() {
+		if err := webSrv.RecoverAfterFactoryReset(); err != nil {
+			logger.Warn("factory-reset recovery failed", "err", err)
+		}
+	})
+	go pairer.Run(ctx)
 
 	// Home Assistant MQTT bridge: reads its config from the settings store on every
 	// (re)connect, so the web UI's MQTT section takes effect via bridge.Reload().

@@ -15,6 +15,16 @@ import (
 type Settings struct {
 	Language string `json:"language"` // UI language code, e.g. "en", "nl"
 	MQTT     MQTT   `json:"mqtt"`     // Home Assistant MQTT bridge config
+	Auth     Auth   `json:"auth"`     // admin password for the settings UI
+}
+
+// Auth holds the hashed admin password that gates the settings UI. A zero Auth
+// (empty PasswordHash) means no password is set and settings stay open, which is
+// also what old settings files without the field decode to.
+type Auth struct {
+	PasswordHash string `json:"passwordHash"` // hex PBKDF2 key; "" = no password
+	PasswordSalt string `json:"passwordSalt"` // hex random salt
+	Iterations   int    `json:"iterations"`   // PBKDF2 work factor used for this hash
 }
 
 // MQTT is the persisted configuration for the Home Assistant MQTT bridge (see
@@ -69,6 +79,15 @@ func (s *Store) SetMQTT(cfg MQTT) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.s.MQTT = cfg
+	return s.persistLocked()
+}
+
+// SetAuth replaces the admin password hash and persists it. A zero Auth clears
+// the password (settings open again).
+func (s *Store) SetAuth(a Auth) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.s.Auth = a
 	return s.persistLocked()
 }
 

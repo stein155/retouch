@@ -25,7 +25,16 @@ type Pairer struct {
 	token    string
 	interval time.Duration
 	log      *slog.Logger
+	onReset  func() // fired once per unpaired episode; see OnFactoryReset
+	fired    bool   // onReset already fired for the current unpaired episode
 }
+
+// OnFactoryReset registers a callback fired when the speaker reports no marge
+// account — which, once ReTouch has paired it, means the user factory-reset the
+// speaker (physical access). The web layer uses this to clear the settings
+// password and reopen telnet. Fired once per unpaired episode, before re-pairing.
+// Call before Run.
+func (p *Pairer) OnFactoryReset(f func()) { p.onReset = f }
 
 // New builds a Pairer. account is the marge account UUID to keep the speaker paired to;
 // if empty, Run is a no-op (we have no account to assert).
@@ -77,7 +86,12 @@ func (p *Pairer) check(ctx context.Context) bool {
 	}
 	if info.Account != "" {
 		p.log.Debug("autopair: already paired", "account", info.Account)
+		p.fired = false // paired again; a future unpaired episode may fire anew
 		return true
+	}
+	if p.onReset != nil && !p.fired {
+		p.fired = true
+		p.onReset()
 	}
 	if err := p.speaker.SetMargeAccount(c, p.account, p.token); err != nil {
 		p.log.Warn("autopair: setMargeAccount failed (will retry)", "account", p.account, "err", err)

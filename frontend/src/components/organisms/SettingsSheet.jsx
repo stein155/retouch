@@ -20,6 +20,7 @@ import { useI18n, LANGS } from '../../lib/i18n';
 import {
   getSettings, saveSettings, getVersion, getReleases, startUpdate,
   findSpeakers, groupSpeaker, ungroupSpeaker, getMqttStatus,
+  getAuth, login, logout, setPassword,
 } from '../../lib/api';
 
 const fmtBass = (v) => (v > 0 ? '+' + v : String(v));
@@ -187,7 +188,7 @@ function MultiroomSection({ open }) {
 // (a reconnect churns the broker link, so it's a deliberate action, not per-key),
 // and polls the live connection status while enabled. The password is never sent
 // back to the browser, so an empty password field keeps the stored one.
-function MqttSection({ open }) {
+function MqttSection({ open, onAuthError }) {
   const { t } = useI18n();
   const [cfg, setCfg] = useState(null);        // null until loaded
   const [hasPassword, setHasPassword] = useState(false);
@@ -245,6 +246,8 @@ function MqttSection({ open }) {
       if (cfg.password) setHasPassword(true);
       set('password', '');
       setTimeout(async () => { const s = await getMqttStatus(); if (s) setStatus(s); }, 1200);
+    } catch (e) {
+      if (e?.status === 401) onAuthError?.(); // session expired mid-edit
     } finally {
       setSaving(false);
     }
@@ -313,6 +316,126 @@ function MqttSection({ open }) {
   );
 }
 
+// Login gate shown instead of the settings when a password is set and this
+// browser has no (valid) session. The forgot-password path is deliberately not
+// a form: a factory reset of the speaker clears the password (physical access
+// is the proof of ownership), which the hint below explains.
+function LoginView({ onUnlocked }) {
+  const { t } = useI18n();
+  const [pw, setPw] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (busy || !pw) return;
+    setBusy(true);
+    setError(false);
+    try {
+      await login(pw);
+      onUnlocked();
+    } catch {
+      setError(true);
+      setPw('');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Form as="form" onSubmit={submit}>
+      <FieldHint style={{ marginTop: 0, marginBottom: 8 }}>{t('loginHint')}</FieldHint>
+      <FieldCard>
+        <FieldRow>
+          <FieldRowLabel htmlFor="login-pass">{t('password')}</FieldRowLabel>
+          <FieldRowInput
+            id="login-pass"
+            type="password"
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            autoComplete="current-password"
+            autoFocus
+          />
+        </FieldRow>
+      </FieldCard>
+      {error && <FieldHint $error>{t('wrongPassword')}</FieldHint>}
+      <Button $variant="update" type="submit" disabled={busy || !pw} style={{ marginTop: 8 }}>
+        {busy ? <Spinner $scan /> : <Icon.shield width="18" height="18" />}
+        <span>{t('login')}</span>
+      </Button>
+      <FieldHint style={{ marginTop: 10 }}>{t('forgotPasswordHint')}</FieldHint>
+    </Form>
+  );
+}
+
+// Set / change the settings password (security page). Setting the first
+// password locks the settings for everyone else on the network; the server
+// hands this browser a session so the user isn't locked out of the page they
+// are looking at.
+function PasswordSection({ hasPassword, onChanged, onAuthError }) {
+  const { t } = useI18n();
+  const [current, setCurrent] = useState('');
+  const [pw1, setPw1] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null); // { error, text }
+
+  const submit = async () => {
+    if (busy) return;
+    if (pw1.trim().length < 4) { setMsg({ error: true, text: t('passwordTooShort') }); return; }
+    if (pw1 !== pw2) { setMsg({ error: true, text: t('passwordMismatch') }); return; }
+    setBusy(true);
+    setMsg(null);
+    try {
+      await setPassword({ currentPassword: current, newPassword: pw1 });
+      setCurrent(''); setPw1(''); setPw2('');
+      setMsg({ error: false, text: t('passwordSaved') });
+      onChanged();
+    } catch (e) {
+      // 401 with a live form means the current password was wrong — unless the
+      // session itself expired ("login required"), which sends us back to login.
+      if (e?.status === 401 && e.message === 'login required') { onAuthError?.(); return; }
+      setMsg({ error: true, text: e?.status === 401 ? t('wrongPassword') : t('passwordSaveError') });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <FormSection>{hasPassword ? t('changePassword') : t('setPassword')}</FormSection>
+      <FieldHint style={{ marginTop: 0, marginBottom: 8 }}>{t('passwordHint')}</FieldHint>
+      <FieldCard>
+        {hasPassword && (
+          <FieldRow>
+            <FieldRowLabel htmlFor="pw-current">{t('currentPassword')}</FieldRowLabel>
+            <FieldRowInput id="pw-current" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
+          </FieldRow>
+        )}
+        <FieldRow>
+          <FieldRowLabel htmlFor="pw-new">{t('newPassword')}</FieldRowLabel>
+          <FieldRowInput id="pw-new" type="password" value={pw1} onChange={(e) => setPw1(e.target.value)} autoComplete="new-password" />
+        </FieldRow>
+        <FieldRow>
+          <FieldRowLabel htmlFor="pw-confirm">{t('confirmPassword')}</FieldRowLabel>
+          <FieldRowInput id="pw-confirm" type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} autoComplete="new-password" />
+        </FieldRow>
+      </FieldCard>
+      {msg && <FieldHint $error={msg.error}>{msg.text}</FieldHint>}
+      <Button
+        $variant="update"
+        onClick={submit}
+        disabled={busy || !pw1 || (hasPassword && !current)}
+        style={{ marginTop: 8 }}
+      >
+        {busy ? <Spinner $scan /> : <Icon.shield width="18" height="18" />}
+        <span>{hasPassword ? t('changePassword') : t('setPassword')}</span>
+      </Button>
+      {!hasPassword && <FieldHint style={{ marginTop: 10 }}>{t('forgotPasswordHint')}</FieldHint>}
+    </>
+  );
+}
+
 // Shimmering placeholder shown while the sheet's first settings fetch is in
 // flight. Mirrors the real form's section rhythm so the layout doesn't jump
 // when the data lands.
@@ -357,12 +480,15 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
   const [upd, setUpd] = useState({ phase: 'idle', text: '' }); // idle | busy | done | error
   const [loading, setLoading] = useState(true); // true until the first settings fetch resolves
   const [page, setPage] = useState(null); // null = category menu; else the open subpage key
+  const [auth, setAuth] = useState(null); // { hasPassword, authenticated } | null = unknown
   const nameTimer = useRef(null);
   const pollRef = useRef(null);
   const pollGen = useRef(0); // bumped to invalidate a poll tick that is mid-await
 
-  useEffect(() => {
-    if (!open) { setLoading(true); setPage(null); return; }
+  // A password is set and this browser has no session: show the login gate.
+  const locked = !!auth && auth.hasPassword && !auth.authenticated;
+
+  const loadAll = useCallback(() => {
     getSettings().then((s) => {
       setLoading(false);
       if (!s) return;
@@ -381,7 +507,29 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     }).catch(() => setLoading(false));
     getVersion().then((v) => v && setVer(v));
     getReleases().then((r) => { if (r) setBetas(r.betas || []); });
-  }, [open]);
+  }, []);
+
+  useEffect(() => {
+    if (!open) { setLoading(true); setPage(null); setAuth(null); return; }
+    // Auth first: when the settings are locked, don't load (the API would only
+    // return the restricted view anyway) — show the login gate instead.
+    getAuth().then((a) => {
+      const cur = a || { hasPassword: false, authenticated: true };
+      setAuth(cur);
+      if (cur.hasPassword && !cur.authenticated) { setLoading(false); return; }
+      loadAll();
+    });
+  }, [open, loadAll]);
+
+  // A 401 on any live-apply call means the session expired (or the password was
+  // set from another browser): drop back to the login gate.
+  const onAuthExpired = useCallback(() => {
+    setAuth({ hasPassword: true, authenticated: false });
+    setPage(null);
+  }, []);
+  const saveGuarded = useCallback((patch) => {
+    saveSettings(patch).catch((e) => { if (e?.status === 401) onAuthExpired(); });
+  }, [onAuthExpired]);
 
   // Stop any version poll when the sheet closes or unmounts. Bumping pollGen
   // also cancels a tick that is mid-await (clearTimeout alone can't stop that:
@@ -429,6 +577,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     setUpd({ phase: 'busy', text: t('updating') });
     let res;
     try { res = await startUpdate(selTag || undefined); } catch { setUpd({ phase: 'error', text: t('updateError') }); return; }
+    if (res.status === 401) { setUpd({ phase: 'idle', text: '' }); onAuthExpired(); return; }
     if (res.status === 200 && res.body.status === 'current') {
       setUpd({ phase: 'done', text: t('upToDate') });
       return;
@@ -470,30 +619,49 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     clearTimeout(nameTimer.current);
     nameTimer.current = setTimeout(() => {
       const nm = v.trim();
-      if (nm) { saveSettings({ name: nm }); onNameChange && onNameChange(nm); }
+      if (nm) { saveGuarded({ name: nm }); onNameChange && onNameChange(nm); }
     }, 600);
   };
 
-  const onBass = (v) => { setBass(v); saveSettings({ bass: v }); };
+  const onBass = (v) => { setBass(v); saveGuarded({ bass: v }); };
 
   // Treble snaps to the step the speaker accepts.
   const onTreble = (v) => {
     const step = trebleCaps.step || 1;
     const snapped = Math.round(v / step) * step;
     setTreble(snapped);
-    saveSettings({ treble: snapped });
+    saveGuarded({ treble: snapped });
   };
 
   const onWifiOpt = () => {
     const next = !wifiOpt;
     setWifiOpt(next);
-    saveSettings({ wifiOptimization: next });
+    saveGuarded({ wifiOptimization: next });
   };
 
   const onCloseTelnet = async () => {
     const next = !closeTelnet;
     setCloseTelnet(next);
-    try { await saveSettings({ closeTelnet: next }); } catch { setCloseTelnet(!next); }
+    try {
+      await saveSettings({ closeTelnet: next });
+    } catch (e) {
+      setCloseTelnet(!next);
+      if (e?.status === 401) onAuthExpired();
+    }
+  };
+
+  // Login succeeded (or the first password was just set): load the real
+  // settings this browser couldn't see while locked.
+  const onUnlocked = useCallback(() => {
+    setAuth({ hasPassword: true, authenticated: true });
+    setLoading(true);
+    loadAll();
+  }, [loadAll]);
+
+  const onLogout = async () => {
+    try { await logout(); } catch { /* the cookie may already be gone */ }
+    setAuth({ hasPassword: true, authenticated: false });
+    setPage(null);
   };
 
   // Categories shown on the root menu. Network and Software only appear when the
@@ -618,9 +786,15 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
       </>
     ),
     multiroom: <MultiroomSection open={open && page === 'multiroom'} />,
-    mqtt: <MqttSection open={open && page === 'mqtt'} />,
+    mqtt: <MqttSection open={open && page === 'mqtt'} onAuthError={onAuthExpired} />,
     security: (
       <>
+        <PasswordSection
+          hasPassword={!!auth?.hasPassword}
+          onChanged={() => setAuth({ hasPassword: true, authenticated: true })}
+          onAuthError={onAuthExpired}
+        />
+        <FormSection style={{ marginTop: 22 }}>{t('closeTelnet')}</FormSection>
         <FieldCard>
           <FieldRow>
             <FieldRowLabel as="span">{t('closeTelnet')}</FieldRowLabel>
@@ -633,6 +807,12 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
           </FieldRow>
         </FieldCard>
         <FieldHint>{t('closeTelnetHint')}</FieldHint>
+        {auth?.hasPassword && (
+          <Button $variant="update" onClick={onLogout} style={{ marginTop: 22 }}>
+            <Icon.shield width="18" height="18" />
+            <span>{t('logout')}</span>
+          </Button>
+        )}
       </>
     ),
     plugins: <PluginsSection open={open && page === 'plugins'} />,
@@ -710,6 +890,8 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
         <SheetBody>
           {loading ? (
             <SettingsSkeleton />
+          ) : locked ? (
+            <LoginView onUnlocked={onUnlocked} />
           ) : page ? (
             <Form>{pages[page]}</Form>
           ) : (

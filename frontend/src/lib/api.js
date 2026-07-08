@@ -23,7 +23,9 @@ async function send(path, method, body) {
   if (!r.ok) {
     let msg = `${method} ${path} -> ${r.status}`;
     try { msg = (await r.json()).error || msg; } catch { /* ignore */ }
-    throw new Error(msg);
+    const err = new Error(msg);
+    err.status = r.status; // 401 = login required; callers show the login view
+    throw err;
   }
   return r.status === 204 ? null : r.json().catch(() => null);
 }
@@ -169,6 +171,29 @@ export async function getSettings() {
 // saveSettings applies any subset of { name, bass, language } (live-apply).
 export async function saveSettings(patch) {
   return send('/api/settings', 'PUT', patch);
+}
+
+// Settings login. Settings are open until a password is set; after that the
+// settings side of the API answers 401 without a session cookie.
+
+// getAuth returns { hasPassword, authenticated }.
+export async function getAuth() {
+  try { return await getJSON('/api/auth'); } catch { return null; }
+}
+
+// login exchanges the password for a session cookie. Throws (status 401) on a
+// wrong password.
+export async function login(password) {
+  return send('/api/auth/login', 'POST', { password });
+}
+
+export async function logout() {
+  return send('/api/auth/logout', 'POST');
+}
+
+// setPassword sets (no currentPassword needed) or changes the settings password.
+export async function setPassword({ currentPassword, newPassword }) {
+  return send('/api/auth/password', 'POST', { currentPassword, newPassword });
 }
 
 // getMqttStatus returns { connected, lastError } for the Home Assistant MQTT link.
