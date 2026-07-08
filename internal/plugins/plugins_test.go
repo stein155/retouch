@@ -47,7 +47,7 @@ func TestInstallAndRemove(t *testing.T) {
 	m.client = ts.Client()
 	m.apiBase, m.dlBase = ts.URL, ts.URL
 
-	entry := CatalogEntry{Name: "ring", Repo: "milderdev/retouch-ring", Asset: "ring-armv7l"}
+	entry := CatalogEntry{Name: "ring", Repo: "stein155/retouch-ring", Asset: "ring-armv7l"}
 	if err := m.Install(context.Background(), entry, ""); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestInstallAndRemove(t *testing.T) {
 	}
 
 	// A tampered checksum must be rejected and leave nothing behind.
-	bad := CatalogEntry{Name: "evil", Repo: "milderdev/retouch-ring", Asset: "ring-armv7l"}
+	bad := CatalogEntry{Name: "evil", Repo: "stein155/retouch-ring", Asset: "ring-armv7l"}
 	m2 := testManager(t)
 	m2.client = ts.Client()
 	m2.apiBase = ts.URL

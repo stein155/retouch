@@ -33,7 +33,7 @@ func Catalog() []CatalogEntry {
 			Name:        "ring",
 			Title:       "Ring chime",
 			Description: "Play a chime through this speaker when a Ring doorbell is pressed or motion is detected.",
-			Repo:        "milderdev/retouch-ring",
+			Repo:        "stein155/retouch-ring",
 			Asset:       "retouch-ring-armv7l",
 		},
 	}
