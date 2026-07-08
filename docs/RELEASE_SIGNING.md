@@ -1,4 +1,4 @@
-# Release signing (optional, recommended)
+# Release signing
 
 The agent's self-update downloads `retouch-armv7l` and `SHA256SUMS` over HTTPS and
 checks the binary against the checksum. TLS proves the files came from GitHub and
@@ -11,10 +11,26 @@ Signing closes that gap: CI signs `SHA256SUMS` with an ed25519 **private** key, 
 the agent verifies the signature with the **public** key compiled into it. An
 attacker who can publish a release still can't forge the signature.
 
-It is **off by default** (the update path is unchanged) and turns on only once both
-halves below are in place.
+**Status: enabled.** A public key is compiled into `releasePublicKey`
+(`internal/web/web.go`), so agents built from this commit onward refuse a real
+release whose `SHA256SUMS` isn't validly signed.
+
+> **Required before the next release:** the `RELEASE_SIGNING_KEY` repository secret
+> (the base64 private key) must be set, or the release workflow won't attach
+> `SHA256SUMS.sig` and agents already upgraded to a signed build will be unable to
+> install the next release. See step 3 below.
+
+**Betas are exempt.** The Beta Build workflow builds untrusted PR code and must
+never be given the signing key, so betas ship no `SHA256SUMS.sig`. The agent skips
+signature enforcement for `beta-pr-<n>` tags (they stay maintainer-gated, opt-in
+prereleases over TLS + checksum); see `installRelease` in `internal/web/web.go`.
 
 ## One-time setup
+
+Steps 1–2 are already done for the active key (the public half is in
+`releasePublicKey`). **Step 3 is the outstanding action**: set the
+`RELEASE_SIGNING_KEY` secret to the base64 of the matching private key. The steps
+below are the full reference (also used when rotating the key):
 
 1. Generate a keypair (keep `ed25519.pem` secret; never commit it):
 

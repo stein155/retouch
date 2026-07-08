@@ -65,7 +65,7 @@ const (
 // Empty (the default) keeps the prior behaviour (TLS + checksum only). To enable
 // signing, generate a keypair, put the public half here, and sign releases in CI
 // with the private half — see docs/RELEASE_SIGNING.md.
-const releasePublicKey = ""
+const releasePublicKey = "vmNYVuOZnDN7P7ipK43aJNZ2R6tT1IRX6TXvw7+IvX8="
 
 type releaseInfo struct {
 	TagName    string `json:"tag_name"`
@@ -785,8 +785,11 @@ func (s *Server) installRelease(ctx context.Context, tag string) error {
 		return err
 	}
 	// When signing is enabled, the checksums file itself must carry a valid
-	// signature before we trust any checksum in it.
-	if releasePublicKey != "" {
+	// signature before we trust any checksum in it. Betas are exempt: they are
+	// built from PR code by the Beta Build workflow, which must never be given
+	// the release signing key, so a beta ships no SHA256SUMS.sig. Betas stay
+	// gated by being maintainer-triggered, opt-in prereleases over TLS + checksum.
+	if _, isBeta := betaPR(tag); releasePublicKey != "" && !isBeta {
 		sig := filepath.Join(s.homeDir, "SHA256SUMS.sig")
 		if err := s.downloadFile(ctx, base+"/SHA256SUMS.sig", sig, 0o644); err != nil {
 			_ = os.Remove(newBin)
