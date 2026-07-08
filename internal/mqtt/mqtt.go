@@ -118,10 +118,15 @@ func Connect(ctx context.Context, opts Options) (*Client, error) {
 		done:      make(chan struct{}),
 	}
 
-	// Bound the handshake by the caller's context.
-	if dl, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(dl)
+	// Bound the handshake with a hard deadline so a broker that accepts the TCP
+	// connection but never answers CONNECT can't wedge readConnack forever (the
+	// caller's ctx is app-lifetime and usually has no deadline). Honour the
+	// caller's deadline too if it is sooner.
+	hsDeadline := time.Now().Add(opts.DialTimeout)
+	if dl, ok := ctx.Deadline(); ok && dl.Before(hsDeadline) {
+		hsDeadline = dl
 	}
+	_ = conn.SetDeadline(hsDeadline)
 	if err := c.writeConnect(opts); err != nil {
 		conn.Close()
 		return nil, err

@@ -180,7 +180,7 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		startedAt:  time.Now(),
 		ui:         http.FileServer(http.FS(sub)),
 		proxy:      &http.Client{Timeout: 12 * time.Second, Transport: publicOnlyTransport()},
-		stream:     &http.Client{Timeout: 12 * time.Second},
+		stream:     &http.Client{Timeout: 12 * time.Second, Transport: publicOnlyTransport()},
 		npCache:    map[string]npCacheEntry{},
 		streamURLs: map[string]streamURLEntry{},
 	}
@@ -1112,11 +1112,20 @@ func (s *Server) relay(w http.ResponseWriter, r *http.Request, target, fallbackC
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	} else {
-		w.Header().Set("Content-Type", fallbackCT)
+	// Never reflect the upstream Content-Type verbatim: this proxy fetches
+	// attacker-chosen public URLs, and echoing e.g. "text/html" back on the
+	// speaker's own origin would let a crafted logo URL execute script here.
+	// Keep the upstream type only when it stays within the expected family
+	// (e.g. image/jpeg for a logo), otherwise fall back to the safe default,
+	// and forbid MIME sniffing so the declared type is authoritative.
+	ct := fallbackCT
+	if up := resp.Header.Get("Content-Type"); up != "" {
+		if fam := fallbackCT[:strings.IndexByte(fallbackCT, '/')+1]; strings.HasPrefix(up, fam) {
+			ct = up
+		}
 	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, io.LimitReader(resp.Body, max))
 }

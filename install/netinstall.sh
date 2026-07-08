@@ -51,6 +51,13 @@ sha256_of() {
 # run can tell "gave up on this exact release" from "a newer release is out, retry".
 giveup() { echo "${TAG:-}" >"$GAVEUP"; log "$*; giving up (target ${TAG:-?})"; exit 0; }
 
+# RETOUCH_RELEASE_BASE / RETOUCH_TARGET_TAG are injected by install.sh into the root
+# boot command and then spliced into the download URLs below. install.sh already
+# charset-checks them, but re-validate here (defense in depth) so a tampered boot
+# command can't feed shell metacharacters or a malformed value into curl/sed.
+case "${RETOUCH_RELEASE_BASE:-}" in *[!A-Za-z0-9:/._~-]*) log "RETOUCH_RELEASE_BASE has invalid characters; ignoring update"; exit 0 ;; esac
+case "${RETOUCH_TARGET_TAG:-}"   in *[!A-Za-z0-9._-]*)    log "RETOUCH_TARGET_TAG has invalid characters; ignoring update"; exit 0 ;; esac
+
 LAUNCH="$BIN -speaker-host 127.0.0.1 -listen $WEB_LISTEN -listen-marge $MARGE_LISTEN -marge-base $MARGE_BASE -presets $HOME_DIR/presets.json"
 
 start_agent() {

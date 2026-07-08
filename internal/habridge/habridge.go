@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,7 +62,7 @@ func (c Config) addr() string {
 			port = 1883
 		}
 	}
-	return c.Host + ":" + strconv.Itoa(port)
+	return net.JoinHostPort(c.Host, strconv.Itoa(port))
 }
 
 // availabilityOnline / availabilityOffline are the availability payloads (also the
@@ -72,6 +73,9 @@ const (
 	pollInterval        = 5 * time.Second
 	reconnectDelay      = 15 * time.Second
 	updateCheckInterval = 6 * time.Hour
+	// maxInflightHandlers caps concurrent inbound-message handlers so a flood of
+	// PUBLISHes from a misbehaving broker can't exhaust memory on the speaker.
+	maxInflightHandlers = 8
 )
 
 // Bridge runs the MQTT integration for the life of the process.
@@ -215,6 +219,13 @@ func (b *Bridge) serve(ctx context.Context, cfg Config) error {
 	}
 	tp := topics{base: base}
 
+	// Route each inbound message on a fresh goroutine so a slow speaker call never
+	// stalls the MQTT read loop (and thus other commands / the birth message). The
+	// semaphore caps concurrent handlers: a hostile or misbehaving broker could
+	// otherwise stream PUBLISHes faster than the ~12 s speaker calls drain them and
+	// OOM the speaker with goroutines + payload copies. Excess messages are dropped.
+	sem := make(chan struct{}, maxInflightHandlers)
+
 	client, err := mqtt.Connect(ctx, mqtt.Options{
 		Addr:      cfg.addr(),
 		ClientID:  "retouch-" + info.DeviceID,
@@ -224,10 +235,18 @@ func (b *Bridge) serve(ctx context.Context, cfg Config) error {
 		KeepAlive: 30 * time.Second,
 		Will:      &mqtt.Will{Topic: tp.availability(), Payload: []byte(availabilityOffline), Retain: true},
 		Handler: func(c *mqtt.Client, topic string, payload []byte) {
-			// Route on a fresh goroutine so a slow speaker call never stalls the
-			// MQTT read loop (and thus other commands / the birth message). The
-			// client is passed in, so there is no race on capturing it.
-			go b.handle(ctx, c, tp, disc, info, topic, string(payload))
+			select {
+			case sem <- struct{}{}:
+			default:
+				b.log.Warn("mqtt handler queue full; dropping message", "topic", topic)
+				return
+			}
+			// Copy the payload: the read loop reuses its buffer after this returns.
+			p := string(payload)
+			go func() {
+				defer func() { <-sem }()
+				b.handle(ctx, c, tp, disc, info, topic, p)
+			}()
 		},
 	})
 	if err != nil {
