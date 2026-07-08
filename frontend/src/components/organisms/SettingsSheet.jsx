@@ -7,6 +7,7 @@ import { Button } from '../atoms/Button';
 import { Toggle } from '../atoms/Toggle';
 import { BassSlider } from '../molecules/BassSlider';
 import { SpeakerRow } from '../molecules/SpeakerRow';
+import { PluginsSection } from './PluginsSection';
 import {
   SheetScrim, SheetEl, SheetHandle, SheetBody, SheetHeader,
 } from '../molecules/Sheet';
@@ -503,6 +504,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
     (wifiOpt !== null || network) && { key: 'network', icon: Icon.wifi },
     { key: 'multiroom', icon: Icon.layers },
     { key: 'mqtt', icon: Icon.globe },
+    { key: 'plugins', icon: Icon.settings },
     { key: 'security', icon: Icon.shield },
     ver && { key: 'software', icon: Icon.download },
   ].filter(Boolean);
@@ -633,6 +635,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
         <FieldHint>{t('closeTelnetHint')}</FieldHint>
       </>
     ),
+    plugins: <PluginsSection open={open && page === 'plugins'} />,
     software: ver && (
       <>
         <FieldCard>

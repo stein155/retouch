@@ -5,11 +5,8 @@ package web
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/sha256"
 	"embed"
-	"encoding/base64"
-	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -25,14 +22,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
-
-	"encoding/json"
 
 	"github.com/stein155/retouch/internal/artwork"
 	"github.com/stein155/retouch/internal/discover"
 	"github.com/stein155/retouch/internal/icy"
+	"github.com/stein155/retouch/internal/plugins"
+	"github.com/stein155/retouch/internal/release"
 	"github.com/stein155/retouch/internal/settings"
 	"github.com/stein155/retouch/internal/speaker"
 	"github.com/stein155/retouch/internal/store"
@@ -102,10 +98,12 @@ type Server struct {
 	homeDir   string
 	startedAt time.Time
 	updateMu  sync.Mutex
-	ui        http.Handler // serves the embedded dist bundle
-	proxy     *http.Client // for the same-origin TuneIn / logo proxies + artwork
-	stream    *http.Client // reads ICY metadata off the audio stream
-	hub       *hub         // pushes live state to browsers over SSE (/api/events)
+	ui        http.Handler     // serves the embedded dist bundle
+	proxy     *http.Client     // for the same-origin TuneIn / logo proxies + artwork
+	stream    *http.Client     // reads ICY metadata off the audio stream
+	hub       *hub             // pushes live state to browsers over SSE (/api/events)
+	plugins   *plugins.Manager // installs/supervises/proxies plugins; nil off-speaker
+	sideload  bool             // allow unverified plugin uploads (-allow-sideload)
 
 	npMu       sync.Mutex                // guards npCache and streamURLs
 	npCache    map[string]npCacheEntry   // now-playing, keyed by station id
@@ -211,6 +209,17 @@ func (s *Server) SetMQTTBridge(b MQTTBridge) {
 	s.mqtt = b
 }
 
+// SetPlugins attaches the plugin host so the UI can list/install/remove plugins and
+// their config APIs can be reverse-proxied. Nil (the default, off-speaker) disables
+// the plugin endpoints. allowSideload additionally enables installing an uploaded,
+// UNVERIFIED binary; it must only be set from an explicit start-up flag — never from
+// a runtime setting, which the same LAN attacker it defends against could flip.
+// Call before Handler().
+func (s *Server) SetPlugins(m *plugins.Manager, allowSideload bool) {
+	s.plugins = m
+	s.sideload = allowSideload
+}
+
 // Handler returns the HTTP mux.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -238,6 +247,20 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/releases", s.releases)
 	mux.HandleFunc("GET /api/debug", s.debugBundle)
 	mux.HandleFunc("POST /api/update", s.updateApp)
+
+	// Plugins: list/install/remove, plus a reverse proxy of every other subpath to
+	// the plugin's own loopback API. The install/remove verbs are more specific than
+	// the {path...} catch-all, so the mux routes them first; the plugin's manifest,
+	// health and config endpoints all fall through to the proxy. The proxy is
+	// registered per method (not as an all-method catch-all) so its pattern stays
+	// comparable to "GET /" — an all-method catch-all conflicts with it and panics.
+	mux.HandleFunc("GET /api/plugins", s.listPlugins)
+	mux.HandleFunc("POST /api/plugins/{name}/install", s.installPlugin)
+	mux.HandleFunc("POST /api/plugins/{name}/upload", s.uploadPlugin)
+	mux.HandleFunc("DELETE /api/plugins/{name}", s.removePlugin)
+	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
+		mux.HandleFunc(method+" /api/plugins/{name}/{path...}", s.proxyPlugin)
+	}
 	// Everything else is the embedded single-page UI. More specific /api/...
 	// patterns above win; this serves index.html, assets and icons.
 	mux.HandleFunc("GET /", s.serveUI)
@@ -278,7 +301,13 @@ func (s *Server) guard(next http.Handler) http.Handler {
 				http.Error(w, "cross-site request refused", http.StatusForbidden)
 				return
 			}
-			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+			// A sideloaded plugin binary is multi-MB; every other mutating request is
+			// tiny. Cap the upload generously but bound everything else tightly.
+			limit := int64(maxRequestBody)
+			if strings.HasPrefix(r.URL.Path, "/api/plugins/") && strings.HasSuffix(r.URL.Path, "/upload") {
+				limit = pluginUploadMax
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -800,19 +829,14 @@ func (s *Server) installRelease(ctx context.Context, tag string) error {
 			return err
 		}
 	}
-	want, err := checksumFor(sums, "retouch-armv7l")
+	want, err := release.ChecksumFor(sums, "retouch-armv7l")
 	if err != nil {
 		_ = os.Remove(newBin)
 		return err
 	}
-	got, err := sha256File(newBin)
-	if err != nil {
+	if err := release.VerifyChecksum(newBin, want); err != nil {
 		_ = os.Remove(newBin)
 		return err
-	}
-	if want != got {
-		_ = os.Remove(newBin)
-		return errChecksumMismatch{want: want, got: got}
 	}
 	// Keep the outgoing binary as retouch.old so a bad release can be rolled back
 	// by hand (best-effort; a first install has none). Restore it if the swap fails,
@@ -832,110 +856,30 @@ func (s *Server) installRelease(ctx context.Context, tag string) error {
 	return os.WriteFile(filepath.Join(s.homeDir, ".version"), []byte(tag+"\n"), 0o644)
 }
 
-// verifyReleaseSignature checks that sigPath is a valid ed25519 signature (base64)
-// over the raw bytes of sumsPath, made by the private half of pubKeyB64.
+// verifyReleaseSignature is a thin alias over release.VerifySignature (kept so the
+// on-speaker OTA reads naturally at the call site and the signature test targets it).
 func verifyReleaseSignature(pubKeyB64, sumsPath, sigPath string) error {
-	pub, err := base64.StdEncoding.DecodeString(strings.TrimSpace(pubKeyB64))
-	if err != nil || len(pub) != ed25519.PublicKeySize {
-		return fmt.Errorf("invalid release public key")
-	}
-	sums, err := os.ReadFile(sumsPath)
-	if err != nil {
-		return err
-	}
-	sigRaw, err := os.ReadFile(sigPath)
-	if err != nil {
-		return err
-	}
-	sig, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(sigRaw)))
-	if err != nil {
-		return fmt.Errorf("invalid signature encoding: %w", err)
-	}
-	if !ed25519.Verify(pub, sums, sig) {
-		return fmt.Errorf("release signature verification failed")
-	}
-	return nil
+	return release.VerifySignature(pubKeyB64, sumsPath, sigPath)
 }
 
 func (s *Server) getJSON(ctx context.Context, target string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", "ReTouch/"+s.version)
-	resp, err := s.proxy.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return errHTTPStatus{url: target, status: resp.StatusCode}
-	}
-	return json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(out)
+	return release.GetJSON(ctx, s.proxy, "ReTouch/"+s.version, target, out)
 }
 
 func (s *Server) downloadFile(ctx context.Context, target, path string, mode fs.FileMode) error {
 	ctx, cancel := context.WithTimeout(ctx, updateDownloadTimeout)
 	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", "ReTouch/"+s.version)
 	client := &http.Client{Timeout: updateDownloadTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return errHTTPStatus{url: target, status: resp.StatusCode}
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-	if err != nil {
-		return err
-	}
-	_, copyErr := io.Copy(f, resp.Body)
-	closeErr := f.Close()
-	if copyErr != nil {
-		_ = os.Remove(path)
-		return copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(path)
-	}
-	return closeErr
-}
-
-func checksumFor(path, name string) (string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[1] == name {
-			return strings.ToLower(fields[0]), nil
-		}
-	}
-	return "", errMissingChecksum{name: name}
-}
-
-func sha256File(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = f.Close() }()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return release.Download(ctx, client, "ReTouch/"+s.version, target, path, mode)
 }
 
 func (s *Server) restartAfterUpdate() {
+	// Stop plugin children first: os.Exit skips context cancellation, so without
+	// this they'd be orphaned to init and duplicated by the relaunched ReTouch
+	// (two Ring agents then invalidate each other's rotating refresh token).
+	if s.plugins != nil {
+		s.plugins.Shutdown(3 * time.Second)
+	}
 	start := filepath.Join(s.homeDir, "start.sh")
 	if fileExists(start) {
 		cmd := exec.Command("sh", "-c", "sleep 1; "+shellQuote(start)+" >/tmp/retouch-start.log 2>&1 &")
@@ -952,21 +896,6 @@ func (s *Server) restartAfterUpdate() {
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
-
-type errHTTPStatus struct {
-	url    string
-	status int
-}
-
-func (e errHTTPStatus) Error() string { return e.url + " status " + strconv.Itoa(e.status) }
-
-type errMissingChecksum struct{ name string }
-
-func (e errMissingChecksum) Error() string { return "missing checksum for " + e.name }
-
-type errChecksumMismatch struct{ want, got string }
-
-func (e errChecksumMismatch) Error() string { return "checksum mismatch " + e.got + " != " + e.want }
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
@@ -1033,45 +962,17 @@ func publicHost(ctx context.Context, host string) bool {
 		return false
 	}
 	for _, ip := range ips {
-		if !publicIP(ip.IP) {
+		if !release.PublicIP(ip.IP) {
 			return false
 		}
 	}
 	return true
 }
 
-func publicIP(a net.IP) bool {
-	return !(a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() ||
-		a.IsLinkLocalMulticast() || a.IsMulticast() || a.IsUnspecified())
-}
-
 // publicOnlyTransport is the transport for the outbound proxy client (logo/TuneIn
-// mirrors, artwork + GitHub lookups). Its dialer rejects the connection if the
-// resolved address is not globally routable — checked per hop, so it closes the
-// SSRF holes that a pre-flight hostname check alone leaves open (302 to loopback,
-// DNS rebinding). All legitimate targets are public, so nothing else is affected.
-func publicOnlyTransport() *http.Transport {
-	return &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout: 10 * time.Second,
-			Control: func(_, address string, _ syscall.RawConn) error {
-				host, _, err := net.SplitHostPort(address)
-				if err != nil {
-					return err
-				}
-				if ip := net.ParseIP(host); ip == nil || !publicIP(ip) {
-					return fmt.Errorf("refusing to connect to non-public address %s", address)
-				}
-				return nil
-			},
-		}).DialContext,
-		ForceAttemptHTTP2:   true,
-		MaxIdleConns:        10,
-		IdleConnTimeout:     30 * time.Second,
-		TLSHandshakeTimeout: 10 * time.Second,
-	}
-}
+// mirrors, artwork + GitHub lookups): its dialer rejects any non-public address,
+// per hop, closing the SSRF holes a pre-flight hostname check alone leaves open.
+func publicOnlyTransport() *http.Transport { return release.SafeTransport() }
 
 // relay performs a bounded upstream GET and copies the response back. fallbackCT
 // is used only when the upstream omits a Content-Type.
