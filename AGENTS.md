@@ -30,7 +30,8 @@ internal/marge/      local emulation of the Bose cloud API the firmware expects
 internal/autopair/   keeps the speaker's sources enabled
 internal/mqtt/       tiny stdlib-only MQTT 3.1.1 client (publish / subscribe, QoS 0)
 internal/habridge/   Home Assistant MQTT bridge: models the speaker as an HA device
-internal/settings/   persisted app settings (name, bass, language, MQTT config)
+internal/auth/       password hashing (stdlib PBKDF2) + session tokens for the settings login
+internal/settings/   persisted app settings (name, bass, language, MQTT config, settings password)
 internal/store/      small on-disk state (presets, etc.)
 internal/web/        JSON API + the embedded web app (built from frontend/)
 internal/sim/        SoundTouch speaker simulator (REST :8090 + CLI :17000) for tests

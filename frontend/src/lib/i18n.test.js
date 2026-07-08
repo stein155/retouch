@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { makeT, isSupportedLang, DEFAULT_LANG } from './i18n';
+import { makeT, isSupportedLang, DEFAULT_LANG, I18N, LANGS } from './i18n';
 
 describe('makeT', () => {
   it('returns strings in the requested language', () => {
@@ -21,6 +21,16 @@ describe('makeT', () => {
 
   it('returns the key itself when it is unknown in every dictionary', () => {
     expect(makeT('en')('nope_not_a_key')).toBe('nope_not_a_key');
+  });
+});
+
+describe('dictionaries', () => {
+  it('every language ships every key (no silent fallbacks)', () => {
+    const langs = LANGS.map((l) => l.code);
+    const reference = Object.keys(I18N[DEFAULT_LANG]).sort();
+    for (const lang of langs) {
+      expect(Object.keys(I18N[lang]).sort(), `keys for ${lang}`).toEqual(reference);
+    }
   });
 });
 

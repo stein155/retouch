@@ -97,6 +97,9 @@ type Server struct {
 	mirror    PresetMirror
 	mdns      Hostnamer
 	mqtt      MQTTBridge
+	telnetFW  func(closed bool) error // applies/removes the LAN block on :17000
+	sessions  *sessionStore           // settings-login sessions (see auth.go)
+	loginMu   sync.Mutex              // serializes password verifies (see verifyPassword)
 	log       *slog.Logger
 	version   string
 	homeDir   string
@@ -136,8 +139,6 @@ const updateDownloadTimeout = 5 * time.Minute
 
 // streamURLTTL is how long a resolved stream URL is reused before re-resolving.
 const streamURLTTL = 5 * time.Minute
-
-const telnetCloseWindow = 5 * time.Minute
 
 // PresetMirror receives successful direct speaker preset writes so the local cloud
 // emulation cannot later sync stale presets back to the speaker.
@@ -184,13 +185,29 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		streamURLs: map[string]streamURLEntry{},
 	}
 	srv.hub = newHub(srv.pollState, log.With("comp", "events"))
-	srv.scheduleTelnetClose()
+	srv.telnetFW = telnetFirewall
+	srv.sessions = openSessions(filepath.Join(homeDir, ".sessions"))
 	return srv
+}
+
+// SetTelnetFirewall overrides how the :17000 LAN block is applied/removed.
+// Tests inject a fake so toggling the setting never runs iptables.
+func (s *Server) SetTelnetFirewall(f func(closed bool) error) {
+	s.telnetFW = f
 }
 
 // Run drives the background services the Server owns — currently the SSE hub's
 // speaker poll loop — until ctx is cancelled. Call it once, in a goroutine.
 func (s *Server) Run(ctx context.Context) {
+	// Re-apply the telnet block right away on every start: the iptables rule does
+	// not survive a reboot, only the marker file does.
+	if fileExists(filepath.Join(s.homeDir, ".close-telnet")) {
+		if err := s.telnetFW(true); err != nil {
+			s.log.Warn("close telnet at startup failed", "err", err)
+		} else {
+			s.log.Info("closed LAN telnet", "port", 17000)
+		}
+	}
 	s.hub.run(ctx)
 }
 
@@ -227,17 +244,25 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/volume", s.getVolume)
 	mux.HandleFunc("POST /api/volume", s.setVolume)
+	mux.HandleFunc("GET /api/auth", s.getAuth)
+	mux.HandleFunc("POST /api/auth/login", s.login)
+	mux.HandleFunc("POST /api/auth/logout", s.logout)
+	mux.HandleFunc("POST /api/auth/password", s.requireAuth(s.setPassword))
+	// The settings side of the API sits behind the admin password (when one is
+	// set): everything reachable from the settings sheet that can change the
+	// speaker's configuration or leak network details. Playback, presets, volume
+	// and multiroom stay open — the radio keeps working without a login.
 	mux.HandleFunc("GET /api/settings", s.getSettings)
-	mux.HandleFunc("PUT /api/settings", s.putSettings)
-	mux.HandleFunc("GET /api/mqtt/status", s.mqttStatus)
+	mux.HandleFunc("PUT /api/settings", s.requireAuth(s.putSettings))
+	mux.HandleFunc("GET /api/mqtt/status", s.requireAuth(s.mqttStatus))
 	mux.HandleFunc("GET /api/multiroom", s.multiroom)
 	mux.HandleFunc("GET /api/multiroom/speakers", s.multiroomSpeakers)
 	mux.HandleFunc("POST /api/multiroom/group", s.multiroomGroup)
 	mux.HandleFunc("POST /api/multiroom/ungroup", s.multiroomUngroup)
 	mux.HandleFunc("GET /api/version", s.versionInfo)
 	mux.HandleFunc("GET /api/releases", s.releases)
-	mux.HandleFunc("GET /api/debug", s.debugBundle)
-	mux.HandleFunc("POST /api/update", s.updateApp)
+	mux.HandleFunc("GET /api/debug", s.requireAuth(s.debugBundle))
+	mux.HandleFunc("POST /api/update", s.requireAuth(s.updateApp))
 	// Everything else is the embedded single-page UI. More specific /api/...
 	// patterns above win; this serves index.html, assets and icons.
 	mux.HandleFunc("GET /", s.serveUI)
@@ -1409,12 +1434,25 @@ func (s *Server) setVolume(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
+	authorized := s.authorized(r)
 	out := map[string]any{
-		"language":    s.settings.Get().Language,
-		"closeTelnet": fileExists(filepath.Join(s.homeDir, ".close-telnet")),
+		"language":      s.settings.Get().Language,
+		"hasPassword":   s.settings.Get().Auth.PasswordHash != "",
+		"authenticated": authorized,
 	}
-	if info, err := s.speaker.Info(ctx); err == nil {
+	info, infoErr := s.speaker.Info(ctx)
+	if infoErr == nil {
 		out["name"] = info.Name
+	}
+	if !authorized {
+		// Not logged in: only what the app itself needs at startup (language +
+		// speaker name). Everything else — network details, MQTT config, telnet
+		// state — waits behind the login.
+		writeJSON(w, 200, out)
+		return
+	}
+	out["closeTelnet"] = fileExists(filepath.Join(s.homeDir, ".close-telnet"))
+	if infoErr == nil {
 		out["model"] = info.Type // device model, e.g. "SoundTouch 10"
 	}
 	if b, err := s.speaker.Bass(ctx); err == nil {
@@ -1578,51 +1616,41 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 
+// setCloseTelnet applies the toggle immediately: the marker file only makes the
+// choice survive a reboot, the firewall rule is what actually closes the port.
+// Enabling is open to anyone; disabling goes through the settings login (the PUT
+// handler is auth-gated), which is what makes "close telnet" trustworthy.
 func (s *Server) setCloseTelnet(on bool) error {
 	path := filepath.Join(s.homeDir, ".close-telnet")
 	if on {
 		if err := os.WriteFile(path, []byte("1\n"), 0o644); err != nil {
 			return err
 		}
-		// Past the startup grace window the scheduled one-shot has already fired
-		// and skipped (no marker file then), so apply the rule now — otherwise the
-		// toggle reports success but the port stays open until the next boot.
-		if time.Since(s.startedAt) > telnetCloseWindow {
-			go s.closeTelnetNow()
+		if err := s.telnetFW(true); err != nil {
+			return err
 		}
+		s.log.Info("closed LAN telnet", "port", 17000)
 		return nil
-	}
-	if time.Since(s.startedAt) > telnetCloseWindow {
-		return fmt.Errorf("telnet close can only be disabled within 5 minutes after ReTouch starts")
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	if err := s.telnetFW(false); err != nil {
+		return err
+	}
+	s.log.Info("reopened LAN telnet", "port", 17000)
 	return nil
 }
 
-// closeTelnetNow installs the raw-table DROP that hides the :17000 diagnostic CLI
-// from the LAN (loopback stays open), de-duplicating any earlier copies first.
-func (s *Server) closeTelnetNow() {
-	cmd := exec.Command("sh", "-c", "while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 17000 -j DROP 2>/dev/null; do :; done; iptables -t raw -I PREROUTING 1 ! -i lo -p tcp --dport 17000 -j DROP")
-	if err := cmd.Run(); err != nil {
-		s.log.Warn("close telnet failed", "err", err)
-		return
+// telnetFirewall installs or removes the raw-table DROP that hides the :17000
+// diagnostic CLI from the LAN (loopback stays open), de-duplicating any earlier
+// copies first.
+func telnetFirewall(closed bool) error {
+	script := "while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 17000 -j DROP 2>/dev/null; do :; done"
+	if closed {
+		script += "; iptables -t raw -I PREROUTING 1 ! -i lo -p tcp --dport 17000 -j DROP"
 	}
-	s.log.Info("closed LAN telnet", "port", 17000)
-}
-
-func (s *Server) scheduleTelnetClose() {
-	go func() {
-		wait := time.Until(s.startedAt.Add(telnetCloseWindow))
-		if wait > 0 {
-			time.Sleep(wait)
-		}
-		if !fileExists(filepath.Join(s.homeDir, ".close-telnet")) {
-			return
-		}
-		s.closeTelnetNow()
-	}()
+	return exec.Command("sh", "-c", script).Run()
 }
 
 // stationIDRe matches a TuneIn guide id (e.g. "s6712"). The id is interpolated

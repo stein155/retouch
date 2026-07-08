@@ -136,6 +136,8 @@ msg() {
 		en:still_finishing_1) printf 'The speaker may still be finishing its restart. Give it another minute,' ;;
 		en:still_finishing_2) printf 'then open %%s in your browser.' ;;
 		en:if_never) printf 'If it never comes up, just run this installer again.' ;;
+		en:telnet_closed) printf 'Closed remote access to the speaker (telnet)' ;;
+		en:telnet_close_manual) printf 'Could not close remote access (telnet) - turn it on yourself under Settings, Security.' ;;
 		en:*) printf '%s' "$1" ;;
 
 		nl:could_not_continue) printf 'Kan niet doorgaan' ;;
@@ -177,6 +179,8 @@ msg() {
 		nl:still_finishing_1) printf 'De speaker is misschien nog bezig met herstarten. Wacht nog een minuut,' ;;
 		nl:still_finishing_2) printf 'en open daarna %%s in je browser.' ;;
 		nl:if_never) printf 'Als hij niet opkomt, start deze installer dan opnieuw.' ;;
+		nl:telnet_closed) printf 'Toegang op afstand tot de speaker (telnet) gesloten' ;;
+		nl:telnet_close_manual) printf 'Kon toegang op afstand (telnet) niet sluiten - zet dit zelf aan via Instellingen, Beveiliging.' ;;
 
     de:could_not_continue) printf 'Vorgang kann nicht fortgesetzt werden' ;;
     de:need_curl) printf "Für diesen Vorgang wird 'curl' benötigt. Bitte installiere es und versuche es erneut." ;;
@@ -217,6 +221,8 @@ msg() {
     de:still_finishing_1) printf 'Der Lautsprecher beendet möglicherweise noch seinen Neustart. Warte noch eine Minute,' ;;
     de:still_finishing_2) printf 'und öffne dann %%s in deinem Browser.' ;;
     de:if_never) printf 'Falls ReTouch nicht startet, führe diesen Installer einfach erneut aus.' ;;
+    de:telnet_closed) printf 'Fernzugriff auf den Lautsprecher (Telnet) geschlossen' ;;
+    de:telnet_close_manual) printf 'Fernzugriff (Telnet) konnte nicht geschlossen werden - aktiviere dies selbst unter Einstellungen, Sicherheit.' ;;
 
 		fr:could_not_continue) printf 'Impossible de continuer' ;;
 		fr:need_curl) printf "'curl' est necessaire. Installez-le puis reessayez." ;;
@@ -257,6 +263,8 @@ msg() {
 		fr:still_finishing_1) printf "L'enceinte termine peut-etre encore son redemarrage. Attendez une minute," ;;
 		fr:still_finishing_2) printf 'puis ouvrez %%s dans votre navigateur.' ;;
 		fr:if_never) printf "S'il ne demarre jamais, relancez simplement cet installateur." ;;
+		fr:telnet_closed) printf "Acces a distance a l'enceinte (telnet) ferme" ;;
+		fr:telnet_close_manual) printf "Impossible de fermer l'acces a distance (telnet) - activez-le vous-meme dans Reglages, Securite." ;;
 
 		es:could_not_continue) printf 'No se pudo continuar' ;;
 		es:need_curl) printf "se necesita 'curl'. Instalalo e intentalo de nuevo." ;;
@@ -297,6 +305,8 @@ msg() {
 		es:still_finishing_1) printf 'Puede que el altavoz aun este terminando de reiniciarse. Espera otro minuto,' ;;
 		es:still_finishing_2) printf 'y abre %%s en tu navegador.' ;;
 		es:if_never) printf 'Si nunca aparece, ejecuta este instalador de nuevo.' ;;
+		es:telnet_closed) printf 'Acceso remoto al altavoz (telnet) cerrado' ;;
+		es:telnet_close_manual) printf 'No se pudo cerrar el acceso remoto (telnet) - activalo tu mismo en Ajustes, Seguridad.' ;;
 
 		af:could_not_continue) printf 'Kan nie voortgaan nie' ;;
 		af:need_curl) printf "hierdie het 'curl' nodig. Installeer dit en probeer weer." ;;
@@ -337,6 +347,8 @@ msg() {
 		af:still_finishing_1) printf 'Die luidspreker is dalk nog besig om te herbegin. Wag nog n minuut,' ;;
 		af:still_finishing_2) printf 'en maak dan %%s in jou blaaier oop.' ;;
 		af:if_never) printf 'As dit nooit opkom nie, voer hierdie installeerder net weer uit.' ;;
+		af:telnet_closed) printf 'Afstandtoegang tot die luidspreker (telnet) toegemaak' ;;
+		af:telnet_close_manual) printf 'Kon afstandtoegang (telnet) nie toemaak nie - skakel dit self aan onder Instellings, Sekuriteit.' ;;
 
 		*) old=$LANG_CODE; LANG_CODE=en; msg "$1"; LANG_CODE=$old ;;
 	esac
@@ -572,9 +584,15 @@ fi
 NETINSTALL_ENV=
 [ -z "${RETOUCH_TARGET_TAG:-}" ] || NETINSTALL_ENV="$NETINSTALL_ENV RETOUCH_TARGET_TAG=$RETOUCH_TARGET_TAG"
 [ -z "${RETOUCH_RELEASE_BASE:-}" ] || NETINSTALL_ENV="$NETINSTALL_ENV RETOUCH_RELEASE_BASE=$RETOUCH_RELEASE_BASE"
+# Closing telnet now takes effect the moment ReTouch is told to, and this script
+# still needs the :17000 CLI below (cloud-URL cleanup + final reboot) — so the
+# close is applied at the very end via the web API, not during netinstall. The
+# opt-out (0) still travels with netinstall so a reinstall can clear an earlier
+# choice before ReTouch starts.
+CLOSE_TELNET_AFTER=0
 case "${RETOUCH_CLOSE_TELNET:-}" in
 	"") ;;
-	1|true|yes|on) NETINSTALL_ENV="$NETINSTALL_ENV RETOUCH_CLOSE_TELNET=1" ;;
+	1|true|yes|on) CLOSE_TELNET_AFTER=1 ;;
 	0|false|no|off) NETINSTALL_ENV="$NETINSTALL_ENV RETOUCH_CLOSE_TELNET=0" ;;
 	*) die "RETOUCH_CLOSE_TELNET must be 1 or 0" ;;
 esac
@@ -640,6 +658,20 @@ if [ "$up" -eq 1 ]; then
 		up=0
 	fi
 	step_clear
+fi
+
+# Telnet was needed for every step above; only now that the install is fully done
+# can it be closed. ReTouch applies this instantly. On a reinstall over a box whose
+# settings are password-protected this returns 401 — then the user flips the
+# switch in Settings themselves.
+if [ "$up" -eq 1 ] && [ "$CLOSE_TELNET_AFTER" -eq 1 ]; then
+	if curl -fsS -X PUT --connect-timeout 5 --max-time 10 \
+		-H 'Content-Type: application/json' -d '{"closeTelnet":true}' \
+		"$URL/api/settings" >/dev/null 2>&1; then
+		step_ok "$(msg telnet_closed)"
+	else
+		step_warn "$(msg telnet_close_manual)"
+	fi
 fi
 
 step_clear

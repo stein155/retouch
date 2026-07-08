@@ -194,8 +194,11 @@ trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
 mkdir -p "$HOME_DIR" 2>/dev/null
 
+# Closing telnet is applied by install.sh over the web API once the install is
+# fully done — ReTouch now closes the port the moment the marker exists, and
+# install.sh still needs the :17000 CLI for its final cleanup + reboot. Only the
+# explicit opt-out (clearing a marker left by an earlier install) happens here.
 case "${RETOUCH_CLOSE_TELNET:-}" in
-	1|true|yes|on) echo 1 >"$TELNET_CLOSE" ;;
 	0|false|no|off) rm -f "$TELNET_CLOSE" ;;
 esac
 
