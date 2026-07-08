@@ -18,6 +18,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Routed through env so it can be tested in a step `if:` (secrets can't be).
+    env:
+      RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
     steps:
       - uses: actions/checkout@v7
 
@@ -48,10 +51,25 @@ jobs:
       - name: Checksums
         run: sha256sum retouch-armv7l > SHA256SUMS
 
+      # Sign the checksums so the agent's self-update can verify authenticity, not
+      # just integrity. Dormant until the RELEASE_SIGNING_KEY secret is set AND the
+      # matching public key is compiled into the agent (releasePublicKey in
+      # internal/web/web.go). See docs/RELEASE_SIGNING.md.
+      - name: Sign checksums (ed25519)
+        if: ${{ env.RELEASE_SIGNING_KEY != '' }}
+        run: |
+          printf '%s' "$RELEASE_SIGNING_KEY" | base64 -d > ed25519.pem
+          openssl pkeyutl -sign -inkey ed25519.pem -rawin -in SHA256SUMS -out sig.raw
+          base64 -w0 sig.raw > SHA256SUMS.sig
+          rm -f ed25519.pem sig.raw
+
       - name: Attach binary + checksums to the release
-        uses: softprops/action-gh-release@v3
+        # Pinned to a commit SHA: this action holds contents:write, so a retagged
+        # v3 must not be able to silently change what runs in the release job.
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
           tag_name: ${{ github.event.release.tag_name || github.ref_name }}
           files: |
             retouch-armv7l
             SHA256SUMS
+            SHA256SUMS.sig

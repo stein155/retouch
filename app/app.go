@@ -12,17 +12,21 @@ import (
 	"flag"
 	"hash/fnv"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/stein155/retouch/internal/autopair"
+	"github.com/stein155/retouch/internal/habridge"
 	"github.com/stein155/retouch/internal/marge"
 	"github.com/stein155/retouch/internal/mdns"
+	"github.com/stein155/retouch/internal/plugins"
 	"github.com/stein155/retouch/internal/settings"
 	"github.com/stein155/retouch/internal/speaker"
 	"github.com/stein155/retouch/internal/store"
@@ -46,12 +50,13 @@ func RegisterService(f func(context.Context)) { services = append(services, f) }
 // Run starts retouch and blocks until interrupted.
 func Run() {
 	listen := flag.String("listen", ":8000", "web UI / API listen address")
-	margeAddr := flag.String("listen-marge", ":9080", "pairing-stub HTTP listen address; point the speaker's margeServerUrl / bmxRegistryUrl here")
+	margeAddr := flag.String("listen-marge", "127.0.0.1:9080", "pairing-stub HTTP listen address; the speaker only ever reaches it on loopback, so bind loopback by default (do not expose it to the LAN)")
 	margeBase := flag.String("marge-base", "", "base URL the speaker reaches the pairing stub at (default http://127.0.0.1<listen-marge>); rewritten into the BMX registry")
 	host := flag.String("speaker-host", "127.0.0.1", "speaker host (127.0.0.1 on-speaker; the speaker IP for off-speaker testing)")
 	presets := flag.String("presets", "presets.json", "path to the presets JSON file")
 	accountID := flag.String("account-id", "", "marge account UUID to keep the speaker paired to (default: whatever the speaker reports); enables autopair")
 	pairEvery := flag.Duration("pair-interval", 5*time.Minute, "how often autopair re-checks the speaker's association")
+	sideload := flag.Bool("allow-sideload", false, "allow installing plugin binaries uploaded through the web UI without release verification (anyone on the LAN can then run code on the speaker; leave off unless you are developing a plugin)")
 	verbose := flag.Bool("v", false, "verbose: log every speaker request to the pairing stub")
 	flag.Parse()
 
@@ -69,7 +74,13 @@ func Run() {
 
 	base := *margeBase
 	if base == "" {
-		base = "http://127.0.0.1" + *margeAddr
+		// -listen-marge may omit the host (":9080"); the speaker reaches the stub on
+		// loopback, so default the base host to 127.0.0.1 in that case.
+		addr := *margeAddr
+		if strings.HasPrefix(addr, ":") {
+			addr = "127.0.0.1" + addr
+		}
+		base = "http://" + addr
 	}
 
 	bc := speaker.New(*host)
@@ -122,7 +133,38 @@ func Run() {
 	defer stop()
 
 	// Keep the speaker paired to our marge account so native sources stay enabled.
-	go autopair.New(bc, info.Account, autopair.DefaultAuthToken, *pairEvery, logger.With("comp", "autopair")).Run(ctx)
+	pairer := autopair.New(bc, info.Account, autopair.DefaultAuthToken, *pairEvery, logger.With("comp", "autopair"))
+	// A speaker that lost its pairing was factory-reset (physical access): that is
+	// the recovery path for a forgotten settings password — clear it and reopen
+	// telnet before re-pairing.
+	pairer.OnFactoryReset(func() {
+		if err := webSrv.RecoverAfterFactoryReset(); err != nil {
+			logger.Warn("factory-reset recovery failed", "err", err)
+		}
+	})
+	go pairer.Run(ctx)
+
+	// Home Assistant MQTT bridge: reads its config from the settings store on every
+	// (re)connect, so the web UI's MQTT section takes effect via bridge.Reload().
+	// The HA update entity reuses the web server's version-check + self-update path.
+	bridge := habridge.New(bc, func() habridge.Config {
+		m := set.Get().MQTT
+		return habridge.Config{
+			Enabled:         m.Enabled,
+			Host:            m.Host,
+			Port:            m.Port,
+			Username:        m.Username,
+			Password:        m.Password,
+			BaseTopic:       m.BaseTopic,
+			DiscoveryPrefix: m.DiscoveryPrefix,
+			TLS:             m.TLS,
+		}
+	}, webSrv, logger.With("comp", "habridge"))
+	// Feed the bridge the enriched now-playing so HA shows the live track/artist,
+	// not just the station name (the speaker no longer receives track metadata).
+	bridge.SetNowPlaying(webSrv.EnrichedNowPlaying)
+	webSrv.SetMQTTBridge(bridge)
+	go bridge.Run(ctx)
 
 	// Advertise a friendly <name>.local so the UI is reachable without the IP.
 	if info.IP != "" {
@@ -134,6 +176,29 @@ func Run() {
 			}
 		}()
 	}
+
+	// Plugin host: downloads/verifies plugin binaries (reusing the OTA path), then
+	// supervises each as a child process and reverse-proxies its config API under
+	// /api/plugins/<name>/. Plugins reach the speaker's local API and call back to
+	// this web server. Lives under the same home dir as the presets/state.
+	speakerAddr := *host
+	if _, _, err := net.SplitHostPort(speakerAddr); err != nil {
+		speakerAddr = net.JoinHostPort(*host, "8090")
+	}
+	webHost := *listen
+	if strings.HasPrefix(webHost, ":") {
+		webHost = "127.0.0.1" + webHost
+	}
+	pm, err := plugins.New(filepath.Join(filepath.Dir(*presets), "plugins"), speakerAddr, "http://"+webHost, "ReTouch/"+version, logger.With("comp", "plugins"))
+	if err != nil {
+		logger.Warn("plugin host disabled", "err", err)
+	} else {
+		webSrv.SetPlugins(pm, *sideload)
+		go pm.Run(ctx)
+	}
+
+	// Push live playback/volume state to browsers over SSE (/api/events).
+	go webSrv.Run(ctx)
 
 	var wg sync.WaitGroup
 	serve := func(name, addr string, h http.Handler) {

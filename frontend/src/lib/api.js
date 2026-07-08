@@ -23,7 +23,9 @@ async function send(path, method, body) {
   if (!r.ok) {
     let msg = `${method} ${path} -> ${r.status}`;
     try { msg = (await r.json()).error || msg; } catch { /* ignore */ }
-    throw new Error(msg);
+    const err = new Error(msg);
+    err.status = r.status; // 401 = login required; callers show the login view
+    throw err;
   }
   return r.status === 204 ? null : r.json().catch(() => null);
 }
@@ -32,23 +34,28 @@ const clean = (value) => (typeof value === 'string' ? value.trim() : '');
 
 // Now playing — STLocal returns {source,track,artist,station,stationId,art,playStatus}.
 // Normalised to the shape the UI expects (standby / stationName / tuneInId).
+// Shared by both the /api/now fetch and the /api/events push stream (see events.js).
+export function normalizeNowPlaying(np) {
+  if (!np) return null;
+  const source = clean(np.source);
+  if (!source || source === 'STANDBY' || source === 'INVALID_SOURCE') {
+    return { standby: true };
+  }
+  return {
+    standby: false,
+    source,
+    stationName: clean(np.station) || clean(np.track),
+    track: clean(np.track),
+    artist: clean(np.artist),
+    playStatus: clean(np.playStatus),
+    art: clean(np.art),
+    tuneInId: clean(np.stationId) || null,
+  };
+}
+
 export async function getNowPlaying() {
   try {
-    const np = await getJSON('/api/now');
-    const source = clean(np.source);
-    if (!source || source === 'STANDBY' || source === 'INVALID_SOURCE') {
-      return { standby: true };
-    }
-    return {
-      standby: false,
-      source,
-      stationName: clean(np.station) || clean(np.track),
-      track: clean(np.track),
-      artist: clean(np.artist),
-      playStatus: clean(np.playStatus),
-      art: clean(np.art),
-      tuneInId: clean(np.stationId) || null,
-    };
+    return normalizeNowPlaying(await getJSON('/api/now'));
   } catch {
     return null;
   }
@@ -180,6 +187,34 @@ export async function setWifi({ ssid, security, password }) {
   return send('/api/wifi', 'POST', { ssid, security, password });
 }
 
+// Settings login. Settings are open until a password is set; after that the
+// settings side of the API answers 401 without a session cookie.
+
+// getAuth returns { hasPassword, authenticated }.
+export async function getAuth() {
+  try { return await getJSON('/api/auth'); } catch { return null; }
+}
+
+// login exchanges the password for a session cookie. Throws (status 401) on a
+// wrong password.
+export async function login(password) {
+  return send('/api/auth/login', 'POST', { password });
+}
+
+export async function logout() {
+  return send('/api/auth/logout', 'POST');
+}
+
+// setPassword sets (no currentPassword needed) or changes the settings password.
+export async function setPassword({ currentPassword, newPassword }) {
+  return send('/api/auth/password', 'POST', { currentPassword, newPassword });
+}
+
+// getMqttStatus returns { connected, lastError } for the Home Assistant MQTT link.
+export async function getMqttStatus() {
+  try { return await getJSON('/api/mqtt/status'); } catch { return null; }
+}
+
 // Multiroom — native Bose zone grouping. This speaker acts as the zone master;
 // other speakers on the network join it and play in sync (Bose's own setZone /
 // addZoneSlave / removeZoneSlave under the hood).
@@ -218,6 +253,52 @@ export async function getVersion() {
 // if unreachable (e.g. offline) so the UI can fall back to the plain Update button.
 export async function getReleases() {
   try { return await getJSON('/api/releases'); } catch { return null; }
+}
+
+// --- Plugins --------------------------------------------------------------
+// Plugins are separate binaries the speaker downloads, verifies and supervises.
+// getPlugins returns { installed: [{name,version,running,lastErr,sideloaded,...}],
+// catalog: [{name,title,description,...}] }. Each installed plugin serves its own
+// settings UI as a "manifest" that ReTouch proxies under /api/plugins/<name>/.
+
+export async function getPlugins() {
+  try { return await getJSON('/api/plugins'); } catch { return null; }
+}
+
+export async function installPlugin(name, tag) {
+  return send(`/api/plugins/${encodeURIComponent(name)}/install`, 'POST', tag ? { tag } : undefined);
+}
+
+export async function removePlugin(name) {
+  return send(`/api/plugins/${encodeURIComponent(name)}`, 'DELETE');
+}
+
+// uploadPlugin sideloads a locally-built binary (multipart), for a plugin whose
+// release repo is still private.
+export async function uploadPlugin(name, file) {
+  const fd = new FormData();
+  fd.append('binary', file);
+  const r = await fetch(`/api/plugins/${encodeURIComponent(name)}/upload`, { method: 'POST', body: fd });
+  if (!r.ok) {
+    let msg = `upload -> ${r.status}`;
+    try { msg = (await r.json()).error || msg; } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+  return r.json().catch(() => null);
+}
+
+// getPluginManifest fetches the plugin's current settings UI (a server-driven
+// schema: { title, status, sections:[{fields,rows,actions}] }). Returns null if
+// the plugin isn't running yet.
+export async function getPluginManifest(name) {
+  try { return await getJSON(`/api/plugins/${encodeURIComponent(name)}/manifest`); } catch { return null; }
+}
+
+// pluginAction performs a manifest action (e.g. log in, submit a 2FA code, save
+// devices). The plugin replies with the NEW manifest, which the UI re-renders —
+// that's how multi-step flows like 2FA fall out without any plugin-specific code.
+export async function pluginAction(name, id, body) {
+  return send(`/api/plugins/${encodeURIComponent(name)}/action/${encodeURIComponent(id)}`, 'POST', body || {});
 }
 
 // startUpdate asks the speaker to fetch a release and replace itself. With no tag

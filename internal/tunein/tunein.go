@@ -179,6 +179,9 @@ func (c *Client) Resolve(ctx context.Context, stationID string) ([]string, error
 			urls = append(urls, line)
 		}
 	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("tunein: read streams for %s: %w", stationID, err)
+	}
 	if len(urls) == 0 {
 		return nil, fmt.Errorf("tunein: no streams for %s", stationID)
 	}

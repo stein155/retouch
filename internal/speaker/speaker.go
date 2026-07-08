@@ -686,7 +686,10 @@ func (c *Client) Wake(ctx context.Context) {
 }
 
 func (c *Client) get(ctx context.Context, path string) ([]byte, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.urlFor(path), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.urlFor(path), nil)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
@@ -699,7 +702,10 @@ func (c *Client) get(ctx context.Context, path string) ([]byte, error) {
 }
 
 func (c *Client) post(ctx context.Context, path, body string) error {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.urlFor(path), strings.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.urlFor(path), strings.NewReader(body))
+	if err != nil {
+		return err
+	}
 	req.Header.Set("Content-Type", "application/xml")
 	resp, err := c.http.Do(req)
 	if err != nil {

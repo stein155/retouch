@@ -135,6 +135,51 @@ func TestCheckUnpairedAsserts(t *testing.T) {
 	}
 }
 
+// The factory-reset callback fires once per unpaired episode: on the first
+// unpaired observation, not again while re-pairing is confirmed, and afresh
+// after a later unpair.
+func TestOnFactoryResetFiresOncePerEpisode(t *testing.T) {
+	sp := sim.New()
+	sp.Account = "" // unpaired from the start (boot after factory reset)
+	c := newClient(t, sp)
+
+	p := New(c, "our-account", "tok", time.Minute, quietLog())
+	fired := 0
+	p.OnFactoryReset(func() { fired++ })
+
+	if p.check(context.Background()) {
+		t.Fatal("first check should re-assert and return false")
+	}
+	if fired != 1 {
+		t.Fatalf("fired = %d after first unpaired check, want 1", fired)
+	}
+	// Confirmed paired: no extra fire.
+	if !p.check(context.Background()) {
+		t.Fatal("second check should confirm paired")
+	}
+	if fired != 1 {
+		t.Fatalf("fired = %d after confirm, want still 1", fired)
+	}
+	// A new unpaired episode (another reset) fires again.
+	sp.Account = ""
+	p.check(context.Background())
+	if fired != 2 {
+		t.Fatalf("fired = %d after second episode, want 2", fired)
+	}
+}
+
+// A callback must not fire while the speaker is merely unreachable (no /info):
+// unreachable is not "unpaired".
+func TestOnFactoryResetNotFiredWhenUnreachable(t *testing.T) {
+	p := New(speaker.New("127.0.0.1:1"), "acct", "tok", time.Minute, quietLog())
+	fired := 0
+	p.OnFactoryReset(func() { fired++ })
+	p.check(context.Background())
+	if fired != 0 {
+		t.Fatalf("fired = %d for unreachable speaker, want 0", fired)
+	}
+}
+
 func TestCheckUnreachableReturnsFalse(t *testing.T) {
 	// Point at a closed port: Info fails, check returns false (will retry).
 	p := New(speaker.New("127.0.0.1:1"), "acct", "tok", time.Minute, quietLog())
