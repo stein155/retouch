@@ -2,6 +2,8 @@ package homekit
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/brutella/hap"
@@ -207,5 +209,54 @@ func TestPinForIsStableAndValid(t *testing.T) {
 	// forbidden sequential HomeKit code, so use one HAP accepts).
 	if got := PinFor("3142-5369", "ABC123"); got != "31425369" {
 		t.Errorf("override pin = %q, want 31425369", got)
+	}
+}
+
+func TestSetupIDIsStableAndValid(t *testing.T) {
+	a := SetupIDFor("ABC123")
+	if a != SetupIDFor("ABC123") {
+		t.Errorf("SetupIDFor not stable")
+	}
+	if len(a) != 4 {
+		t.Errorf("setup id %q is not 4 chars", a)
+	}
+	for _, c := range a {
+		if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z')) {
+			t.Errorf("setup id %q has invalid char %q", a, c)
+		}
+	}
+	if SetupIDFor("ABC123") == SetupIDFor("XYZ789") {
+		t.Errorf("distinct device ids gave the same setup id")
+	}
+}
+
+// TestSetupURIEncodesPinAndCategory decodes the X-HM payload back to its fields
+// and checks the setup code and accessory category round-trip — the Home app
+// reads exactly these when the QR is scanned.
+func TestSetupURIEncodesPinAndCategory(t *testing.T) {
+	const setupID = "ABCD"
+	uri := SetupURI("31425369", setupID)
+	if !strings.HasPrefix(uri, "X-HM://") {
+		t.Fatalf("uri %q missing X-HM prefix", uri)
+	}
+	body := strings.TrimPrefix(uri, "X-HM://")
+	if len(body) != 9+len(setupID) || body[9:] != setupID {
+		t.Fatalf("uri %q does not end with setup id %q after 9-char payload", uri, setupID)
+	}
+	payload, err := strconv.ParseUint(body[:9], 36, 64)
+	if err != nil {
+		t.Fatalf("payload %q not base-36: %v", body[:9], err)
+	}
+	if code := payload & 0x7ffffff; code != 31425369 {
+		t.Errorf("decoded setup code = %d, want 31425369", code)
+	}
+	if cat := (payload >> 31) & 0xff; cat != uint64(accessory.TypeTelevision) {
+		t.Errorf("decoded category = %d, want %d", cat, accessory.TypeTelevision)
+	}
+	if flags := (payload >> 27) & 0xf; flags != 2 {
+		t.Errorf("decoded flags = %d, want 2 (IP)", flags)
+	}
+	if SetupURI("bad", setupID) != "" {
+		t.Errorf("SetupURI with a non-numeric pin should be empty")
 	}
 }

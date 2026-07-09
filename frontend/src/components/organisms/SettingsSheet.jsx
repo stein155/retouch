@@ -5,6 +5,7 @@ import { Spinner } from '../atoms/Spinner';
 import { Skeleton } from '../atoms/Skeleton';
 import { Button } from '../atoms/Button';
 import { Toggle } from '../atoms/Toggle';
+import { QRCode } from '../atoms/QRCode';
 import { BassSlider } from '../molecules/BassSlider';
 import { SpeakerRow } from '../molecules/SpeakerRow';
 import { PluginsSection } from './PluginsSection';
@@ -39,40 +40,62 @@ const ScanButton = styled(Button).attrs({ $variant: 'update' })`
   &:hover { background: var(--ink-2); }
 `;
 
-// HomeKit setup-code card — a tappable FieldCard variant that copies the code.
-const HkCodeCard = styled(FieldCard).attrs({ as: 'button', type: 'button' })`
+// HomeKit pairing card: the QR code to scan, with the numeric setup code below it
+// as a tappable pill that copies. Laid out as a centred white FieldCard so it
+// matches the rest of the settings sheet.
+const HkCard = styled(FieldCard)`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 18px 16px;
+  margin-top: 8px;
+`;
+
+// The QR sits in a white box with a hairline ring — its quiet zone against the card.
+const HkQuiet = styled.div`
+  padding: 12px;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px rgba(31, 24, 20, 0.06);
+  line-height: 0;
+`;
+
+const HkCodeBtn = styled.button`
   display: flex;
   align-items: center;
-  gap: 12px;
-  width: 100%;
-  margin-top: 8px;
-  text-align: left;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 8px 10px 8px 16px;
+  background: var(--surface-2);
+  border-radius: 12px;
   -webkit-tap-highlight-color: transparent;
 `;
 
 const HkCode = styled.span`
-  flex: 1;
-  min-width: 0;
-  text-align: center;
-  font-size: 22px;
+  font-size: 21px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 `;
 
-const HkCodeCopy = styled.span`
+const HkCopy = styled.span`
+  display: flex;
+  align-items: center;
+  gap: 5px;
   flex-shrink: 0;
-  min-width: 56px;
-  text-align: right;
-  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: #fff;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--accent);
 `;
 
 const HkReset = styled.button`
-  margin-top: 6px;
+  display: block;
+  margin: 12px auto 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--ink-3);
@@ -140,12 +163,22 @@ function HomeKitSection() {
       </FieldCard>
       {hk.enabled && hk.code && (
         <>
-          <HkCodeCard onClick={copyCode} aria-label={t('homekitCopyCode')}>
-            <FieldRowLabel as="span">{t('homekitCode')}</FieldRowLabel>
-            <HkCode>{hk.code}</HkCode>
-            <HkCodeCopy>{copied ? t('copied') : t('copy')}</HkCodeCopy>
-          </HkCodeCard>
-          <FieldHint>{t('homekitCodeHint')}</FieldHint>
+          <HkCard>
+            <SetEyebrow style={{ marginBottom: 14 }}>{t('homekitScan')}</SetEyebrow>
+            {hk.uri && (
+              <HkQuiet>
+                <QRCode value={hk.uri} size={150} />
+              </HkQuiet>
+            )}
+            <HkCodeBtn type="button" onClick={copyCode} aria-label={t('homekitCopyCode')}>
+              <HkCode>{hk.code}</HkCode>
+              <HkCopy>
+                {copied && <Icon.check width="15" height="15" />}
+                {copied ? t('copied') : t('copy')}
+              </HkCopy>
+            </HkCodeBtn>
+          </HkCard>
+          <FieldHint style={{ textAlign: 'center' }}>{t('homekitCodeHint')}</FieldHint>
           <HkReset type="button" onClick={reset} disabled={busy}>
             {t('homekitReset')}
           </HkReset>

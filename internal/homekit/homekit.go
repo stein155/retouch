@@ -131,6 +131,7 @@ func Run(ctx context.Context, bc *speaker.Client, info *speaker.Info, cfg Config
 		return err
 	}
 	srv.Pin = pin
+	srv.SetupId = SetupIDFor(info.DeviceID) // must match the QR-code setup ID
 	if cfg.Addr != "" {
 		srv.Addr = cfg.Addr
 	}
@@ -505,6 +506,62 @@ func PinFor(override, deviceID string) string {
 		code = "31425369"
 	}
 	return code
+}
+
+// setupIDAlphabet is the character set HAP allows in a 4-character setup ID.
+const setupIDAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+// SetupIDFor returns the stable 4-character HomeKit setup ID for a device, derived
+// from the device id so it survives restarts without storage. It must match the
+// setup ID baked into the QR-code (X-HM) URI and advertised in the accessory's
+// mDNS setup hash — both have to agree for QR pairing to work — which is why the
+// same value is used in Run (srv.SetupId) and SetupURI.
+func SetupIDFor(deviceID string) string {
+	seed := deviceID
+	if seed == "" {
+		seed = "retouch"
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte("setupid:" + seed))
+	n := h.Sum32()
+	id := make([]byte, 4)
+	for i := range id {
+		id[i] = setupIDAlphabet[n%36]
+		n /= 36
+	}
+	return string(id)
+}
+
+// SetupURI builds the HomeKit setup payload ("X-HM://…") that the Home app pairs
+// from when the QR code is scanned — no code to type. The payload packs the
+// accessory category (Television), the IP-transport flag and the 8-digit setup
+// code into a base-36 number, followed by the 4-char setup ID. Returns "" if pin
+// isn't 8 digits. The bit layout follows the HAP setup-payload spec.
+func SetupURI(pin, setupID string) string {
+	code, err := strconv.ParseUint(keepDigits(pin), 10, 64)
+	if err != nil {
+		return ""
+	}
+	const (
+		version  = 0
+		reserved = 0
+		flagsIP  = 2 // the accessory pairs over IP (Wi-Fi)
+	)
+	var payload uint64
+	payload |= uint64(version) & 0x7
+	payload <<= 4
+	payload |= uint64(reserved) & 0xf
+	payload <<= 8
+	payload |= uint64(accessory.TypeTelevision) & 0xff
+	payload <<= 4
+	payload |= uint64(flagsIP) & 0xf
+	payload <<= 27
+	payload |= code & 0x7ffffff
+	enc := strings.ToUpper(strconv.FormatUint(payload, 36))
+	for len(enc) < 9 {
+		enc = "0" + enc
+	}
+	return "X-HM://" + enc + setupID
 }
 
 // FmtPin renders an 8-digit code as the XXX-XX-XXX form shown in the Home app.

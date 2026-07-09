@@ -116,3 +116,9 @@ func (m *Manager) Name() string {
 func (m *Manager) Code() string {
 	return FmtPin(PinFor(m.cfg.Pin, m.info.DeviceID))
 }
+
+// SetupURI is the HomeKit QR-code payload ("X-HM://…"): scanning it in the Home
+// app pairs the accessory using the same setup code Code renders.
+func (m *Manager) SetupURI() string {
+	return SetupURI(PinFor(m.cfg.Pin, m.info.DeviceID), SetupIDFor(m.info.DeviceID))
+}

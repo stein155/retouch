@@ -228,6 +228,7 @@ type HomeKitController interface {
 	Enabled() bool
 	Name() string
 	Code() string
+	SetupURI() string
 	Start()
 	Stop()
 	Reset() error
@@ -1203,6 +1204,7 @@ func (s *Server) homeKitInfo(w http.ResponseWriter, r *http.Request) {
 		"supported": true,
 		"name":      s.homekit.Name(),
 		"code":      s.homekit.Code(),
+		"uri":       s.homekit.SetupURI(),
 	})
 }
 
@@ -1233,6 +1235,7 @@ func (s *Server) setHomeKit(w http.ResponseWriter, r *http.Request) {
 		"enabled": s.homekit.Enabled(),
 		"name":    s.homekit.Name(),
 		"code":    s.homekit.Code(),
+		"uri":     s.homekit.SetupURI(),
 	})
 }
 
@@ -1252,6 +1255,7 @@ func (s *Server) resetHomeKit(w http.ResponseWriter, r *http.Request) {
 		"enabled": s.homekit.Enabled(),
 		"name":    s.homekit.Name(),
 		"code":    s.homekit.Code(),
+		"uri":     s.homekit.SetupURI(),
 	})
 }
 
