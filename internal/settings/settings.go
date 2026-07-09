@@ -1,7 +1,7 @@
 // Package settings persists small STLocal-level preferences that aren't speaker
-// state — the UI language and whether the HomeKit bridge is on. (The speaker's own
-// name and bass live on the speaker; its sysLanguage is a separate voice-prompt
-// setting we don't touch.)
+// state — the UI language, the MQTT bridge config and the settings password. (The
+// speaker's own name and bass live on the speaker; its sysLanguage is a separate
+// voice-prompt setting we don't touch.)
 package settings
 
 import (
@@ -15,7 +15,6 @@ import (
 // Settings is the persisted preference set.
 type Settings struct {
 	Language string `json:"language"` // UI language code, e.g. "en", "nl"
-	HomeKit  bool   `json:"homekit"`  // whether the Apple Home (HomeKit) bridge is on
 	MQTT     MQTT   `json:"mqtt"`     // Home Assistant MQTT bridge config
 	Auth     Auth   `json:"auth"`     // admin password for the settings UI
 }
@@ -73,14 +72,6 @@ func (s *Store) SetLanguage(code string) error {
 	if code != "" {
 		s.s.Language = code
 	}
-	return s.persistLocked()
-}
-
-// SetHomeKit records whether the HomeKit bridge is on and persists.
-func (s *Store) SetHomeKit(on bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.s.HomeKit = on
 	return s.persistLocked()
 }
 

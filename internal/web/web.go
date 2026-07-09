@@ -91,7 +91,6 @@ type Server struct {
 	store     *store.Store
 	settings  *settings.Store
 	mirror    PresetMirror
-	homekit   HomeKitController // controls/reports the HomeKit bridge; nil if unsupported
 	mdns      Hostnamer
 	mqtt      MQTTBridge
 	telnetFW  func(closed bool) error // applies/removes the LAN block on :17000
@@ -215,31 +214,6 @@ func (s *Server) SetPresetMirror(m PresetMirror) {
 	s.mirror = m
 }
 
-// HomeKitInfo is what the UI needs to show the Apple Home pairing state.
-type HomeKitInfo struct {
-	Enabled bool   `json:"enabled"`
-	Name    string `json:"name,omitempty"`
-	Code    string `json:"code,omitempty"` // XXX-XX-XXX setup code
-}
-
-// HomeKitController is the runtime HomeKit bridge: it can be turned on/off and
-// reports its pairing details. Implemented by internal/homekit.Manager.
-type HomeKitController interface {
-	Enabled() bool
-	Name() string
-	Code() string
-	SetupURI() string
-	Start()
-	Stop()
-	Reset() error
-}
-
-// SetHomeKit wires the HomeKit bridge so GET/POST /api/homekit can report and
-// toggle it. Pass nil (or don't call) on platforms without HomeKit support.
-func (s *Server) SetHomeKit(c HomeKitController) {
-	s.homekit = c
-}
-
 // SetMDNS attaches the mDNS responder so settings can show the .local address and
 // renames re-advertise it.
 func (s *Server) SetMDNS(h Hostnamer) {
@@ -294,9 +268,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/multiroom/speakers", s.multiroomSpeakers)
 	mux.HandleFunc("POST /api/multiroom/group", s.multiroomGroup)
 	mux.HandleFunc("POST /api/multiroom/ungroup", s.multiroomUngroup)
-	mux.HandleFunc("GET /api/homekit", s.homeKitInfo)
-	mux.HandleFunc("POST /api/homekit", s.requireAuth(s.setHomeKit))
-	mux.HandleFunc("POST /api/homekit/reset", s.requireAuth(s.resetHomeKit))
 	mux.HandleFunc("GET /api/version", s.versionInfo)
 	mux.HandleFunc("GET /api/releases", s.releases)
 	mux.HandleFunc("GET /api/debug", s.requireAuth(s.debugBundle))
@@ -1188,75 +1159,6 @@ func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 	}
 	s.hub.nudge() // push the stopped state to browsers at once
 	writeJSON(w, 200, map[string]string{"status": "stopped"})
-}
-
-// homeKitInfo reports whether the Apple Home bridge is on and the setup code to
-// type into the Home app. The code is shown even when off so the UI can preview it.
-// On a platform without HomeKit support (s.homekit == nil) it omits the code; the
-// UI then hides the toggle.
-func (s *Server) homeKitInfo(w http.ResponseWriter, r *http.Request) {
-	if s.homekit == nil {
-		writeJSON(w, 200, map[string]any{"enabled": false, "supported": false})
-		return
-	}
-	writeJSON(w, 200, map[string]any{
-		"enabled":   s.homekit.Enabled(),
-		"supported": true,
-		"name":      s.homekit.Name(),
-		"code":      s.homekit.Code(),
-		"uri":       s.homekit.SetupURI(),
-	})
-}
-
-// setHomeKit turns the Apple Home bridge on or off and persists the choice so it
-// survives reboots and OTA updates. Body: {"enabled": true|false}.
-func (s *Server) setHomeKit(w http.ResponseWriter, r *http.Request) {
-	if s.homekit == nil {
-		http.Error(w, "homekit not supported", http.StatusNotImplemented)
-		return
-	}
-	var body struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		s.fail(w, "bad body", err)
-		return
-	}
-	if err := s.settings.SetHomeKit(body.Enabled); err != nil {
-		s.fail(w, "save homekit setting failed", err)
-		return
-	}
-	if body.Enabled {
-		s.homekit.Start()
-	} else {
-		s.homekit.Stop()
-	}
-	writeJSON(w, 200, map[string]any{
-		"enabled": s.homekit.Enabled(),
-		"name":    s.homekit.Name(),
-		"code":    s.homekit.Code(),
-		"uri":     s.homekit.SetupURI(),
-	})
-}
-
-// resetHomeKit clears the HomeKit pairing state so the accessory becomes
-// discoverable again. Used when a pairing was removed in the Home app (or never
-// finished) and the accessory is left advertising as already-paired.
-func (s *Server) resetHomeKit(w http.ResponseWriter, r *http.Request) {
-	if s.homekit == nil {
-		http.Error(w, "homekit not supported", http.StatusNotImplemented)
-		return
-	}
-	if err := s.homekit.Reset(); err != nil {
-		s.fail(w, "reset homekit pairing failed", err)
-		return
-	}
-	writeJSON(w, 200, map[string]any{
-		"enabled": s.homekit.Enabled(),
-		"name":    s.homekit.Name(),
-		"code":    s.homekit.Code(),
-		"uri":     s.homekit.SetupURI(),
-	})
 }
 
 func (s *Server) now(w http.ResponseWriter, r *http.Request) {

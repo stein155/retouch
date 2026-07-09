@@ -27,7 +27,6 @@ internal/artwork/    cover-art lookup for a track via the iTunes Search API
 internal/speaker/    speaker control (play, presets, volume, name, bass, multiroom zones)
 internal/discover/   finds other ReTouch speakers on the LAN (for multiroom)
 internal/marge/      local emulation of the Bose cloud API the firmware expects
-internal/homekit/    HomeKit (HAP) — exposes the speaker to Apple Home as a Television
 internal/autopair/   keeps the speaker's sources enabled
 internal/mqtt/       tiny stdlib-only MQTT 3.1.1 client (publish / subscribe, QoS 0)
 internal/habridge/   Home Assistant MQTT bridge: models the speaker as an HA device
@@ -60,8 +59,8 @@ go run . -speaker-host 127.0.0.1   # point the agent at the simulator
 
 ## Build & test
 
-This is an almost stdlib-only Go module (`go.mod`) with a single dependency,
-`github.com/brutella/hap`, used only by `internal/homekit` (see Conventions for why).
+This is a **stdlib-only** Go module (`go.mod`): no third-party dependencies at all.
+(HomeKit, which needs `github.com/brutella/hap`, is a separate plugin — see below.)
 **Do not install toolchains on the host — always build inside Docker** and clean up
 afterward.
 
@@ -98,14 +97,10 @@ is self-contained. Rebuild the frontend whenever you change anything under
   configuration is backed up first so it can be fully restored.
 - An autostart entry relaunches ReTouch on every boot; on boot it re-checks in so the
   native radio sources come back automatically.
-- When enabled (the installer enables it), the HomeKit server listens on its own LAN
-  port (`:51827`) — separate from the `:8080` web UI and not affected by the `:8000`
-  redirect/hide rules — and advertises an Apple Home accessory via its own mDNS. The
-  speaker is published as a single HomeKit **Television** accessory (on/off, a linked
-  Speaker service for volume/mute, and the six presets as linked input sources). The
-  setup code is derived from the speaker's device id (stable across reboots) and shown
-  in the UI / at `GET /api/homekit`. Pairing state lives under the install dir, so
-  `uninstall.sh` removes it with everything else.
+- Apple Home (HomeKit) is not built in. It ships as the `retouch-homekit` plugin,
+  installed from the settings page and supervised by the plugin host; its HAP server
+  and pairing state live under the plugin's own directory. Keeping it out of the core
+  is what lets this module stay stdlib-only.
 - Everything is reversible via `install/uninstall.sh`.
 
 When referring to a speaker in code, docs, or scripts, use a placeholder such as
@@ -113,11 +108,12 @@ When referring to a speaker in code, docs, or scripts, use a placeholder such as
 
 ## Conventions
 
-- **Stdlib-only Go.** Don't add Go dependencies without a strong reason. The one
-  exception is `github.com/brutella/hap` (HomeKit): the HomeKit Accessory Protocol
-  needs SRP pairing, Curve25519/ChaCha20-Poly1305 transport crypto and its own mDNS
-  advertisement, none of which is feasible on the stdlib. It is confined to
-  `internal/homekit`; the rest of the tree stays stdlib-only.
+- **Stdlib-only Go.** The core has no third-party dependencies; don't add any.
+  HomeKit is the reason this is possible as a rule rather than an aspiration: it
+  needs `github.com/brutella/hap` (SRP pairing, Curve25519/ChaCha20-Poly1305
+  transport crypto, its own mDNS), so it lives in a separate plugin binary
+  (`retouch-homekit`) instead of in this module. Anything that would pull in a
+  dependency belongs in a plugin, not the core.
 - **Reversible by default.** Anything that changes the speaker must back up what it
   replaces and be undoable from `uninstall.sh`.
 - **No domain jargon in user-facing text.** Installer and UI copy should read plainly

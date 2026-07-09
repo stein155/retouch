@@ -58,13 +58,10 @@ giveup() { echo "${TAG:-}" >"$GAVEUP"; log "$*; giving up (target ${TAG:-?})"; e
 case "${RETOUCH_RELEASE_BASE:-}" in *[!A-Za-z0-9:/._~-]*) log "RETOUCH_RELEASE_BASE has invalid characters; ignoring update"; exit 0 ;; esac
 case "${RETOUCH_TARGET_TAG:-}"   in *[!A-Za-z0-9._-]*)    log "RETOUCH_TARGET_TAG has invalid characters; ignoring update"; exit 0 ;; esac
 
-# HomeKit bridge: expose the speaker to Apple Home. It is turned on/off from the
-# settings page (persisted, so it survives reboots and OTA updates) — these flags
-# only configure where it listens (a LAN port separate from the :8080 web UI) and
-# where its pairing state lives ($HOME_DIR, so pairings survive reboots). The setup
-# code is derived from the speaker's device id and shown in ReTouch's settings.
-HOMEKIT_ADDR=:51827
-LAUNCH="$BIN -speaker-host 127.0.0.1 -listen $WEB_LISTEN -listen-marge $MARGE_LISTEN -marge-base $MARGE_BASE -presets $HOME_DIR/presets.json -homekit-addr $HOMEKIT_ADDR -homekit-store $HOME_DIR/homekit"
+# Apple Home (HomeKit) is no longer built in — it ships as the retouch-homekit
+# plugin, installed from ReTouch's settings. The plugin host manages its lifecycle,
+# so no HomeKit flags are needed here.
+LAUNCH="$BIN -speaker-host 127.0.0.1 -listen $WEB_LISTEN -listen-marge $MARGE_LISTEN -marge-base $MARGE_BASE -presets $HOME_DIR/presets.json"
 
 start_agent() {
 	if pidof retouch >/dev/null 2>&1; then

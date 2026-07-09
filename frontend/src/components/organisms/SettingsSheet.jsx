@@ -5,7 +5,6 @@ import { Spinner } from '../atoms/Spinner';
 import { Skeleton } from '../atoms/Skeleton';
 import { Button } from '../atoms/Button';
 import { Toggle } from '../atoms/Toggle';
-import { QRCode } from '../atoms/QRCode';
 import { BassSlider } from '../molecules/BassSlider';
 import { SpeakerRow } from '../molecules/SpeakerRow';
 import { PluginsSection } from './PluginsSection';
@@ -21,7 +20,6 @@ import { useI18n, LANGS } from '../../lib/i18n';
 import {
   getSettings, saveSettings, getVersion, getReleases, startUpdate,
   findSpeakers, groupSpeaker, ungroupSpeaker,
-  getHomeKit, setHomeKit, resetHomeKit,
   getMqttStatus, getAuth, login, logout, setPassword,
 } from '../../lib/api';
 
@@ -42,154 +40,6 @@ const ScanButton = styled(Button).attrs({ $variant: 'update' })`
   color: var(--bg);
   &:hover { background: var(--ink-2); }
 `;
-
-// HomeKit pairing card: the QR code to scan, with the numeric setup code below it
-// as a tappable pill that copies. Laid out as a centred white FieldCard so it
-// matches the rest of the settings sheet.
-const HkCard = styled(FieldCard)`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 20px 18px 16px;
-  margin-top: 8px;
-`;
-
-// The QR sits in a white box with a hairline ring — its quiet zone against the card.
-const HkQuiet = styled.div`
-  padding: 12px;
-  background: #fff;
-  border-radius: 14px;
-  box-shadow: 0 0 0 1px rgba(31, 24, 20, 0.06);
-  line-height: 0;
-`;
-
-const HkCodeBtn = styled.button`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 18px;
-  padding: 8px 10px 8px 16px;
-  background: var(--surface-2);
-  border-radius: 12px;
-  -webkit-tap-highlight-color: transparent;
-`;
-
-const HkCode = styled.span`
-  font-size: 21px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-`;
-
-const HkCopy = styled.span`
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-shrink: 0;
-  padding: 6px 10px;
-  border-radius: 9px;
-  background: #fff;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--accent);
-`;
-
-const HkReset = styled.button`
-  display: block;
-  margin: 12px auto 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink-3);
-  text-decoration: underline;
-
-  &:disabled { opacity: 0.5; cursor: default; }
-`;
-
-// HomeKit: expose this speaker to Apple Home. A single toggle turns the HAP bridge
-// on/off at runtime (persisted on the speaker); when on, it shows the setup code to
-// type into the Home app. Hidden entirely on builds without HomeKit support.
-function HomeKitSection() {
-  const { t } = useI18n();
-  const [hk, setHk] = useState(null); // { supported, enabled, name, code }
-  const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => { getHomeKit().then((d) => d && setHk(d)); }, []);
-
-  if (!hk || !hk.supported) return null;
-
-  const copyCode = async () => {
-    if (!hk.code) return;
-    try { await navigator.clipboard.writeText(hk.code); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard unavailable */ }
-  };
-
-  const reset = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const res = await resetHomeKit();
-      if (res) setHk((s) => ({ ...s, ...res }));
-    } catch { /* leave state as-is */ } finally { setBusy(false); }
-  };
-
-  const toggle = async () => {
-    if (busy) return;
-    const want = !hk.enabled;
-    setBusy(true);
-    setHk((s) => ({ ...s, enabled: want })); // optimistic
-    try {
-      const res = await setHomeKit(want);
-      if (res) setHk((s) => ({ ...s, ...res }));
-    } catch {
-      setHk((s) => ({ ...s, enabled: !want })); // revert
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <>
-      <FieldHint style={{ marginTop: 0, marginBottom: 8 }}>{t('homekitHint')}</FieldHint>
-      <FieldCard>
-        <FieldRow>
-          <FieldRowLabel as="span">{t('homekitEnable')}</FieldRowLabel>
-          <Toggle
-            on={hk.enabled}
-            onClick={toggle}
-            disabled={busy}
-            aria-label={t('homekitEnable')}
-            style={{ marginLeft: 'auto' }}
-          />
-        </FieldRow>
-      </FieldCard>
-      {hk.enabled && hk.code && (
-        <>
-          <HkCard>
-            <SetEyebrow style={{ marginBottom: 14 }}>{t('homekitScan')}</SetEyebrow>
-            {hk.uri && (
-              <HkQuiet>
-                <QRCode value={hk.uri} size={150} />
-              </HkQuiet>
-            )}
-            <HkCodeBtn type="button" onClick={copyCode} aria-label={t('homekitCopyCode')}>
-              <HkCode>{hk.code}</HkCode>
-              <HkCopy>
-                {copied && <Icon.check width="15" height="15" />}
-                {copied ? t('copied') : t('copy')}
-              </HkCopy>
-            </HkCodeBtn>
-          </HkCard>
-          <FieldHint style={{ textAlign: 'center' }}>{t('homekitCodeHint')}</FieldHint>
-          <HkReset type="button" onClick={reset} disabled={busy}>
-            {t('homekitReset')}
-          </HkReset>
-        </>
-      )}
-    </>
-  );
-}
 
 // Shown once an update lands: a blocking full-screen overlay that forces the
 // page to reload onto the new bundle. Sits above the sheet (z-index 50) so the
@@ -634,7 +484,6 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
   const [loading, setLoading] = useState(true); // true until the first settings fetch resolves
   const [page, setPage] = useState(null); // null = category menu; else the open subpage key
   const [auth, setAuth] = useState(null); // { hasPassword, authenticated } | null = unknown
-  const [hkSupported, setHkSupported] = useState(false); // Apple Home available on this build
   const nameTimer = useRef(null);
   const pollRef = useRef(null);
   const pollGen = useRef(0); // bumped to invalidate a poll tick that is mid-await
@@ -661,8 +510,6 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
     }).catch(() => setLoading(false));
     getVersion().then((v) => v && setVer(v));
     getReleases().then((r) => { if (r) setBetas(r.betas || []); });
-    // Only surface the Apple Home page on builds that actually ship the bridge.
-    getHomeKit().then((d) => setHkSupported(!!(d && d.supported)));
   }, []);
 
   useEffect(() => {
@@ -827,7 +674,6 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
     { key: 'sound', icon: Icon.volume },
     (wifiOpt !== null || network) && { key: 'network', icon: Icon.wifi },
     { key: 'multiroom', icon: Icon.layers },
-    hkSupported && { key: 'homekit', icon: Icon.home },
     { key: 'mqtt', icon: Icon.globe },
     { key: 'plugins', icon: Icon.settings },
     { key: 'security', icon: Icon.shield },
@@ -957,7 +803,6 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
       </>
     ),
     multiroom: <MultiroomSection open={open && page === 'multiroom'} />,
-    homekit: <HomeKitSection />,
     mqtt: <MqttSection open={open && page === 'mqtt'} onAuthError={onAuthExpired} />,
     security: (
       <>
