@@ -177,10 +177,6 @@ func Run() {
 		}()
 	}
 
-	// Apple Home (HomeKit) is no longer built in: it ships as the retouch-homekit
-	// plugin, installed and supervised by the plugin host below. That keeps this
-	// binary stdlib-only and makes HomeKit opt-in.
-
 	// Plugin host: downloads/verifies plugin binaries (reusing the OTA path), then
 	// supervises each as a child process and reverse-proxies its config API under
 	// /api/plugins/<name>/. Plugins reach the speaker's local API and call back to

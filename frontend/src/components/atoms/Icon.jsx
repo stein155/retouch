@@ -1,11 +1,6 @@
 // SVG icon set. Kept verbatim from the original Icons.jsx — pure presentational
 // atoms, no styling beyond the inline SVG attributes.
 export const Icon = {
-  home: (p) => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
-      <path d="M4 11 12 4l8 7" /><path d="M6 10v9h12v-9" />
-    </svg>
-  ),
   search: (p) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" {...p}>
       <circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" />
