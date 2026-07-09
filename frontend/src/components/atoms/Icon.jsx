@@ -93,6 +93,12 @@ export const Icon = {
       <path d="M12 3 5 6v5c0 4.4 3 7.6 7 9 4-1.4 7-4.6 7-9V6l-7-3Z"/>
     </svg>
   ),
+  lock: (p) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <rect x="5" y="10.5" width="14" height="9.5" rx="2.6"/>
+      <path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>
+    </svg>
+  ),
   globe: (p) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
       <circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.4 2.4 3.5 5.7 3.5 9s-1.1 6.6-3.5 9c-2.4-2.4-3.5-5.7-3.5-9S9.6 5.4 12 3Z"/>
