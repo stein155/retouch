@@ -64,6 +64,12 @@ takes the other route and lives on the speaker itself:
 |:---:|:---:|:---:|
 | ![Home](screenshots/home.png) | ![Search](screenshots/search.png) | ![Settings](screenshots/settings.png) |
 
+**Dark mode** — follows your device automatically, or pick light/dark yourself under Settings › General.
+
+<p align="center">
+  <img src="screenshots/home-dark.png" width="280" alt="ReTouch in dark mode" />
+</p>
+
 ## What you get
 
 - 🔎 **Search internet radio** — TuneIn's public directory, no account or key
@@ -77,7 +83,9 @@ takes the other route and lives on the speaker itself:
   appears in Home Assistant automatically, with volume, station switching, transport,
   power on/off, and now-playing — plus a native update entity that notifies you when a
   new ReTouch release is out and installs it over the air
-- ⚙️ **Settings** — speaker name, bass, and the app's language
+- ⚙️ **Settings** — speaker name, bass, the app's language, and light/dark appearance
+- 🌙 **Light & dark mode** — follows your device, or set it yourself; the whole app
+  re-themes instantly with a warm gradient backdrop
 - ⬆️ **Over-the-air updates** — one tap in the app; the speaker fetches the latest
   release and relaunches ReTouch in a few seconds (no reboot)
 
