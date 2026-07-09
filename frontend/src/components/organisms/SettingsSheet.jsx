@@ -32,9 +32,12 @@ const sigLabel = (t, sig) => {
   return key ? t(key) : sig;
 };
 
-// .spk-scan — multiroom scan button: the dark variant of .update-btn.
+// .spk-scan — multiroom scan button: the dark variant of .update-btn. Its label
+// is --bg (not #fff) so it inverts with the theme: dark button + light label in
+// light mode, light button + dark label in dark mode.
 const ScanButton = styled(Button).attrs({ $variant: 'update' })`
   background: var(--ink);
+  color: var(--bg);
   &:hover { background: var(--ink-2); }
 `;
 
@@ -54,7 +57,7 @@ const UpdateOverlay = styled.div`
 `;
 
 const UpdateCard = styled.div`
-  background: var(--bg);
+  background: var(--surface);
   border-radius: 22px;
   padding: 30px 26px;
   max-width: 320px;
@@ -462,7 +465,7 @@ function SettingsSkeleton() {
 // settings (Wi-Fi/streaming optimization + a read-only connection summary). Each
 // device setting only appears when the speaker actually reports it. Live-applies
 // every field.
-export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) {
+export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSetTheme, onNameChange }) {
   const { t } = useI18n();
   const [name, setName] = useState('');
   const [bass, setBass] = useState(0);
@@ -705,6 +708,20 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, onNameChange }) 
             aria-label={t('language')}
           >
             {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+          </Select>
+          <SelectChev aria-hidden="true"><Icon.chevron width="18" height="18" /></SelectChev>
+        </SelectWrap>
+
+        <FormSection style={{ marginTop: 22 }}>{t('appearance')}</FormSection>
+        <SelectWrap>
+          <Select
+            value={themeMode}
+            onChange={(e) => onSetTheme(e.target.value)}
+            aria-label={t('appearance')}
+          >
+            <option value="system">{t('themeSystem')}</option>
+            <option value="light">{t('themeLight')}</option>
+            <option value="dark">{t('themeDark')}</option>
           </Select>
           <SelectChev aria-hidden="true"><Icon.chevron width="18" height="18" /></SelectChev>
         </SelectWrap>

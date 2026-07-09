@@ -68,7 +68,7 @@ const TileName = styled.span`
 // .tile (filled state wrapper) + is-playing / is-starting variants.
 const Tile = styled.div`
   position: relative;
-  background: #fff;
+  background: var(--surface);
   border-radius: var(--radius);
   aspect-ratio: 1.1 / 1;
   min-height: 116px;
@@ -88,17 +88,17 @@ const Tile = styled.div`
       inset 0 0 0 1px rgba(196, 122, 82, 0.25);
 
     ${TileName} { color: var(--ink); }
-    ${TileLogo} { background: #fff; color: var(--accent); }
-    ${TileMore} { color: var(--accent); background: rgba(255, 255, 255, 0.6); opacity: 1; }
+    ${TileLogo} { background: var(--surface); color: var(--accent); }
+    ${TileMore} { color: var(--accent); background: var(--surface); opacity: 1; }
   `}
   ${(p) => p.$starting && css`
-    background: linear-gradient(180deg, var(--accent-soft), #fff);
+    background: linear-gradient(180deg, var(--accent-soft), var(--surface));
     box-shadow:
       0 6px 18px -10px rgba(196, 122, 82, 0.3),
       inset 0 0 0 1px rgba(196, 122, 82, 0.18);
 
-    ${TileLogo} { background: #fff; color: var(--accent); }
-    ${TileMore} { opacity: 1; color: var(--accent); background: rgba(255, 255, 255, 0.6); }
+    ${TileLogo} { background: var(--surface); color: var(--accent); }
+    ${TileMore} { opacity: 1; color: var(--accent); background: var(--surface); }
   `}
 
   @media (prefers-reduced-motion: reduce) { transition: none; }
@@ -156,12 +156,12 @@ const TileEmpty = styled.button`
   padding: 14px;
   width: 100%;
   cursor: pointer;
-  border: 1.5px dashed rgba(31, 24, 20, 0.18);
+  border: 1.5px dashed var(--border-strong);
   color: var(--ink-2);
   box-shadow: none;
   text-align: center;
 
-  &:hover { background: rgba(255, 255, 255, 0.5); border-color: rgba(31, 24, 20, 0.28); }
+  &:hover { background: var(--surface-2); border-color: var(--border-strong); }
   &:active { transform: translateY(0) scale(0.985); }
 
   @media (prefers-reduced-motion: reduce) { transition: none; }
@@ -173,7 +173,7 @@ const TileEmptyMid = styled.span`
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--surface);
   color: var(--accent);
   box-shadow: var(--shadow-sm);
 `;
@@ -197,7 +197,7 @@ const Popover = styled.div`
   top: 40px;
   right: 8px;
   z-index: 5;
-  background: #fff;
+  background: var(--surface);
   border-radius: 14px;
   padding: 5px;
   min-width: 140px;
@@ -221,7 +221,7 @@ const Popover = styled.div`
 // .tile-skeleton — a loading placeholder matching the filled tile's shape, so
 // the grid doesn't flash empty "add" slots before the presets arrive.
 const TileSkeleton = styled.div`
-  background: #fff;
+  background: var(--surface);
   border-radius: var(--radius);
   aspect-ratio: 1.1 / 1;
   min-height: 116px;

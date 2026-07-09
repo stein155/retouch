@@ -28,7 +28,7 @@ const Row = styled.button`
   width: 100%;
   text-align: left;
 
-  &:hover { background: rgba(255, 255, 255, 0.6); }
+  &:hover { background: var(--surface-2); }
   &:hover ${RowPlay} { opacity: 1; transform: scale(1.05); }
 `;
 
