@@ -17,7 +17,7 @@ const Mp = styled.div`
   bottom: max(14px, calc(env(safe-area-inset-bottom) + 8px));
   z-index: 20;
   flex-shrink: 0;
-  background: #fff;
+  background: var(--surface);
   border-radius: 22px;
   padding: 12px;
   transition: transform 360ms cubic-bezier(.34,.78,.18,1), box-shadow 300ms ease;
@@ -26,7 +26,7 @@ const Mp = styled.div`
     0 18px 40px -16px rgba(31, 24, 20, 0.22),
     0 0 0 1px rgba(31, 24, 20, 0.05);
 
-  ${(p) => p.$on && `background: linear-gradient(180deg, var(--accent-soft), #fff);`}
+  ${(p) => p.$on && `background: linear-gradient(180deg, var(--accent-soft), var(--surface));`}
 
   @media (prefers-reduced-motion: reduce) { transition: none; }
 `;

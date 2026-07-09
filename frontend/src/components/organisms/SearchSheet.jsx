@@ -16,7 +16,7 @@ const SheetSearch = styled.div`
   gap: 10px;
   margin: 0 20px 10px;
   padding: 14px 16px;
-  background: #fff;
+  background: var(--surface);
   border-radius: 16px;
   color: var(--ink-2);
   box-shadow: var(--shadow-sm);
@@ -45,7 +45,7 @@ const SheetClear = styled.button`
   color: var(--ink-2);
   background: var(--surface-3);
 
-  &:hover { background: var(--ink); color: #fff; }
+  &:hover { background: var(--ink); color: var(--bg); }
 `;
 
 const SheetRows = styled.div`

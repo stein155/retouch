@@ -24,7 +24,7 @@ const Switch = styled.button`
   border: none;
   border-radius: 99px;
   cursor: pointer;
-  background: rgba(31, 24, 20, 0.16);
+  background: var(--border-strong);
   position: relative;
   transition: background 0.18s ease;
 

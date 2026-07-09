@@ -9,7 +9,7 @@ const Browse = styled.button`
   display: flex;
   align-items: center;
   gap: 14px;
-  background: #fff;
+  background: var(--surface);
   border-radius: var(--radius);
   padding: 14px 16px;
   color: var(--ink);

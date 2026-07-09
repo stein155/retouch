@@ -13,12 +13,12 @@ export const Shell = styled.div`
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--app-bg);
 
   @media (min-width: 720px) {
     height: min(880px, calc(100dvh - 64px));
     max-height: 920px;
-    background: var(--bg);
+    background: var(--app-bg);
     border-radius: 36px;
     overflow: hidden;
     box-shadow:

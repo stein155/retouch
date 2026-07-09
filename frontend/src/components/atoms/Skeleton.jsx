@@ -10,7 +10,7 @@ export const Skeleton = styled.span`
   background-image: linear-gradient(
     90deg,
     transparent 0,
-    rgba(255, 255, 255, 0.55) 50%,
+    var(--shimmer) 50%,
     transparent 100%
   );
   background-size: 150% 100%;
