@@ -81,6 +81,8 @@ export const I18N = {
     pluginNotRunning: 'Not running', pluginRunning: 'Running', pluginUpdatable: 'Can’t be updated over the air (installed from file).',
     pluginsOnSpeaker: 'Plugins are only available on the speaker itself.',
     pluginSave: 'Save', pluginWorking: 'Working…',
+    pluginCat_ring_title: 'Ring chime',
+    pluginCat_ring_desc: 'Play a chime through this speaker when a Ring doorbell is pressed or motion is detected.',
   },
   nl: {
     appTitle: 'Radio', settings: 'Instellingen', thisRadio: 'Deze radio', general: 'Algemeen', back: 'Terug',
@@ -146,6 +148,8 @@ export const I18N = {
     pluginNotRunning: 'Draait niet', pluginRunning: 'Draait', pluginUpdatable: 'Kan niet draadloos worden bijgewerkt (uit bestand geïnstalleerd).',
     pluginsOnSpeaker: 'Plugins zijn alleen beschikbaar op de speaker zelf.',
     pluginSave: 'Opslaan', pluginWorking: 'Bezig…',
+    pluginCat_ring_title: 'Ring-deurbel',
+    pluginCat_ring_desc: 'Speel een deurbelgeluid af via deze speaker wanneer er op een Ring-deurbel wordt gedrukt of beweging wordt gedetecteerd.',
   },
   de: {
     appTitle: 'Radio', settings: 'Einstellungen', thisRadio: 'Dieses Radio', general: 'Allgemein', back: 'Zurück',
@@ -211,6 +215,8 @@ export const I18N = {
     pluginNotRunning: 'Läuft nicht', pluginRunning: 'Läuft', pluginUpdatable: 'Kann nicht drahtlos aktualisiert werden (aus Datei installiert).',
     pluginsOnSpeaker: 'Plugins sind nur auf dem Lautsprecher selbst verfügbar.',
     pluginSave: 'Speichern', pluginWorking: 'Wird ausgeführt…',
+    pluginCat_ring_title: 'Ring-Türklingel',
+    pluginCat_ring_desc: 'Spielt einen Klingelton über diesen Lautsprecher ab, wenn an einer Ring-Türklingel geklingelt oder Bewegung erkannt wird.',
   },
   fr: {
     appTitle: 'Radio', settings: 'Réglages', thisRadio: 'Cette radio', general: 'Général', back: 'Retour',
@@ -276,6 +282,8 @@ export const I18N = {
     pluginNotRunning: "À l'arrêt", pluginRunning: 'En cours', pluginUpdatable: 'Impossible de mettre à jour par le réseau (installé depuis un fichier).',
     pluginsOnSpeaker: "Les plugins ne sont disponibles que sur l'enceinte elle-même.",
     pluginSave: 'Enregistrer', pluginWorking: 'En cours…',
+    pluginCat_ring_title: 'Sonnette Ring',
+    pluginCat_ring_desc: 'Diffuse un carillon sur cette enceinte lorsqu’on sonne à une sonnette Ring ou qu’un mouvement est détecté.',
   },
   es: {
     appTitle: 'Radio', settings: 'Ajustes', thisRadio: 'Esta radio', general: 'General', back: 'Atrás',
@@ -341,6 +349,8 @@ export const I18N = {
     pluginNotRunning: 'No está en marcha', pluginRunning: 'En marcha', pluginUpdatable: 'No se puede actualizar por la red (instalado desde archivo).',
     pluginsOnSpeaker: 'Los plugins solo están disponibles en el propio altavoz.',
     pluginSave: 'Guardar', pluginWorking: 'Trabajando…',
+    pluginCat_ring_title: 'Timbre Ring',
+    pluginCat_ring_desc: 'Reproduce un timbre por este altavoz cuando se pulsa un timbre Ring o se detecta movimiento.',
   },
   af: {
     appTitle: 'Radio', settings: 'Instellings', thisRadio: 'Hierdie radio', general: 'Algemeen', back: 'Terug',
@@ -406,6 +416,8 @@ export const I18N = {
     pluginNotRunning: 'Loop nie', pluginRunning: 'Loop', pluginUpdatable: 'Kan nie draadloos opgedateer word nie (vanaf lêer geïnstalleer).',
     pluginsOnSpeaker: 'Plugins is net op die luidspreker self beskikbaar.',
     pluginSave: 'Stoor', pluginWorking: 'Besig…',
+    pluginCat_ring_title: 'Ring-deurklok',
+    pluginCat_ring_desc: 'Speel ’n deurklokgeluid deur hierdie luidspreker wanneer ’n Ring-deurklok gedruk word of beweging bespeur word.',
   },
 };
 
