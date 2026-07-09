@@ -1,6 +1,7 @@
 // Package settings persists small STLocal-level preferences that aren't speaker
-// state — currently just the UI language. (The speaker's own name and bass live on
-// the speaker; its sysLanguage is a separate voice-prompt setting we don't touch.)
+// state — the UI language, the MQTT bridge config and the settings password. (The
+// speaker's own name and bass live on the speaker; its sysLanguage is a separate
+// voice-prompt setting we don't touch.)
 package settings
 
 import (

@@ -30,6 +30,13 @@ type CatalogEntry struct {
 func Catalog() []CatalogEntry {
 	return []CatalogEntry{
 		{
+			Name:        "homekit",
+			Title:       "Apple Home",
+			Description: "Add this radio to Apple Home and control it with Siri. Adds HomeKit support, which isn't built into ReTouch by default.",
+			Repo:        "stein155/retouch-homekit",
+			Asset:       "retouch-homekit-armv7l",
+		},
+		{
 			Name:        "ring",
 			Title:       "Ring chime",
 			Description: "Play a chime through this speaker when a Ring doorbell is pressed or motion is detected.",

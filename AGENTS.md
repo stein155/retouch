@@ -59,8 +59,10 @@ go run . -speaker-host 127.0.0.1   # point the agent at the simulator
 
 ## Build & test
 
-This is a stdlib-only Go module (`go.mod`). **Do not install toolchains on the host
-— always build inside Docker** and clean up afterward.
+This is a **stdlib-only** Go module (`go.mod`): no third-party dependencies at all.
+(HomeKit, which needs `github.com/brutella/hap`, is a separate plugin — see below.)
+**Do not install toolchains on the host — always build inside Docker** and clean up
+afterward.
 
 ```sh
 # build for the speaker (ARMv7) and for local testing (amd64)
@@ -95,6 +97,10 @@ is self-contained. Rebuild the frontend whenever you change anything under
   configuration is backed up first so it can be fully restored.
 - An autostart entry relaunches ReTouch on every boot; on boot it re-checks in so the
   native radio sources come back automatically.
+- Apple Home (HomeKit) is not built in. It ships as the `retouch-homekit` plugin,
+  installed from the settings page and supervised by the plugin host; its HAP server
+  and pairing state live under the plugin's own directory. Keeping it out of the core
+  is what lets this module stay stdlib-only.
 - Everything is reversible via `install/uninstall.sh`.
 
 When referring to a speaker in code, docs, or scripts, use a placeholder such as
@@ -102,7 +108,12 @@ When referring to a speaker in code, docs, or scripts, use a placeholder such as
 
 ## Conventions
 
-- **Stdlib-only Go.** Don't add Go dependencies without a strong reason.
+- **Stdlib-only Go.** The core has no third-party dependencies; don't add any.
+  HomeKit is the reason this is possible as a rule rather than an aspiration: it
+  needs `github.com/brutella/hap` (SRP pairing, Curve25519/ChaCha20-Poly1305
+  transport crypto, its own mDNS), so it lives in a separate plugin binary
+  (`retouch-homekit`) instead of in this module. Anything that would pull in a
+  dependency belongs in a plugin, not the core.
 - **Reversible by default.** Anything that changes the speaker must back up what it
   replaces and be undoable from `uninstall.sh`.
 - **No domain jargon in user-facing text.** Installer and UI copy should read plainly

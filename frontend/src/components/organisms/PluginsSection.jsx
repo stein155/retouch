@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import styled from 'styled-components';
 import { Icon } from '../atoms/Icon';
 import { Spinner } from '../atoms/Spinner';
 import { Button } from '../atoms/Button';
 import { Toggle } from '../atoms/Toggle';
+import { QRCode } from '../atoms/QRCode';
 import {
-  FieldHint, FieldCard, FieldRow, FieldRowLabel, FieldRowInput, FieldRowValue,
+  FieldHint, FieldCard, FieldRow, FieldRowLabel, FieldRowInput, FieldRowValue, SetEyebrow,
 } from '../molecules/Field';
 import { useI18n } from '../../lib/i18n';
 import {
@@ -16,6 +18,85 @@ import {
 const statusColor = (level) => ({
   ok: '#2ecc71', warn: '#f1c40f', error: '#e74c3c',
 }[level] || 'var(--muted, #9aa0a6)');
+
+// --- qr field: a scannable pairing code plus its typeable digits -----------
+// Used by plugins like Apple Home. The field carries { value } (the payload the QR
+// encodes) and an optional { code } (the human-readable version, tap to copy).
+const QrCardEl = styled(FieldCard)`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 18px 16px;
+`;
+
+const QrQuiet = styled.div`
+  padding: 12px;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px rgba(31, 24, 20, 0.06);
+  line-height: 0;
+`;
+
+const QrCodeBtn = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 8px 10px 8px 16px;
+  background: var(--surface-2);
+  border-radius: 12px;
+  -webkit-tap-highlight-color: transparent;
+`;
+
+const QrCodeText = styled.span`
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+`;
+
+const QrCopy = styled.span`
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+`;
+
+function QrField({ field }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    if (!field.code) return;
+    try {
+      await navigator.clipboard.writeText(field.code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard unavailable */ }
+  };
+  return (
+    <QrCardEl>
+      {field.label && <SetEyebrow style={{ marginBottom: 14 }}>{field.label}</SetEyebrow>}
+      {field.value && <QrQuiet><QRCode value={field.value} size={150} /></QrQuiet>}
+      {field.code && (
+        <QrCodeBtn type="button" onClick={copy} aria-label={t('copy')}>
+          <QrCodeText>{field.code}</QrCodeText>
+          <QrCopy>
+            {copied && <Icon.check width="15" height="15" />}
+            {copied ? t('copied') : t('copy')}
+          </QrCopy>
+        </QrCodeBtn>
+      )}
+    </QrCardEl>
+  );
+}
 
 // PluginPanel renders one installed plugin's server-driven settings UI. The plugin
 // serves a "manifest" (status + sections of fields/rows/actions); every action POSTs
@@ -103,9 +184,13 @@ function PluginPanel({ name }) {
           {sec.title && <FieldRowLabel as="div" style={{ fontWeight: 600, marginBottom: 6 }}>{sec.title}</FieldRowLabel>}
           {sec.text && <FieldHint style={{ marginTop: 0, marginBottom: 8 }}>{sec.text}</FieldHint>}
 
-          {(sec.fields?.length > 0 || sec.rows?.length > 0) && (
+          {(sec.fields || []).filter((f) => f.type === 'qr').map((f) => (
+            <QrField key={f.key} field={f} />
+          ))}
+
+          {((sec.fields || []).some((f) => f.type !== 'qr') || sec.rows?.length > 0) && (
             <FieldCard>
-              {(sec.fields || []).map((f) => (
+              {(sec.fields || []).filter((f) => f.type !== 'qr').map((f) => (
                 <FieldRow key={f.key}>
                   <FieldRowLabel htmlFor={`pl-${name}-${f.key}`}>{f.label}</FieldRowLabel>
                   {f.type === 'toggle' ? (

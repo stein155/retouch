@@ -19,8 +19,8 @@ import {
 import { useI18n, LANGS } from '../../lib/i18n';
 import {
   getSettings, saveSettings, getVersion, getReleases, startUpdate,
-  findSpeakers, groupSpeaker, ungroupSpeaker, getMqttStatus,
-  getAuth, login, logout, setPassword,
+  findSpeakers, groupSpeaker, ungroupSpeaker,
+  getMqttStatus, getAuth, login, logout, setPassword,
 } from '../../lib/api';
 
 const fmtBass = (v) => (v > 0 ? '+' + v : String(v));
