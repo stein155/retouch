@@ -11,13 +11,14 @@ import {
   playPreset, stopPlayback, storePreset, selectStation, getSettings, saveSettings,
 } from '../lib/api';
 import { makeT, I18nContext, useI18n, detectInitialLang, LANGS } from '../lib/i18n';
+import { useThemeMode } from '../theme/themeMode';
 
 const clean = (value) => (typeof value === 'string' ? value.trim() : '');
 
 // The page body. Reads translations from context; everything else comes in as
 // props from HomePage. This is App.jsx's old body, unchanged in behaviour.
 function HomeBody({
-  lang, onSetLang, speakerName, setSpeakerName, speakerModel,
+  lang, onSetLang, themeMode, onSetTheme, speakerName, setSpeakerName, speakerModel,
   search, setSearch, settingsOpen, setSettingsOpen, data, settingsLoaded,
 }) {
   const { t } = useI18n();
@@ -132,6 +133,8 @@ function HomeBody({
         open={settingsOpen}
         lang={lang}
         onSetLang={onSetLang}
+        themeMode={themeMode}
+        onSetTheme={onSetTheme}
         onNameChange={setSpeakerName}
         onClose={() => setSettingsOpen(false)}
       />
@@ -144,6 +147,10 @@ export default function HomePage() {
   // (GET /api/settings) overrides once loaded; changing it persists via PUT.
   const [lang, setLang] = useState(detectInitialLang);
   const t = useMemo(() => makeT(lang), [lang]);
+
+  // Colour scheme: 'system' | 'light' | 'dark', persisted per device. The hook
+  // applies the resolved theme to <html> and follows the OS in 'system' mode.
+  const [themeMode, setThemeMode] = useThemeMode();
 
   const [search, setSearch] = useState(null); // null | { mode:'browse' } | { mode:'assign', slot:N }
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -189,6 +196,8 @@ export default function HomePage() {
       <HomeBody
         lang={lang}
         onSetLang={handleSetLang}
+        themeMode={themeMode}
+        onSetTheme={setThemeMode}
         speakerName={speakerName}
         setSpeakerName={setSpeakerName}
         speakerModel={speakerModel}

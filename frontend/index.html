@@ -17,6 +17,22 @@
          and styled-components injects GlobalStyle. Without it the body briefly
          shows the UA margin + a window scrollbar, so the centred app frame jumps
          from narrow to wider on refresh. Keep in sync with GlobalStyle. -->
+    <!-- Apply the saved colour scheme before the first paint so a dark-mode
+         device never flashes the light theme. Mirrors theme/themeMode.js — keep
+         the storage key + resolution in sync with it. -->
+    <script>
+      (function () {
+        try {
+          var m = localStorage.getItem('retouch-theme');
+          var mode = (m === 'light' || m === 'dark') ? m : 'system';
+          var dark = mode === 'dark' || (mode === 'system' && window.matchMedia
+            && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', dark ? '#17130f' : '#f1e6cb');
+        } catch (e) { /* private mode / no matchMedia: default to light */ }
+      })();
+    </script>
     <style>
       html, body {
         margin: 0;
@@ -25,6 +41,15 @@
         height: 100dvh;
         overflow: hidden;
         overscroll-behavior: none;
+      }
+      body {
+        background: linear-gradient(176deg, #f1e6cb 0%, #efe1c1 42%, #e7d7b2 100%);
+        background-attachment: fixed;
+      }
+      html[data-theme='dark'], html[data-theme='dark'] body { background: #17130f; }
+      html[data-theme='dark'] body {
+        background: linear-gradient(176deg, #211a14 0%, #17130f 48%, #100c09 100%);
+        background-attachment: fixed;
       }
       @media (min-width: 720px) {
         body { display: grid; place-items: center; }
@@ -37,13 +62,19 @@
          Keep the shapes/tokens in sync with AppShell + PresetTile + MiniPlayer. */
       #root:has(.ls) { height: 100%; }
       .ls {
-        --bg: #f1e6cb; --surface-3: #ead9b3; --accent-soft: #f4dcc6;
-        --ink: #1f1814; --shadow-sm: 0 1px 2px rgba(31,24,20,.05), 0 0 0 1px rgba(31,24,20,.04);
+        --bg: #f1e6cb; --surface: #fff; --surface-3: #ead9b3; --accent-soft: #f4dcc6;
+        --ink: #1f1814; --shimmer: rgba(255,255,255,.55);
+        --shadow-sm: 0 1px 2px rgba(31,24,20,.05), 0 0 0 1px rgba(31,24,20,.04);
         font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
         color: var(--ink);
         width: 460px; max-width: 100%; height: 100dvh; margin: 0 auto;
         display: flex; flex-direction: column; overflow: hidden;
         background: var(--bg); position: relative;
+      }
+      html[data-theme='dark'] .ls {
+        --bg: #17130f; --surface: #221d18; --surface-3: #362c23; --accent-soft: #3b2a1f;
+        --ink: #f3e9db; --shimmer: rgba(255,255,255,.06);
+        --shadow-sm: 0 1px 2px rgba(0,0,0,.4), 0 0 0 1px rgba(0,0,0,.3);
       }
       @media (min-width: 720px) {
         .ls { height: min(880px, calc(100dvh - 64px)); max-height: 920px; border-radius: 36px;
@@ -56,24 +87,24 @@
                  overflow: hidden; box-shadow: 0 1px 4px rgba(31,24,20,.10), 0 0 0 1px rgba(31,24,20,.06); }
       .ls-blob img { width: 100%; height: 100%; object-fit: cover; display: block; }
       .ls-title { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
-      .ls-gear { width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,.6);
+      .ls-gear { width: 40px; height: 40px; border-radius: 50%; background: var(--surface);
                  box-shadow: var(--shadow-sm); }
       .ls-sect { padding: 14px 22px 0; }
       .ls-sect-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
       .ls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-      .ls-tile { background: #fff; border-radius: 20px; aspect-ratio: 1.1 / 1; min-height: 116px;
+      .ls-tile { background: var(--surface); border-radius: 20px; aspect-ratio: 1.1 / 1; min-height: 116px;
                  padding: 14px; box-shadow: var(--shadow-sm);
                  display: flex; flex-direction: column; justify-content: space-between; }
-      .ls-browse { display: flex; align-items: center; gap: 14px; background: #fff; border-radius: 20px;
+      .ls-browse { display: flex; align-items: center; gap: 14px; background: var(--surface); border-radius: 20px;
                    padding: 14px 16px; box-shadow: var(--shadow-sm); margin-top: 6px; }
       .ls-mp { position: absolute; left: 14px; right: 14px; bottom: max(14px, calc(env(safe-area-inset-bottom) + 8px));
-               background: #fff; border-radius: 22px; padding: 12px;
+               background: var(--surface); border-radius: 22px; padding: 12px;
                box-shadow: 0 18px 40px -16px rgba(31,24,20,.22), 0 0 0 1px rgba(31,24,20,.05); }
       .ls-mp-top { display: flex; align-items: center; gap: 12px; }
       .ls-mp-meta { flex: 1; min-width: 0; }
       .ls-mp-vol { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 0 2px; }
       .ls-sk { display: block; background-color: var(--surface-3);
-               background-image: linear-gradient(90deg, transparent 0, rgba(255,255,255,.55) 50%, transparent 100%);
+               background-image: linear-gradient(90deg, transparent 0, var(--shimmer) 50%, transparent 100%);
                background-size: 150% 100%; background-repeat: no-repeat; border-radius: 9px;
                animation: ls-shimmer 1.4s ease-in-out infinite; }
       @keyframes ls-shimmer { from { background-position: -150% 0; } to { background-position: 150% 0; } }

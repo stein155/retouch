@@ -60,7 +60,7 @@ export const SheetEl = styled.div`
 export const SheetHandle = styled.div`
   width: 40px;
   height: 4px;
-  background: rgba(31, 24, 20, 0.15);
+  background: var(--border-strong);
   border-radius: 99px;
   margin: 10px auto 6px;
 
@@ -80,7 +80,7 @@ export const SheetBack = styled.button`
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
   flex-shrink: 0;
   box-shadow: var(--shadow-sm);

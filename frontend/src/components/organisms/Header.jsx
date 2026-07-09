@@ -19,20 +19,26 @@ const Hdr = styled.header`
   right: 0;
   z-index: 10;
   pointer-events: none;
-  background: var(--bg);
+  /* Transparent at rest so the Shell's gradient canvas shows through seamlessly
+     (the bar only overlaps the scroll area's empty top padding); the $scrolled
+     state below fades in a blurred scrim once content slides underneath. */
+  background: transparent;
   transition: background 240ms ease, backdrop-filter 240ms ease;
 
   ${(p) => p.$scrolled && `
+    /* Fully opaque through the title band (so scrolling content is cleanly
+       hidden rather than ghosting through it), then a soft fade + blur on the
+       bottom edge that eases the first rows in as they slide underneath. */
     background: linear-gradient(
       to bottom,
-      rgba(241, 230, 203, 0.9) 0%,
-      rgba(241, 230, 203, 0.62) 46%,
-      rgba(241, 230, 203, 0) 100%
+      rgba(var(--bg-rgb), 1) 0%,
+      rgba(var(--bg-rgb), 1) 62%,
+      rgba(var(--bg-rgb), 0) 100%
     );
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 50%, transparent 100%);
-    mask-image: linear-gradient(to bottom, #000 0%, #000 50%, transparent 100%);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 66%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0%, #000 66%, transparent 100%);
   `}
 
   @media (prefers-reduced-motion: reduce) { transition: none; }
@@ -69,7 +75,7 @@ const HdrGear = styled.button`
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--surface);
   color: var(--ink);
   box-shadow: var(--shadow-sm);
   pointer-events: auto;

@@ -61,6 +61,6 @@ export const SliderCenter = styled.div`
   width: 2px;
   height: 14px;
   transform: translate(-50%, -50%);
-  background: rgba(31, 24, 20, 0.18);
+  background: var(--border-strong);
   border-radius: 99px;
 `;

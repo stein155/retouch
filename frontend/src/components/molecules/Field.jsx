@@ -28,7 +28,7 @@ export const FieldHint = styled.div`
 `;
 
 export const FieldCard = styled.div`
-  background: #fff;
+  background: var(--surface);
   border-radius: 16px;
   padding: 4px 16px;
   box-shadow: var(--shadow-sm);
@@ -81,7 +81,7 @@ export const Select = styled.select`
   font-size: 15px;
   font-weight: 600;
   color: var(--ink);
-  background: #fff;
+  background: var(--surface);
   border: none;
   border-radius: 14px;
   padding: 14px 16px;
@@ -118,7 +118,7 @@ export const SetEyebrow = styled.div`
 `;
 
 export const BassCard = styled.div`
-  background: #fff;
+  background: var(--surface);
   border-radius: 16px;
   padding: 16px 18px 14px;
   box-shadow: var(--shadow-sm);

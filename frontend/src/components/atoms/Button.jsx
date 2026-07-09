@@ -27,7 +27,7 @@ const ghost = css`
   font-weight: 600;
   font-size: 15px;
   color: var(--ink-2);
-  background: #fff;
+  background: var(--surface);
   box-shadow: var(--shadow-sm);
   transition: color 160ms ease, box-shadow 160ms ease;
 
