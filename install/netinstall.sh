@@ -58,6 +58,9 @@ giveup() { echo "${TAG:-}" >"$GAVEUP"; log "$*; giving up (target ${TAG:-?})"; e
 case "${RETOUCH_RELEASE_BASE:-}" in *[!A-Za-z0-9:/._~-]*) log "RETOUCH_RELEASE_BASE has invalid characters; ignoring update"; exit 0 ;; esac
 case "${RETOUCH_TARGET_TAG:-}"   in *[!A-Za-z0-9._-]*)    log "RETOUCH_TARGET_TAG has invalid characters; ignoring update"; exit 0 ;; esac
 
+# Apple Home (HomeKit) is no longer built in — it ships as the retouch-homekit
+# plugin, installed from ReTouch's settings. The plugin host manages its lifecycle,
+# so no HomeKit flags are needed here.
 LAUNCH="$BIN -speaker-host 127.0.0.1 -listen $WEB_LISTEN -listen-marge $MARGE_LISTEN -marge-base $MARGE_BASE -presets $HOME_DIR/presets.json"
 
 start_agent() {

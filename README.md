@@ -77,6 +77,8 @@ takes the other route and lives on the speaker itself:
 - ▶️ **Play / stop and volume**, with live now-playing (station name + logo)
 - 🔗 **Multiroom** — find your other ReTouch speakers and group them so they play
   in sync, using Bose's own native zones
+- 🏠 **Apple Home (HomeKit)** — an optional plugin puts the speaker in the Home app
+  and Siri as a radio you can turn on/off, set the volume on, and pick a preset on
 - 🏠 **Home Assistant (MQTT)** — connect the speaker to your MQTT broker and it
   appears in Home Assistant automatically, with volume, station switching, transport,
   power on/off, and now-playing — plus a native update entity that notifies you when a
@@ -102,6 +104,29 @@ speaker adds the search, presets, and controls.
 finds your other ReTouch speakers on the network and uses Bose's own zone API to
 group them, so one speaker leads and the rest play in perfect sync, exactly like
 multiroom did when the Bose app still worked.
+
+## Apple Home (HomeKit)
+
+Apple Home is an **optional plugin** ([`retouch-homekit`](https://github.com/stein155/retouch-homekit)),
+not part of the core. Install it from **Settings → Plugins**; once it's running, the
+speaker shows up in the Home app and Siri ("Hey Siri, turn on the kitchen speaker",
+"play preset 2") as a single **media accessory** — a radio — with:
+
+- **on/off** (the speaker wakes or goes on standby),
+- a **volume** control with mute (drag the slider, or use the remote's volume buttons),
+- the **six presets as sources** — pick one to play it; the one that's playing is shown
+  as the current source ("now playing").
+
+Under the hood this is a HomeKit **Television** accessory. To pair it, open the plugin's
+settings and either **scan the QR code** with the Home app, or open **Home** →
+**Add Accessory** → *More options* and enter the **setup code** shown there. The code is
+fixed per speaker.
+
+HomeKit lives in a plugin precisely so ReTouch's core stays dependency-free: the HomeKit
+protocol needs one Go dependency (`github.com/brutella/hap`), which the plugin carries so
+the main binary doesn't have to.
+
+## Home Assistant (MQTT)
 
 **Home Assistant** is optional. Turn it on under Settings → Home Assistant (MQTT),
 point it at your broker, and ReTouch publishes MQTT discovery so the speaker shows
