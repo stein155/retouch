@@ -219,15 +219,26 @@ function CatalogPlugin({ entry, onChanged, sideloadAllowed }) {
     try { await uploadPlugin(entry.name, file); onChanged(); } catch (e) { setErr(e.message || String(e)); setBusy(false); }
   };
 
+  // Catalog entries carry English title/description from the server. Prefer a
+  // localised string when the app ships one for this plugin (key present), else
+  // fall back to the server value. makeT returns the key itself when missing.
+  const local = (suffix, fallback) => {
+    const key = `pluginCat_${entry.name}_${suffix}`;
+    const v = t(key);
+    return v === key ? fallback : v;
+  };
+  const title = local('title', entry.title || entry.name);
+  const description = local('desc', entry.description);
+
   return (
     <div style={{ marginTop: 12 }}>
       <FieldCard>
         <FieldRow>
-          <span>
-            <FieldRowLabel as="div">{entry.title || entry.name}</FieldRowLabel>
-            {entry.description && <FieldRowValue as="div" style={{ fontSize: 12, marginTop: 2 }}>{entry.description}</FieldRowValue>}
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <FieldRowLabel as="div">{title}</FieldRowLabel>
+            {description && <FieldRowValue as="div" style={{ flex: 'none', fontSize: 12, marginTop: 2, textAlign: 'left', fontWeight: 400, color: 'var(--ink-3)' }}>{description}</FieldRowValue>}
           </span>
-          <Button $variant="update" onClick={install} disabled={busy} style={{ marginLeft: 'auto' }}>
+          <Button $variant="update" onClick={install} disabled={busy} style={{ flexShrink: 0 }}>
             {busy ? <Spinner $scan /> : <Icon.download width="18" height="18" />}
             <span>{busy ? t('pluginInstalling') : t('pluginInstall')}</span>
           </Button>
