@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 function stationInitials(name) {
   if (!name) return '?';
@@ -40,6 +40,17 @@ export function StationLogo({ id, name, tuneInId, logo }) {
   const [status, setStatus] = useState('loading');
   const imgRef = useRef(null);
 
+  // Ref callback: fires when the <img> mounts. This catches a cached image whose
+  // load event beats React attaching onLoad — including the case the effect below
+  // misses, where the previous render was in the error state (no <img> mounted),
+  // so switching to a new, already-cached logo would otherwise sit invisible.
+  const setImg = useCallback((img) => {
+    imgRef.current = img;
+    if (!img || !img.complete) return;
+    if (img.naturalWidth === 0) setStatus('error');
+    else requestAnimationFrame(() => setStatus('loaded'));
+  }, []);
+
   // Reset on URL change and fade the logo in reliably. On the speaker's LAN the
   // proxied logo often loads within a single frame; flipping opacity 0 -> 1 in
   // that same frame gives the transition no painted "from" state, so it snaps
@@ -71,7 +82,7 @@ export function StationLogo({ id, name, tuneInId, logo }) {
     <span style={{ position: 'relative', width: '100%', height: '100%', display: 'grid', placeItems: 'center' }}>
       {!loaded && initials}
       <img
-        ref={imgRef}
+        ref={setImg}
         src={logoUrl}
         alt={name || id || ''}
         onLoad={() => requestAnimationFrame(() => setStatus('loaded'))}

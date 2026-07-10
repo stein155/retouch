@@ -32,27 +32,27 @@ describe('PresetTile', () => {
     expect(onPlay).toHaveBeenCalledTimes(1);
   });
 
-  it('shows the live equalizer when this preset is playing', () => {
+  it('shows the live equalizer when active and playing', () => {
     const preset = { name: 'Radio Foo', tuneInId: 's1', logo: '' };
     const { container } = renderWithTheme(
-      <PresetTile preset={preset} player={playingFoo} onPlay={() => {}} onAssign={() => {}} />,
+      <PresetTile preset={preset} player={playingFoo} active onPlay={() => {}} onAssign={() => {}} />,
     );
     // Equalizer = four animated <i> bars; the starting spinner has none.
     expect(container.querySelectorAll('i').length).toBe(4);
   });
 
-  it('shows a starting spinner (not the equalizer) when starting', () => {
+  it('shows a starting spinner (not the equalizer) when active and starting', () => {
     const preset = { name: 'Radio Foo', tuneInId: 's1', logo: '' };
     const { container } = renderWithTheme(
-      <PresetTile preset={preset} player={startingFoo} onPlay={() => {}} onAssign={() => {}} />,
+      <PresetTile preset={preset} player={startingFoo} active onPlay={() => {}} onAssign={() => {}} />,
     );
     expect(container.querySelectorAll('i').length).toBe(0);
   });
 
-  it('does not highlight a tile for a different station', () => {
+  it('does not highlight when not the active tile, even if a station plays', () => {
     const preset = { name: 'Radio Bar', tuneInId: 's2', logo: '' };
     const { container } = renderWithTheme(
-      <PresetTile preset={preset} player={playingFoo} onPlay={() => {}} onAssign={() => {}} />,
+      <PresetTile preset={preset} player={playingFoo} active={false} onPlay={() => {}} onAssign={() => {}} />,
     );
     expect(container.querySelectorAll('i').length).toBe(0);
   });

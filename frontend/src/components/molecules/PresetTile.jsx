@@ -6,7 +6,6 @@ import { EqualizerBars } from '../atoms/EqualizerBars';
 import { Spinner } from '../atoms/Spinner';
 import { Skeleton } from '../atoms/Skeleton';
 import { useI18n } from '../../lib/i18n';
-import { sameStation } from '../../lib/station';
 import { pop } from '../../theme/keyframes';
 
 const clean = (value) => (typeof value === 'string' ? value.trim() : '');
@@ -242,7 +241,7 @@ export function PresetTileSkeleton() {
   );
 }
 
-export function PresetTile({ preset, player, onPlay, onAssign }) {
+export function PresetTile({ preset, player, active, onPlay, onAssign }) {
   const { t } = useI18n();
   const [menu, setMenu] = useState(false);
   const ref = useRef(null);
@@ -275,16 +274,12 @@ export function PresetTile({ preset, player, onPlay, onAssign }) {
 
   const name = clean(preset.name) || '?';
 
-  // Is this the preset the player is on? Match by TuneIn id when known, else by
-  // name (the speaker doesn't expose the live id). starting/buffering shows a
-  // loader on the tile; PLAY_STATE shows the live equalizer.
-  const st = player.station;
-  const matches = !!st && (
-    (preset.tuneInId && st.tuneInId && preset.tuneInId === st.tuneInId) ||
-    sameStation(preset.name, st.name)
-  );
-  const isPlaying = matches && player.status === 'playing';
-  const isStarting = matches && (player.status === 'starting' || player.status === 'buffering');
+  // Whether this is the preset the player is on is resolved once by the grid (see
+  // PresetGrid / activePresetIndex) and passed in as `active`, so a loose name
+  // match can't light up several tiles at once. starting/buffering shows a loader
+  // on the tile; PLAY_STATE shows the live equalizer.
+  const isPlaying = active && player.status === 'playing';
+  const isStarting = active && (player.status === 'starting' || player.status === 'buffering');
 
   return (
     <Tile $playing={isPlaying} $starting={isStarting} ref={ref}>

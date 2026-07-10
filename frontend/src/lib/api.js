@@ -134,6 +134,7 @@ export async function searchTuneIn(query) {
     const r = await fetch(
       `/api/tunein/Search.ashx?query=${encodeURIComponent(query)}&types=station&render=json`,
     );
+    if (!r.ok) throw new Error(`search -> ${r.status}`);
     const data = await r.json();
     const results = [];
     const walk = (items) => {
