@@ -39,3 +39,39 @@ describe('useSpeaker changeVolume', () => {
     expect(api.setVolume).toHaveBeenNthCalledWith(2, 30); // 20 was dropped
   });
 });
+
+describe('useSpeaker optimistic playback', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('shows a picked station as "starting" the instant it is tapped', async () => {
+    const { result } = renderHook(() => useSpeaker());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => { result.current.playOptimistic({ name: 'Jazz FM', tuneInId: 's1', logo: 'l' }); });
+
+    expect(result.current.player.status).toBe('starting');
+    expect(result.current.player.station?.name).toBe('Jazz FM');
+    expect(result.current.player.station?.tuneInId).toBe('s1');
+  });
+
+  it('collapses to idle immediately on stop', async () => {
+    const { result } = renderHook(() => useSpeaker());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => { result.current.playOptimistic({ name: 'Jazz FM', tuneInId: 's1' }); });
+    expect(result.current.player.status).toBe('starting');
+
+    act(() => { result.current.stopOptimistic(); });
+    expect(result.current.player.status).toBe('idle');
+    expect(result.current.player.station).toBeNull();
+  });
+
+  it('drops the pending target when cancelled (failed play)', async () => {
+    const { result } = renderHook(() => useSpeaker());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => { result.current.playOptimistic({ name: 'Jazz FM', tuneInId: 's1' }); });
+    act(() => { result.current.cancelPending(); });
+    expect(result.current.player.status).toBe('idle');
+  });
+});
