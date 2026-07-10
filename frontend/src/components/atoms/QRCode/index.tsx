@@ -1,11 +1,24 @@
+import type * as React from 'react';
 import { useMemo } from 'react';
 import { encode } from '../../../lib/qr';
+
+type Props = {
+  value: string;
+  size?: number;
+  quiet?: number;
+  color?: string;
+};
 
 // Renders `value` as a QR-code SVG (dark modules on a transparent ground, so it
 // sits on any light card). All modules are drawn as one <path> of 1×1 squares in
 // module coordinates, scaled by the viewBox — crisp at any size. Renders nothing
 // if the value is empty or can't be encoded.
-export function QRCode({ value, size = 150, quiet = 4, color = 'var(--ink)' }) {
+export function QRCode({
+  value,
+  size = 150,
+  quiet = 4,
+  color = 'var(--ink)',
+}: Props): React.ReactElement | null {
   const qr = useMemo(() => {
     if (!value) return null;
     try {

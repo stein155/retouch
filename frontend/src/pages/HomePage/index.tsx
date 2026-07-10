@@ -1,5 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import type React from 'react';
 import { useSpeaker } from '../../hooks/useSpeaker';
+import type { Preset, Station } from '../../lib/types';
 import { Header } from '../../components/organisms/Header';
 import { PresetGrid } from '../../components/organisms/PresetGrid';
 import { BrowseRow } from '../../components/organisms/BrowseRow';
@@ -13,20 +15,42 @@ import {
 import { makeT, I18nContext, useI18n, detectInitialLang, LANGS } from '../../lib/i18n';
 import { useThemeMode } from '../../theme/themeMode';
 
-const clean = (value) => (typeof value === 'string' ? value.trim() : '');
+const clean = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+
+// The live speaker state returned by the useSpeaker hook, threaded through as a prop.
+type SpeakerData = ReturnType<typeof useSpeaker>;
+
+// The search-sheet mode: browse, or assign a station to a preset slot. null = closed.
+type SearchMode = { mode: 'browse' } | { mode: 'assign'; slot: number };
+
+interface HomeBodyProps {
+  lang: string;
+  onSetLang: (code: string) => void;
+  themeMode: string;
+  onSetTheme: (mode: string) => void;
+  speakerName: string;
+  setSpeakerName: (name: string) => void;
+  speakerModel: string;
+  search: SearchMode | null;
+  setSearch: (search: SearchMode | null) => void;
+  settingsOpen: boolean;
+  setSettingsOpen: (open: boolean) => void;
+  data: SpeakerData;
+  settingsLoaded: boolean;
+}
 
 // The page body. Reads translations from context; everything else comes in as
 // props from HomePage. This is App.jsx's old body, unchanged in behaviour.
 function HomeBody({
   lang, onSetLang, themeMode, onSetTheme, speakerName, setSpeakerName, speakerModel,
   search, setSearch, settingsOpen, setSettingsOpen, data, settingsLoaded,
-}) {
+}: HomeBodyProps) {
   const { t } = useI18n();
 
   // Header turns into a translucent fade-out scrim only once the body is
   // scrolled; at the top it stays a plain solid bar.
   const [scrolled, setScrolled] = useState(false);
-  const handleScroll = useCallback((e) => {
+  const handleScroll = useCallback((e: React.UIEvent<HTMLElement>) => {
     const s = e.currentTarget.scrollTop > 4;
     setScrolled((prev) => (prev !== s ? s : prev));
   }, []);
@@ -35,15 +59,15 @@ function HomeBody({
   // firing two play/select requests that fight each other and make the tile flicker
   // between "starting" states. Ignore a repeat tap on the station already being
   // switched to while its request is still settling.
-  const switchingRef = useRef(null); // name currently being switched to, or null
-  const isDupTap = useCallback((name) => {
+  const switchingRef = useRef<string | null>(null); // name currently being switched to, or null
+  const isDupTap = useCallback((name: unknown) => {
     const cur = clean(name);
     if (switchingRef.current === cur) return true;
     switchingRef.current = cur;
     return false;
   }, []);
 
-  const handlePlay = useCallback(async (preset, slot) => {
+  const handlePlay = useCallback(async (preset: Preset, slot: number) => {
     const name = clean(preset?.name);
     if (isDupTap(preset?.name)) return;
     const standby = data.player.status !== 'playing';
@@ -68,11 +92,11 @@ function HomeBody({
     setTimeout(data.refreshNowPlaying, 1000);
   }, [data]);
 
-  const handleVolume = useCallback((v) => data.changeVolume(v), [data]);
+  const handleVolume = useCallback((v: number) => data.changeVolume(v), [data]);
 
-  const handleAssign = useCallback((slot) => setSearch({ mode: 'assign', slot }), [setSearch]);
+  const handleAssign = useCallback((slot: number) => setSearch({ mode: 'assign', slot }), [setSearch]);
 
-  const handlePick = useCallback(async (station) => {
+  const handlePick = useCallback(async (station: Station) => {
     // Stations come straight from live TuneIn search, so the id is always
     // current (no hardcoded catalog ids that could go stale).
     if (!station.tuneInId) { setSearch(null); return; }
@@ -154,9 +178,9 @@ export default function HomePage() {
 
   // Colour scheme: 'system' | 'light' | 'dark', persisted per device. The hook
   // applies the resolved theme to <html> and follows the OS in 'system' mode.
-  const [themeMode, setThemeMode] = useThemeMode();
+  const [themeMode, setThemeMode] = useThemeMode() as [string, (mode: string) => void];
 
-  const [search, setSearch] = useState(null); // null | { mode:'browse' } | { mode:'assign', slot:N }
+  const [search, setSearch] = useState<SearchMode | null>(null); // null | { mode:'browse' } | { mode:'assign', slot:N }
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [speakerName, setSpeakerName] = useState('SoundTouch');
   const [speakerModel, setSpeakerModel] = useState('');
@@ -190,7 +214,7 @@ export default function HomePage() {
     if (meta) meta.setAttribute('content', nm || 'ReTouch');
   }, [speakerName]);
 
-  const handleSetLang = useCallback((code) => {
+  const handleSetLang = useCallback((code: string) => {
     setLang(code);
     saveSettings({ language: code });
   }, []);

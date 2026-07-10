@@ -3,12 +3,20 @@ import { SliderRoot, SliderTrack, SliderFill, SliderThumb, SliderCenter } from '
 
 // Centre-origin bass slider over the speaker's real capability range (e.g. -9..0).
 // The "origin" tick + fill anchor at the default (or 0 if in range).
-export function BassSlider({ value, min, max, origin, onChange }) {
-  const ref = useRef(null);
+interface Props {
+  value: number;
+  min: number;
+  max: number;
+  origin: number;
+  onChange: (v: number) => void;
+}
+
+export function BassSlider({ value, min, max, origin, onChange }: Props) {
+  const ref = useRef<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState(false);
   const span = max - min || 1;
 
-  const update = (clientX) => {
+  const update = (clientX: number) => {
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
@@ -18,7 +26,7 @@ export function BassSlider({ value, min, max, origin, onChange }) {
 
   useEffect(() => {
     if (!dragging) return;
-    const move = (e) => update(e.touches ? e.touches[0].clientX : e.clientX);
+    const move = (e: MouseEvent | TouchEvent) => update('touches' in e ? e.touches[0].clientX : e.clientX);
     const up = () => setDragging(false);
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);

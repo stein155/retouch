@@ -76,6 +76,6 @@ export const update = css`
 
 const variants = { primary, ghost, delete: del, update };
 
-export const Button = styled.button`
-  ${(p) => variants[p.$variant] || primary}
+export const Button = styled.button<{ $variant?: keyof typeof variants }>`
+  ${(p) => variants[p.$variant ?? 'primary'] || primary}
 `;

@@ -1,6 +1,8 @@
+import type * as React from 'react';
+
 // SVG icon set. Kept verbatim from the original Icons.jsx — pure presentational
 // atoms, no styling beyond the inline SVG attributes.
-export const Icon = {
+export const Icon: Record<string, (props: React.SVGProps<SVGSVGElement>) => React.ReactElement> = {
   search: (p) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" {...p}>
       <circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" />

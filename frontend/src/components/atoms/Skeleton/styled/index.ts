@@ -4,7 +4,7 @@ import { shimmer } from '../../../../theme/keyframes';
 // A shimmering placeholder block shown while real content loads. Size it with
 // width/height (or let a parent size it); $radius overrides the corner radius.
 // Reduced-motion users get a static tint instead of the sweep.
-export const Skeleton = styled.span`
+export const Skeleton = styled.span<{ $radius?: string }>`
   display: block;
   background-color: var(--surface-3);
   background-image: linear-gradient(

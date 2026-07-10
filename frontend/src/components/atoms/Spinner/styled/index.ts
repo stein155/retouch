@@ -4,7 +4,7 @@ import { spin } from '../../../../theme/keyframes';
 // .mp-spinner — loading spinner shown while a station is starting / buffering.
 // $tile applies the smaller .tile-spinner override; $scan applies the white
 // .spk-scan .mp-spinner override used inside the multiroom scan button.
-export const Spinner = styled.span`
+export const Spinner = styled.span<{ $tile?: boolean; $scan?: boolean }>`
   width: 9px;
   height: 9px;
   border-radius: 50%;

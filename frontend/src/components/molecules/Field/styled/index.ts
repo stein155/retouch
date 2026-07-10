@@ -18,7 +18,7 @@ export const FormSection = styled.div`
   margin: 0 0 10px 2px;
 `;
 
-export const FieldHint = styled.div`
+export const FieldHint = styled.div<{ $error?: boolean }>`
   font-size: 12.5px;
   color: var(--ink-3);
   margin: 8px 2px 0;
@@ -137,7 +137,7 @@ export const BassName = styled.span`
   letter-spacing: -0.015em;
 `;
 
-export const BassVal = styled.span`
+export const BassVal = styled.span<{ $set?: boolean }>`
   font-size: 17px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;

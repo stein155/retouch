@@ -9,15 +9,24 @@ import { useI18n } from '../../../lib/i18n';
 import {
   SheetSearch, SheetClear, SheetRows, SheetEmpty, SheetEmptyQ,
 } from './styled';
+import type { Station } from '../../../lib/types';
 
-const clean = (value) => (typeof value === 'string' ? value.trim() : '');
+const clean = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
-export function SearchSheet({ open, mode, speakerName, onClose, onPick }) {
+interface Props {
+  open: boolean;
+  mode: { mode: string; slot?: number } | null;
+  speakerName: string;
+  onClose: () => void;
+  onPick: (station: Station) => void;
+}
+
+export function SearchSheet({ open, mode, speakerName, onClose, onPick }: Props) {
   const { t } = useI18n();
   const [query, setQuery] = useState('');
-  const [tuneInResults, setTuneInResults] = useState([]);
+  const [tuneInResults, setTuneInResults] = useState<Station[]>([]);
   const [searching, setSearching] = useState(false);
-  const inputRef = useRef(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -30,7 +39,7 @@ export function SearchSheet({ open, mode, speakerName, onClose, onPick }) {
   // Esc to close
   useEffect(() => {
     if (!open) return;
-    const f = (e) => { if (e.key === 'Escape') onClose(); };
+    const f = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', f);
     return () => window.removeEventListener('keydown', f);
   }, [open, onClose]);
@@ -100,7 +109,7 @@ export function SearchSheet({ open, mode, speakerName, onClose, onPick }) {
           ) : (
             <SheetRows>
               {allResults.map((s, i) => (
-                <StationRow key={s.tuneInId || s.id || i} station={s} onPick={() => onPick(s)} />
+                <StationRow key={s.tuneInId || i} station={s} onPick={() => onPick(s)} />
               ))}
             </SheetRows>
           )}

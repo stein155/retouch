@@ -1,11 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { renderWithTheme, screen } from '../../../test/render';
+import type { Player, Preset } from '../../../lib/types';
 import { PresetTile } from '.';
 
-const idle = { status: 'idle', station: null };
-const playingFoo = { status: 'playing', station: { name: 'Radio Foo', tuneInId: 's1' } };
-const startingFoo = { status: 'starting', station: { name: 'Radio Foo', tuneInId: 's1' } };
+const idle = { status: 'idle', station: null } as Player;
+const playingFoo = { status: 'playing', station: { name: 'Radio Foo', tuneInId: 's1' } } as Player;
+const startingFoo = { status: 'starting', station: { name: 'Radio Foo', tuneInId: 's1' } } as Player;
 
 describe('PresetTile', () => {
   it('renders an empty slot that calls onAssign when tapped', async () => {

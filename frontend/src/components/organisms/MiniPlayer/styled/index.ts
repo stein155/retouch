@@ -2,7 +2,7 @@ import styled from 'styled-components';
 import { Marquee } from '../../../atoms/Marquee';
 import { mpfade } from '../../../../theme/keyframes';
 
-export const Mp = styled.div`
+export const Mp = styled.div<{ $on?: boolean }>`
   position: absolute;
   left: 14px;
   right: 14px;

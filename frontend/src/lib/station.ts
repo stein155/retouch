@@ -4,9 +4,11 @@
 // TuneIn search results and the speaker's stationName (e.g. a "(London)" suffix),
 // so the match is loose: equal after normalising, or one clearly contains the other.
 
-export const normName = (s) => (s || '').trim().toLowerCase();
+import type { Preset, PlayerStation } from './types';
 
-export function sameStation(a, b) {
+export const normName = (s?: string | null): string => (s || '').trim().toLowerCase();
+
+export function sameStation(a?: string | null, b?: string | null): boolean {
   const x = normName(a);
   const y = normName(b);
   if (!x || !y) return false;

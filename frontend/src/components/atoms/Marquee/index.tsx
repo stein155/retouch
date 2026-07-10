@@ -1,13 +1,19 @@
+import type * as React from 'react';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Viewport, Content } from './styled';
+
+type Props = {
+  text: React.ReactNode;
+  className?: string;
+};
 
 // Marquee shows text on one line: it fits, it's ellipsised, or — when it would
 // clip — it gently scrolls end to end so the whole thing is readable. Motion is
 // only enabled when the text actually overflows and the user hasn't asked for
 // reduced motion; otherwise it degrades to a plain ellipsis.
-export function Marquee({ text, className }) {
-  const viewportRef = useRef(null);
-  const contentRef = useRef(null);
+export function Marquee({ text, className }: Props) {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLSpanElement | null>(null);
   const [shift, setShift] = useState(0);
 
   // useLayoutEffect so the measurement (and any resulting scroll) is applied
@@ -42,7 +48,11 @@ export function Marquee({ text, className }) {
       <Content
         ref={contentRef}
         $scroll={scrolling}
-        style={scrolling ? { '--mq-shift': `${shift}px`, '--mq-dur': `${dur}s` } : undefined}
+        style={
+          scrolling
+            ? ({ '--mq-shift': `${shift}px`, '--mq-dur': `${dur}s` } as React.CSSProperties)
+            : undefined
+        }
       >
         {text}
       </Content>

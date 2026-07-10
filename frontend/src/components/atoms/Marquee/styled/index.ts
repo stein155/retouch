@@ -12,7 +12,7 @@ export const Viewport = styled.div`
   overflow: hidden;
 `;
 
-export const Content = styled.span`
+export const Content = styled.span<{ $scroll?: boolean }>`
   white-space: nowrap;
   ${(p) =>
     p.$scroll

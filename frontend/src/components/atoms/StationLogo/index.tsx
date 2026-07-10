@@ -1,6 +1,16 @@
+import type * as React from 'react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-function stationInitials(name) {
+type Props = {
+  id?: string;
+  name?: string;
+  tuneInId?: string | null;
+  logo?: string;
+};
+
+type Status = 'loading' | 'loaded' | 'error';
+
+function stationInitials(name: string): string {
   if (!name) return '?';
   const upper = name.replace(/[^A-Z]/g, '');
   if (upper.length >= 2) return upper.slice(0, 2);
@@ -10,18 +20,18 @@ function stationInitials(name) {
 
 // Build the same-origin proxy URL for a logo. STLocal exposes
 // GET /api/logo?u=<encoded absolute url> (TuneIn has no CORS / is plain http).
-function proxiedLogo(absUrl) {
+function proxiedLogo(absUrl?: string | null): string | null {
   if (!absUrl) return null;
   return `/api/logo?u=${encodeURIComponent(absUrl)}`;
 }
 
 // TuneIn's CDN serves a station logo at a predictable path keyed by guide id.
-function tuneInLogoUrl(tuneInId) {
+function tuneInLogoUrl(tuneInId?: string | null): string | null {
   if (!tuneInId) return null;
   return proxiedLogo(`http://cdn-radiotime-logos.tunein.com/${tuneInId}g.png`);
 }
 
-const initialsStyle = {
+const initialsStyle: React.CSSProperties = {
   fontFamily: 'inherit',
   fontWeight: 800,
   fontSize: '14px',

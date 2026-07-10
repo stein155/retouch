@@ -9,8 +9,9 @@ import {
   Mp, MpIdle, MpIdleBlob, MpIdleText, MpIdleVol, MpTop, MpArt, MpArtInner,
   MpLivePill, MpMeta, MpName, MpSub, MpStop, MpVol, MpVolIcon, MpVolVal,
 } from './styled';
+import type { Player } from '../../../lib/types';
 
-const clean = (value) => (typeof value === 'string' ? value.trim() : '');
+const clean = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
 // Skeleton shown while the first now-playing / volume read is in flight, so the
 // player doesn't flash its idle "choose a station" state before we know if
@@ -37,7 +38,16 @@ function MiniPlayerSkeleton() {
   );
 }
 
-export function MiniPlayer({ player, volume, speakerName, loading, onStop, onVolume }) {
+interface Props {
+  player: Player;
+  volume: number;
+  speakerName: string;
+  loading: boolean;
+  onStop: () => void;
+  onVolume: (v: number) => void;
+}
+
+export function MiniPlayer({ player, volume, speakerName, loading, onStop, onVolume }: Props) {
   const { t } = useI18n();
   const { status, station } = player;
 
@@ -45,7 +55,7 @@ export function MiniPlayer({ player, volume, speakerName, loading, onStop, onVol
   // a hard-coded default. Tracks the last non-zero volume however it was reached
   // (mute button or slider dragged to 0). Declared before the loading early-return
   // so the hook order stays stable.
-  const preMute = useRef(volume || 25);
+  const preMute = useRef<number>(volume || 25);
   useEffect(() => { if (volume > 0) preMute.current = volume; }, [volume]);
 
   if (loading) return <MiniPlayerSkeleton />;

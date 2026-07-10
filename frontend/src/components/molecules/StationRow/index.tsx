@@ -1,8 +1,16 @@
 import { StationLogo } from '../../atoms/StationLogo';
 import { Icon } from '../../atoms/Icon';
+import type { Station } from '../../../lib/types';
 import { Row, RowPlay, RowArt, RowText, RowName, RowSub, RowDot, RowTagline } from './styled';
 
-export function StationRow({ station, onPick }) {
+interface Props {
+  // The component defensively reads a legacy `id` alongside the canonical
+  // `tuneInId`, so allow it here without dropping the shared Station shape.
+  station: Station & { id?: string | null };
+  onPick: () => void;
+}
+
+export function StationRow({ station, onPick }: Props) {
   const id = station.id || null;
   return (
     <Row onClick={onPick}>

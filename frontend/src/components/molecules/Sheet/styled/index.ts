@@ -4,7 +4,7 @@ import styled from 'styled-components';
 // copied verbatim from the .sheet* block in styles.css, including the desktop
 // (min-width: 720px) centred-dialog behaviour. $open maps to .is-open.
 
-export const SheetScrim = styled.div`
+export const SheetScrim = styled.div<{ $open?: boolean }>`
   position: fixed;
   inset: 0;
   background: rgba(31, 24, 20, 0.25);
@@ -17,7 +17,7 @@ export const SheetScrim = styled.div`
   ${(p) => p.$open && `opacity: 1; pointer-events: auto;`}
 `;
 
-export const SheetEl = styled.div`
+export const SheetEl = styled.div<{ $open?: boolean }>`
   position: fixed;
   left: 50%;
   bottom: 0;

@@ -1,11 +1,16 @@
 import { useRef, useState, useEffect } from 'react';
 import { SliderRoot, SliderTrack, SliderFill, SliderThumb } from '../../atoms/Slider';
 
-export function VolumeSlider({ value, onChange }) {
-  const ref = useRef(null);
+interface Props {
+  value: number;
+  onChange: (v: number) => void;
+}
+
+export function VolumeSlider({ value, onChange }: Props) {
+  const ref = useRef<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  const update = (clientX) => {
+  const update = (clientX: number) => {
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
@@ -15,7 +20,7 @@ export function VolumeSlider({ value, onChange }) {
 
   useEffect(() => {
     if (!dragging) return;
-    const move = (e) => update(e.touches ? e.touches[0].clientX : e.clientX);
+    const move = (e: MouseEvent | TouchEvent) => update('touches' in e ? e.touches[0].clientX : e.clientX);
     const up = () => setDragging(false);
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);

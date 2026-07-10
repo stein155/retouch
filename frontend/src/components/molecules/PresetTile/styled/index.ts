@@ -56,7 +56,7 @@ export const TileName = styled.span`
 `;
 
 // .tile (filled state wrapper) + is-playing / is-starting variants.
-export const Tile = styled.div`
+export const Tile = styled.div<{ $playing?: boolean; $starting?: boolean }>`
   position: relative;
   background: var(--surface);
   border-radius: var(--radius);

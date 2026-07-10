@@ -6,7 +6,7 @@ import styled from 'styled-components';
 // its bottom edge — so the content reads through it and dissolves downward.
 // pointer-events: none lets scroll/taps fall through the transparent lower
 // part; the gear re-enables them for itself.
-export const Hdr = styled.header`
+export const Hdr = styled.header<{ $scrolled?: boolean }>`
   display: flex;
   align-items: center;
   justify-content: space-between;

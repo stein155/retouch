@@ -16,7 +16,7 @@ export const Knob = styled.span`
 `;
 
 // .spk-toggle — on/off switch. $on maps to .is-on.
-export const Switch = styled.button`
+export const Switch = styled.button<{ $on?: boolean }>`
   flex-shrink: 0;
   width: 46px;
   height: 28px;

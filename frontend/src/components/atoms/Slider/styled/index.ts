@@ -4,7 +4,7 @@ import styled from 'styled-components';
 // SliderRoot carries the :active thumb-scale behaviour. $bass applies the
 // .bass-slider height override.
 
-export const SliderRoot = styled.div`
+export const SliderRoot = styled.div<{ $bass?: boolean }>`
   position: relative;
   flex: 1;
   height: 24px;

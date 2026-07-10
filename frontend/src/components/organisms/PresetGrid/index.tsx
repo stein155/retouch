@@ -4,8 +4,17 @@ import { PresetTile, PresetTileSkeleton } from '../../molecules/PresetTile';
 import { useI18n } from '../../../lib/i18n';
 import { activePresetIndex } from '../../../lib/station';
 import { SectHead, SectTitle, SectSub, Grid } from './styled';
+import type { Preset, Player } from '../../../lib/types';
 
-export function PresetGrid({ presets, player, loading, onPlay, onAssign }) {
+interface Props {
+  presets: (Preset | null)[];
+  player: Player;
+  loading: boolean;
+  onPlay: (preset: Preset, slot: number) => void;
+  onAssign: (slot: number) => void;
+}
+
+export function PresetGrid({ presets, player, loading, onPlay, onAssign }: Props) {
   const { t } = useI18n();
   // Resolve the one active slot here, not per-tile: a loose name match could
   // otherwise light up several tiles at once (see activePresetIndex).

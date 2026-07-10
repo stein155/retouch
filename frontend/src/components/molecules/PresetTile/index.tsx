@@ -5,6 +5,7 @@ import { EqualizerBars } from '../../atoms/EqualizerBars';
 import { Spinner } from '../../atoms/Spinner';
 import { Skeleton } from '../../atoms/Skeleton';
 import { useI18n } from '../../../lib/i18n';
+import type { Preset, Player } from '../../../lib/types';
 import {
   TileMore,
   TileLogo,
@@ -21,7 +22,15 @@ import {
   TileSkeleton,
 } from './styled';
 
-const clean = (value) => (typeof value === 'string' ? value.trim() : '');
+const clean = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+
+interface Props {
+  preset: Preset | null;
+  player: Player;
+  active?: boolean;
+  onPlay: () => void;
+  onAssign: () => void;
+}
 
 export function PresetTileSkeleton() {
   return (
@@ -32,15 +41,15 @@ export function PresetTileSkeleton() {
   );
 }
 
-export function PresetTile({ preset, player, active, onPlay, onAssign }) {
+export function PresetTile({ preset, player, active, onPlay, onAssign }: Props) {
   const { t } = useI18n();
   const [menu, setMenu] = useState(false);
-  const ref = useRef(null);
+  const ref = useRef<HTMLDivElement | null>(null);
 
   // Close the menu on an outside click.
   useEffect(() => {
     if (!menu) return;
-    const fn = (e) => { if (ref.current && !ref.current.contains(e.target)) setMenu(false); };
+    const fn = (e: MouseEvent | TouchEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setMenu(false); };
     document.addEventListener('mousedown', fn);
     document.addEventListener('touchstart', fn);
     return () => {

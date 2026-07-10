@@ -1,8 +1,15 @@
 import { Icon } from '../../atoms/Icon';
 import { Toggle } from '../../atoms/Toggle';
+import type { FoundSpeaker } from '../../../lib/types';
 import { SpkRow, SpkIcon, SpkText, SpkName, SpkModel } from './styled';
 
-export function SpeakerRow({ speaker, disabled, onToggle }) {
+interface Props {
+  speaker: FoundSpeaker;
+  disabled?: boolean;
+  onToggle: () => void;
+}
+
+export function SpeakerRow({ speaker, disabled, onToggle }: Props) {
   const sp = speaker;
   return (
     <SpkRow>
