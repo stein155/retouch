@@ -133,17 +133,25 @@ function MultiroomSection({ open }) {
   const [speakers, setSpeakers] = useState(null); // null = not scanned yet; [] = scanned, none found
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState({}); // ip -> in-flight toggle
+  const scanGen = useRef(0); // bumped per scan so a slow one can't clobber a newer
 
   const scan = useCallback(async () => {
+    const gen = ++scanGen.current;
     setScanning(true);
     const list = await findSpeakers();
+    if (gen !== scanGen.current) return; // superseded by a newer scan (or sheet closed)
     setSpeakers(list);
     setScanning(false);
   }, []);
 
   // Scan when the sheet opens (not at app start — the sheet is always mounted,
   // just hidden), so the list is fresh each time the user actually looks at it.
-  useEffect(() => { if (open) scan(); }, [open, scan]);
+  // Cleanup bumps the generation so an in-flight scan from a now-closed sheet is
+  // discarded instead of landing on top of the next open's results.
+  useEffect(() => {
+    if (open) scan();
+    return () => { scanGen.current += 1; };
+  }, [open, scan]);
 
   const toggle = async (sp) => {
     if (busy[sp.ip]) return;
@@ -546,11 +554,13 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
     if (open) return;
     pollGen.current += 1;
     clearTimeout(pollRef.current);
+    clearTimeout(nameTimer.current); // don't PUT a half-typed name after close
     setUpd({ phase: 'idle', text: '' });
   }, [open]);
   useEffect(() => () => {
     pollGen.current += 1;
     clearTimeout(pollRef.current);
+    clearTimeout(nameTimer.current);
   }, []);
 
   // Poll /api/version until the speaker comes back on the target tag (it restarts

@@ -26,3 +26,28 @@ function containsWord(long, short) {
   }
   return false;
 }
+
+// activePresetIndex returns the index of the single preset that is playing, or
+// -1. sameStation is deliberately loose (word-boundary containment), so naming
+// it per-tile lit up several tiles at once — e.g. both "Radio 1" and "NPO Radio
+// 1" match while either plays. Resolving to ONE index here fixes that: prefer an
+// exact TuneIn-id match, then an exact name, then a loose match only when it is
+// unambiguous (a single preset matches). Ambiguous -> none, never several.
+export function activePresetIndex(presets, station) {
+  if (!station || !Array.isArray(presets)) return -1;
+  if (station.tuneInId) {
+    const byId = presets.findIndex((p) => p && p.tuneInId && p.tuneInId === station.tuneInId);
+    if (byId >= 0) return byId;
+  }
+  const target = normName(station.name);
+  const byExact = presets.findIndex((p) => p && normName(p.name) === target && target);
+  if (byExact >= 0) return byExact;
+  let loose = -1;
+  for (let i = 0; i < presets.length; i++) {
+    if (presets[i] && sameStation(presets[i].name, station.name)) {
+      if (loose >= 0) return -1; // more than one loose match — don't guess
+      loose = i;
+    }
+  }
+  return loose;
+}

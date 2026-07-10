@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { StationLogo } from '../atoms/StationLogo';
 import { Marquee } from '../atoms/Marquee';
@@ -216,6 +217,13 @@ export function MiniPlayer({ player, volume, speakerName, loading, onStop, onVol
   const { t } = useI18n();
   const { status, station } = player;
 
+  // Remember the level before muting so unmute restores it instead of jumping to
+  // a hard-coded default. Tracks the last non-zero volume however it was reached
+  // (mute button or slider dragged to 0). Declared before the loading early-return
+  // so the hook order stays stable.
+  const preMute = useRef(volume || 25);
+  useEffect(() => { if (volume > 0) preMute.current = volume; }, [volume]);
+
   if (loading) return <MiniPlayerSkeleton />;
 
   const active = status !== 'idle' && !!station;
@@ -223,6 +231,7 @@ export function MiniPlayer({ player, volume, speakerName, loading, onStop, onVol
   const displayName = clean(station?.name) || clean(station?.track) || '?';
   const speaker = clean(speakerName) || 'SoundTouch';
   const muted = volume === 0;
+  const toggleMute = () => onVolume(muted ? (preMute.current > 0 ? preMute.current : 25) : 0);
 
   // Current track line from TuneIn now-playing: "Artist · Title" when both are
   // known, else whichever we have. Hidden when it would just repeat the station.
@@ -267,7 +276,7 @@ export function MiniPlayer({ player, volume, speakerName, loading, onStop, onVol
           </MpTop>
           <MpVol>
             <MpVolIcon
-              onClick={() => onVolume(muted ? 25 : 0)}
+              onClick={toggleMute}
               aria-label={t('mute')}
             >
               {muted

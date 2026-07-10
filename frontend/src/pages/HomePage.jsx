@@ -44,6 +44,7 @@ function HomeBody({
   }, []);
 
   const handlePlay = useCallback(async (preset, slot) => {
+    const name = clean(preset?.name);
     if (isDupTap(preset?.name)) return;
     const standby = data.player.status !== 'playing';
     data.playOptimistic(preset); // show it instantly
@@ -53,7 +54,9 @@ function HomeBody({
     } catch {
       data.cancelPending(); // request never reached the box: stop showing "starting"
     }
-    switchingRef.current = null;
+    // Only clear the guard if it still points at THIS station — a newer tap on a
+    // different station may have replaced it while we were awaiting.
+    if (switchingRef.current === name) switchingRef.current = null;
     data.refreshNowPlaying();
   }, [data, isDupTap]);
 
@@ -73,6 +76,7 @@ function HomeBody({
     // Stations come straight from live TuneIn search, so the id is always
     // current (no hardcoded catalog ids that could go stale).
     if (!station.tuneInId) { setSearch(null); return; }
+    const name = clean(station.name);
     if (isDupTap(station.name)) { setSearch(null); return; }
     const assignSlot = search?.mode === 'assign' ? search.slot : null;
     data.playOptimistic(station); // show it instantly
@@ -87,7 +91,7 @@ function HomeBody({
     } catch {
       data.cancelPending(); // request failed: stop showing "starting"
     }
-    switchingRef.current = null;
+    if (switchingRef.current === name) switchingRef.current = null;
     data.refreshNowPlaying();
   }, [search, data, setSearch, isDupTap]);
 
