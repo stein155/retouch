@@ -2,6 +2,12 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { getNowPlaying, getVolume, getPresets, setVolume } from '../lib/api';
 import { subscribeState } from '../lib/events';
 import { sameStation } from '../lib/station';
+import type { NowPlaying, Preset, Player, PlayTarget } from '../lib/types';
+
+type Pending = { name: string; tuneInId: string | null; logo: string; since: number; prevName: string };
+type VolumeHold = { value: number; until: number };
+type Picked = { name: string; logo: string; tuneInId: string | null };
+type Timer = ReturnType<typeof setTimeout>;
 
 // Live state for the single speaker driven through STLocal's /api/* endpoints.
 //
@@ -21,26 +27,26 @@ const POLL_SAFETY_MS = 30000; // while SSE is live, only poll occasionally as a 
 const VOLUME_HOLD_MS = 2500; // ignore polled volume this long after a local change
 
 export function useSpeaker() {
-  const [nowPlaying, setNowPlaying] = useState(null); // raw normalised speaker state
-  const [pending, setPending] = useState(null); // { name, tuneInId, logo, since } target after a tap
+  const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null); // raw normalised speaker state
+  const [pending, setPending] = useState<Pending | null>(null); // target after a tap
   const [volume, setVolumeState] = useState(20);
-  const [presets, setPresets] = useState(Array(6).fill(null));
+  const [presets, setPresets] = useState<(Preset | null)[]>(Array(6).fill(null));
   const [loading, setLoading] = useState(true);
 
-  const pendingRef = useRef(null);
+  const pendingRef = useRef<Pending | null>(null);
   pendingRef.current = pending;
   // Volume the user just set locally, held for a moment so a poll that reads the
   // speaker's not-yet-applied volume can't yank the slider back. { value, until }.
-  const volumeHoldRef = useRef(null);
+  const volumeHoldRef = useRef<VolumeHold | null>(null);
   // What's on screen right now (real or pending), so a tap can remember which
   // station we're switching *away* from.
-  const shownNameRef = useRef('');
+  const shownNameRef = useRef<string>('');
   // Identity (logo + TuneIn id) of the station we last picked. The speaker's
   // own now-playing reports tuneInId: null and often a blank art right after a
   // switch, so once pending clears we'd otherwise drop back to the initials
   // fallback until TuneIn enrichment warms up. We keep what we already knew and
   // backfill it for the same station so the logo never regresses.
-  const lastPickedRef = useRef(null); // { name, logo, tuneInId }
+  const lastPickedRef = useRef<Picked | null>(null); // { name, logo, tuneInId }
   // Monotonic id per refresh, so a slow response can't clobber a newer one
   // (refresh is fired concurrently by the poll, nudge timers and action handlers).
   const refreshSeqRef = useRef(0);
@@ -55,7 +61,7 @@ export function useSpeaker() {
   // normalised now-playing (object / {standby} / null-or-undefined when unknown);
   // vol is a number (or null/undefined when unknown). Both sources funnel through
   // here so the optimistic holds behave identically whichever delivered the update.
-  const applyState = useCallback((np, vol) => {
+  const applyState = useCallback((np: NowPlaying | null | undefined, vol: number | null | undefined) => {
     // Right after Stop the box still reports the old station as PLAY_STATE for a
     // moment; ignore now-playing (but not volume) until it catches up or the hold
     // expires, so the stopped station doesn't pop back on screen.
@@ -107,8 +113,8 @@ export function useSpeaker() {
   // latest value and send it next. Serialised (in order) + coalesced (skips the
   // in-between values) + always flushes the final position.
   const volInflightRef = useRef(false);
-  const volNextRef = useRef(null);
-  const changeVolume = useCallback((v) => {
+  const volNextRef = useRef<number | null>(null);
+  const changeVolume = useCallback((v: number) => {
     volumeHoldRef.current = { value: v, until: Date.now() + VOLUME_HOLD_MS };
     setVolumeState(v);
     volNextRef.current = v;
@@ -135,7 +141,7 @@ export function useSpeaker() {
   // Optimistically show a station as starting the instant the user taps it, so the
   // UI reacts immediately and keeps that station on screen through wake + buffering.
   // station: { name, tuneInId?, logo? }.
-  const playOptimistic = useCallback((station) => {
+  const playOptimistic = useCallback((station: PlayTarget | null) => {
     if (!station) return;
     stopHoldRef.current = 0;
     lastPickedRef.current = {
@@ -166,7 +172,7 @@ export function useSpeaker() {
   // Refresh now-playing a few times after an action so the optimistic state
   // converges to the real one (wake + buffering can take a moment). A new nudge
   // supersedes the previous one's remaining timers.
-  const nudgeTimersRef = useRef([]);
+  const nudgeTimersRef = useRef<Timer[]>([]);
   const nudge = useCallback(() => {
     nudgeTimersRef.current.forEach(clearTimeout);
     nudgeTimersRef.current = [500, 1200, 2500, 4500, 7000, 10000, 13000]
@@ -229,7 +235,7 @@ export function useSpeaker() {
   // any slower in-flight poll response before folding it in.
   useEffect(() => {
     return subscribeState({
-      onState: ({ now, volume }) => {
+      onState: ({ now, volume }: { now?: NowPlaying; volume?: number }) => {
         refreshSeqRef.current++;
         applyState(now, volume);
       },
@@ -245,7 +251,7 @@ export function useSpeaker() {
   // Polling: adaptive (quick while starting / buffering) when the SSE stream is
   // down; a slow safety net while it's live, in case a push is ever missed.
   useEffect(() => {
-    let timer;
+    let timer: Timer;
     let cancelled = false;
     const tick = async () => {
       await refresh();

@@ -12,25 +12,30 @@ import { useCallback, useEffect, useState } from 'react';
 // script in index.html, which applies the same attribute before the bundle
 // loads so there's no light-mode flash on a dark device.
 
-export const THEME_KEY = 'retouch-theme';
-export const THEME_MODES = ['system', 'light', 'dark'];
+export type ThemeMode = 'system' | 'light' | 'dark';
+export type ConcreteTheme = 'light' | 'dark';
 
-const media = () =>
+export const THEME_KEY = 'retouch-theme';
+export const THEME_MODES: ThemeMode[] = ['system', 'light', 'dark'];
+
+const isMode = (v: unknown): v is ThemeMode => THEME_MODES.includes(v as ThemeMode);
+
+const media = (): MediaQueryList | null =>
   typeof window !== 'undefined' && window.matchMedia
     ? window.matchMedia('(prefers-color-scheme: dark)')
     : null;
 
-export function getStoredMode() {
+export function getStoredMode(): ThemeMode {
   try {
     const v = localStorage.getItem(THEME_KEY);
-    return THEME_MODES.includes(v) ? v : 'system';
+    return isMode(v) ? v : 'system';
   } catch {
     return 'system';
   }
 }
 
 // Resolve a preference to the concrete theme that should be painted.
-export function resolveTheme(mode) {
+export function resolveTheme(mode: ThemeMode): ConcreteTheme {
   if (mode === 'light' || mode === 'dark') return mode;
   const m = media();
   return m && m.matches ? 'dark' : 'light';
@@ -38,7 +43,7 @@ export function resolveTheme(mode) {
 
 // Write the concrete theme to <html data-theme> and keep the browser chrome
 // (address bar / status bar) colour in step via the theme-color meta tag.
-export function applyTheme(mode) {
+export function applyTheme(mode: ThemeMode) {
   if (typeof document === 'undefined') return;
   const theme = resolveTheme(mode);
   document.documentElement.setAttribute('data-theme', theme);
@@ -63,9 +68,9 @@ export function useThemeMode() {
     return () => m.removeEventListener('change', onChange);
   }, [mode]);
 
-  const set = useCallback((next) => {
-    setMode(THEME_MODES.includes(next) ? next : 'system');
+  const set = useCallback((next: string) => {
+    setMode(isMode(next) ? next : 'system');
   }, []);
 
-  return [mode, set];
+  return [mode, set] as const;
 }

@@ -25,10 +25,13 @@ const LOG = new Uint8Array(256);
   for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
 })();
 
-const gfMul = (a, b) => (a === 0 || b === 0 ? 0 : EXP[LOG[a] + LOG[b]]);
+type Cell = boolean | null; // null = free module
+type Matrix = Cell[][];
+
+const gfMul = (a: number, b: number): number => (a === 0 || b === 0 ? 0 : EXP[LOG[a] + LOG[b]]);
 
 // Generator polynomial for `degree` error-correction codewords.
-function rsGenerator(degree) {
+function rsGenerator(degree: number): number[] {
   let poly = [1];
   for (let d = 0; d < degree; d++) {
     const next = new Array(poly.length + 1).fill(0);
@@ -44,7 +47,7 @@ function rsGenerator(degree) {
 // Reed–Solomon error-correction codewords for one data block. rsGenerator returns
 // coefficients constant-term-first; the division wants them highest-degree-first,
 // and drops the monic leading 1, leaving `ecLen` divisor coefficients.
-function rsEncode(data, ecLen) {
+function rsEncode(data: number[], ecLen: number): number[] {
   const gen = rsGenerator(ecLen).reverse().slice(1);
   const res = new Array(ecLen).fill(0);
   for (const byte of data) {
@@ -59,7 +62,7 @@ function rsEncode(data, ecLen) {
 // --- Version tables (error-correction level M) -----------------------------
 // [ecPerBlock, group1Blocks, group1DataCw, group2Blocks, group2DataCw]
 const MAX_VERSION = 6;
-const EC_M = {
+const EC_M: Record<number, number[]> = {
   1: [10, 1, 16, 0, 0],
   2: [16, 1, 28, 0, 0],
   3: [26, 1, 44, 0, 0],
@@ -69,26 +72,25 @@ const EC_M = {
 };
 
 // Alignment-pattern centre coordinates per version.
-const ALIGN = {
+const ALIGN: Record<number, number[]> = {
   1: [], 2: [6, 18], 3: [6, 22], 4: [6, 26], 5: [6, 30], 6: [6, 34],
 };
 
-const dataCapacity = (v) => {
+const dataCapacity = (v: number): number => {
   const [, g1, d1, g2, d2] = EC_M[v];
   return g1 * d1 + g2 * d2;
 };
 
 // --- Bit buffer ------------------------------------------------------------
 function bits() {
-  const arr = [];
+  const arr: number[] = [];
   return {
-    put(val, len) { for (let i = len - 1; i >= 0; i--) arr.push((val >> i) & 1); },
-    get: () => arr,
+    put(val: number, len: number) { for (let i = len - 1; i >= 0; i--) arr.push((val >> i) & 1); },
+    get: (): number[] => arr,
   };
 }
-
 // Byte-mode data codewords for `str`, padded to the version's capacity.
-function encodeData(str, version) {
+function encodeData(str: string, version: number): number[] {
   const buf = bits();
   buf.put(0b0100, 4);          // byte mode
   buf.put(str.length, 8);      // char count (8 bits for versions 1–9)
@@ -111,7 +113,7 @@ function encodeData(str, version) {
 }
 
 // Interleave data + error-correction codewords across blocks per the spec.
-function interleave(dataCw, version) {
+function interleave(dataCw: number[], version: number): number[] {
   const [ecLen, g1, d1, g2, d2] = EC_M[version];
   const blocks = [];
   let pos = 0;
@@ -127,13 +129,13 @@ function interleave(dataCw, version) {
 }
 
 // --- Matrix construction ---------------------------------------------------
-function newMatrix(size) {
-  const m = [];
+function newMatrix(size: number): Matrix {
+  const m: Matrix = [];
   for (let i = 0; i < size; i++) m.push(new Array(size).fill(null)); // null = free
   return m;
 }
 
-function placeFinder(m, r, c) {
+function placeFinder(m: Matrix, r: number, c: number) {
   for (let dy = -1; dy <= 7; dy++) {
     for (let dx = -1; dx <= 7; dx++) {
       const y = r + dy, x = c + dx;
@@ -145,7 +147,7 @@ function placeFinder(m, r, c) {
   }
 }
 
-function placeFunctionPatterns(m, version) {
+function placeFunctionPatterns(m: Matrix, version: number) {
   const size = m.length;
   placeFinder(m, 0, 0);
   placeFinder(m, 0, size - 7);
@@ -176,7 +178,7 @@ function placeFunctionPatterns(m, version) {
 }
 
 // Reserve the format-info modules so data placement skips them.
-function reserveFormat(m) {
+function reserveFormat(m: Matrix) {
   const size = m.length;
   for (let i = 0; i < 9; i++) {
     if (m[8][i] === null) m[8][i] = false;
@@ -188,12 +190,12 @@ function reserveFormat(m) {
   }
 }
 
-function isFunction(reserved, r, c) { return reserved[r][c]; }
+function isFunction(reserved: boolean[][], r: number, c: number): boolean { return reserved[r][c]; }
 
 // Zig-zag data placement (bottom-right upward), skipping function modules.
-function placeData(m, reserved, codewords) {
+function placeData(m: Matrix, reserved: boolean[][], codewords: number[]) {
   const size = m.length;
-  const bitsArr = [];
+  const bitsArr: number[] = [];
   for (const cw of codewords) for (let i = 7; i >= 0; i--) bitsArr.push((cw >> i) & 1);
 
   let idx = 0, up = true;
@@ -224,7 +226,7 @@ const MASKS = [
   (r, c) => (((r + c) % 2) + ((r * c) % 3)) % 2 === 0,
 ];
 
-function applyMask(m, reserved, mask) {
+function applyMask(m: Matrix, reserved: boolean[][], mask: number): Matrix {
   const fn = MASKS[mask];
   const size = m.length;
   const out = m.map((row) => row.slice());
@@ -237,7 +239,7 @@ function applyMask(m, reserved, mask) {
 }
 
 // Penalty score (lower is better) used to pick the least-noisy mask.
-function penalty(m) {
+function penalty(m: Matrix): number {
   const size = m.length;
   let score = 0;
   // Rule 1: runs of 5+ same-colour modules per row/column.
@@ -260,7 +262,7 @@ function penalty(m) {
   // Rule 3: finder-like 1:1:3:1:1 patterns.
   const pat1 = [true, false, true, true, true, false, true, false, false, false, false];
   const pat2 = [false, false, false, false, true, false, true, true, true, false, true];
-  const match = (line, i, pat) => pat.every((v, k) => line[i + k] === v);
+  const match = (line: Cell[], i: number, pat: boolean[]) => pat.every((v, k) => line[i + k] === v);
   for (let r = 0; r < size; r++) {
     const rowLine = m[r];
     const colLine = m.map((row) => row[r]);
@@ -278,7 +280,7 @@ function penalty(m) {
 }
 
 // Format info: 2-bit EC level (M = 0) + 3-bit mask, BCH-protected, then masked.
-function formatBits(mask) {
+function formatBits(mask: number): number {
   const data = (0b00 << 3) | mask; // level M
   let rem = data << 10;
   const g = 0b10100110111;
@@ -286,12 +288,12 @@ function formatBits(mask) {
   return ((data << 10) | rem) ^ 0b101010000010010;
 }
 
-function placeFormat(m, mask) {
+function placeFormat(m: Matrix, mask: number) {
   const size = m.length;
   const raw = formatBits(mask);
   let fmt = 0; // the 15 bits are placed most-significant-first
   for (let i = 0; i < 15; i++) fmt = (fmt << 1) | ((raw >> i) & 1);
-  const bit = (i) => ((fmt >> i) & 1) === 1;
+  const bit = (i: number) => ((fmt >> i) & 1) === 1;
   for (let i = 0; i <= 5; i++) m[8][i] = bit(i);
   m[8][7] = bit(6);
   m[8][8] = bit(7);
@@ -303,7 +305,7 @@ function placeFormat(m, mask) {
 }
 
 // encode returns a { size, modules } matrix (modules[r][c] === true → dark).
-export function encode(str) {
+export function encode(str: string): { size: number; modules: boolean[][] } {
   let version = 1;
   const need = Math.ceil((4 + 8 + 8 * str.length) / 8);
   while (version < MAX_VERSION && dataCapacity(version) < need) version++;
@@ -321,12 +323,12 @@ export function encode(str) {
 
   placeData(base, reserved, codewords);
 
-  let best = null, bestScore = Infinity;
+  let best: Matrix | null = null, bestScore = Infinity;
   for (let mask = 0; mask < 8; mask++) {
     const masked = applyMask(base, reserved, mask);
     placeFormat(masked, mask);
     const s = penalty(masked);
     if (s < bestScore) { bestScore = s; best = masked; }
   }
-  return { size, modules: best.map((row) => row.map((v) => v === true)) };
+  return { size, modules: (best as Matrix).map((row) => row.map((v) => v === true)) };
 }

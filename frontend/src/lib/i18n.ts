@@ -499,12 +499,15 @@ export const I18N = {
   },
 };
 
-export function isSupportedLang(code) {
-  return !!I18N[code];
+type Dict = Record<string, string>;
+export type TranslateFn = (key: string) => string;
+
+export function isSupportedLang(code: string): boolean {
+  return !!(I18N as Record<string, Dict>)[code];
 }
 
 // Initial language: the browser's preferred language if supported, else Dutch.
-export function detectInitialLang() {
+export function detectInitialLang(): string {
   const candidates = (typeof navigator !== 'undefined' && navigator.languages?.length)
     ? navigator.languages
     : [typeof navigator !== 'undefined' ? navigator.language : ''];
@@ -516,11 +519,12 @@ export function detectInitialLang() {
 }
 
 // Build a translate function for a language, falling back to Dutch then the key.
-export function makeT(lang) {
-  const dict = I18N[lang] || I18N[DEFAULT_LANG];
-  const fb = I18N[DEFAULT_LANG];
-  return (key) => (dict[key] != null ? dict[key] : (fb[key] != null ? fb[key] : key));
+export function makeT(lang: string): TranslateFn {
+  const all = I18N as Record<string, Dict>;
+  const dict = all[lang] || all[DEFAULT_LANG];
+  const fb = all[DEFAULT_LANG];
+  return (key: string) => (dict[key] != null ? dict[key] : (fb[key] != null ? fb[key] : key));
 }
 
-export const I18nContext = createContext({ t: (k) => k, lang: DEFAULT_LANG });
+export const I18nContext = createContext<{ t: TranslateFn; lang: string }>({ t: (k) => k, lang: DEFAULT_LANG });
 export const useI18n = () => useContext(I18nContext);

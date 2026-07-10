@@ -1,19 +1,19 @@
 // Shared domain types for the ReTouch UI. The API client (api.ts) produces these;
 // hooks and components consume them. Kept in one place so the shapes stay in sync.
 
-// Normalised now-playing. `standby` discriminates: when true nothing else is set.
-export type NowPlaying =
-  | { standby: true }
-  | {
-      standby: false;
-      source: string;
-      stationName: string;
-      track: string;
-      artist: string;
-      playStatus: string;
-      art: string;
-      tuneInId: string | null;
-    };
+// Normalised now-playing. `standby` true means idle/off; the other fields are
+// only populated when not in standby (kept optional so callers can read them
+// without narrowing, matching the original loose JS access).
+export interface NowPlaying {
+  standby: boolean;
+  source?: string;
+  stationName?: string;
+  track?: string;
+  artist?: string;
+  playStatus?: string;
+  art?: string;
+  tuneInId?: string | null;
+}
 
 // One preset slot (1..6), or null for an empty slot.
 export interface Preset {

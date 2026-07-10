@@ -7,27 +7,33 @@
 // stream comes back.
 
 import { normalizeNowPlaying } from './api';
+import type { NowPlaying } from './types';
+
+interface StateHandlers {
+  onState?: (s: { now?: NowPlaying; volume?: number }) => void;
+  onOpen?: () => void;
+  onError?: () => void;
+}
 
 // subscribeState opens the stream and returns an unsubscribe function.
-// handlers: { onState({ now, volume }), onOpen(), onError() }.
 //   now    — normalised now-playing, or undefined when this push didn't include it.
 //   volume — a number, or undefined when this push didn't include it.
-export function subscribeState({ onState, onOpen, onError } = {}) {
+export function subscribeState({ onState, onOpen, onError }: StateHandlers = {}): () => void {
   if (typeof EventSource === 'undefined') {
     return () => {}; // no SSE support: caller keeps polling
   }
   const es = new EventSource('/api/events');
   es.onopen = () => onOpen?.();
   es.onerror = () => onError?.(); // EventSource retries automatically
-  es.addEventListener('state', (e) => {
-    let data;
+  es.addEventListener('state', (e: MessageEvent) => {
+    let data: { now?: unknown; volume?: unknown };
     try {
       data = JSON.parse(e.data);
     } catch {
       return;
     }
     onState?.({
-      now: 'now' in data ? normalizeNowPlaying(data.now) : undefined,
+      now: 'now' in data ? normalizeNowPlaying(data.now) ?? undefined : undefined,
       volume: typeof data.volume === 'number' ? data.volume : undefined,
     });
   });

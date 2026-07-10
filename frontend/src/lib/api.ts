@@ -8,13 +8,19 @@
 // TuneIn search still goes through the same-origin /api/tunein proxy (STLocal
 // adds CORS-free proxying) and the curated catalog is the offline fallback.
 
-async function getJSON(path) {
+import type {
+  NowPlaying, Preset, Station, Settings, Auth, WifiNetwork, VersionInfo,
+  Releases, FoundSpeaker, Multiroom, PluginsResponse, PluginManifest,
+  ApiError, UpdateResult,
+} from './types';
+
+async function getJSON<T>(path: string): Promise<T> {
   const r = await fetch(path, { headers: { Accept: 'application/json' } });
   if (!r.ok) throw new Error(`GET ${path} -> ${r.status}`);
-  return r.json();
+  return r.json() as Promise<T>;
 }
 
-async function send(path, method, body) {
+async function send(path: string, method: string, body?: unknown): Promise<unknown> {
   const r = await fetch(path, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
@@ -22,38 +28,39 @@ async function send(path, method, body) {
   });
   if (!r.ok) {
     let msg = `${method} ${path} -> ${r.status}`;
-    try { msg = (await r.json()).error || msg; } catch { /* ignore */ }
-    const err = new Error(msg);
+    try { msg = ((await r.json()) as { error?: string }).error || msg; } catch { /* ignore */ }
+    const err = new Error(msg) as ApiError;
     err.status = r.status; // 401 = login required; callers show the login view
     throw err;
   }
   return r.status === 204 ? null : r.json().catch(() => null);
 }
 
-const clean = (value) => (typeof value === 'string' ? value.trim() : '');
+const clean = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
 // Now playing — STLocal returns {source,track,artist,station,stationId,art,playStatus}.
 // Normalised to the shape the UI expects (standby / stationName / tuneInId).
 // Shared by both the /api/now fetch and the /api/events push stream (see events.js).
-export function normalizeNowPlaying(np) {
-  if (!np) return null;
-  const source = clean(np.source);
+export function normalizeNowPlaying(np: unknown): NowPlaying | null {
+  if (!np || typeof np !== 'object') return null;
+  const raw = np as Record<string, unknown>;
+  const source = clean(raw.source);
   if (!source || source === 'STANDBY' || source === 'INVALID_SOURCE') {
     return { standby: true };
   }
   return {
     standby: false,
     source,
-    stationName: clean(np.station) || clean(np.track),
-    track: clean(np.track),
-    artist: clean(np.artist),
-    playStatus: clean(np.playStatus),
-    art: clean(np.art),
-    tuneInId: clean(np.stationId) || null,
+    stationName: clean(raw.station) || clean(raw.track),
+    track: clean(raw.track),
+    artist: clean(raw.artist),
+    playStatus: clean(raw.playStatus),
+    art: clean(raw.art),
+    tuneInId: clean(raw.stationId) || null,
   };
 }
 
-export async function getNowPlaying() {
+export async function getNowPlaying(): Promise<NowPlaying | null> {
   try {
     return normalizeNowPlaying(await getJSON('/api/now'));
   } catch {
@@ -61,9 +68,9 @@ export async function getNowPlaying() {
   }
 }
 
-export async function getVolume() {
+export async function getVolume(): Promise<number | null> {
   try {
-    const v = await getJSON('/api/volume');
+    const v = await getJSON<{ volume?: number }>('/api/volume');
     return typeof v.volume === 'number' ? v.volume : null;
   } catch {
     return null;
@@ -73,20 +80,20 @@ export async function getVolume() {
 // Presets — STLocal returns an array of saved/native presets
 // [{slot,name,stationId,location,logo}]. Expanded to a fixed 6-slot array with
 // the tuneInId the UI keys off.
-export async function getPresets() {
-  const slots = Array(6).fill(null);
+export async function getPresets(): Promise<(Preset | null)[]> {
+  const slots: (Preset | null)[] = Array(6).fill(null);
   try {
-    const list = await getJSON('/api/presets');
+    const list = await getJSON<Record<string, unknown>[]>('/api/presets');
     for (const p of list || []) {
-      const slot = p.slot;
+      const slot = p.slot as number;
       if (slot >= 1 && slot <= 6) {
-        const tuneInId = p.stationId || (p.location || '').match(/station\/(s\d+)/)?.[1] || null;
+        const tuneInId = (p.stationId as string) || (String(p.location || '')).match(/station\/(s\d+)/)?.[1] || null;
         slots[slot - 1] = {
           slot,
           name: clean(p.name),
           tuneInId,
-          location: p.location || '',
-          logo: p.logo || '',
+          location: (p.location as string) || '',
+          logo: (p.logo as string) || '',
         };
       }
     }
@@ -96,19 +103,19 @@ export async function getPresets() {
   return slots;
 }
 
-export async function setVolume(value) {
+export async function setVolume(value: number) {
   return send('/api/volume', 'POST', { volume: value });
 }
 
 // Select (play) a TuneIn station by id.
-export async function selectStation(tuneInId, name) {
+export async function selectStation(tuneInId: string, name: string) {
   return send('/api/play', 'POST', { stationId: tuneInId, name: clean(name) });
 }
 
 // Play a preset slot. STLocal plays the station saved on that slot server-side.
 // Falls back to a direct station select if the slot has a known station id but
 // the server-side play fails (e.g. native preset only known to the box).
-export async function playPreset(slot, _standby, preset) {
+export async function playPreset(slot: number, _standby: boolean, preset?: Preset | null) {
   try {
     return await send(`/api/play/${slot}`, 'POST');
   } catch (e) {
@@ -122,35 +129,35 @@ export async function stopPlayback() {
 }
 
 // Save a station to a preset slot (STLocal's local store).
-export async function storePreset(slot, tuneInId, name, logo) {
+export async function storePreset(slot: number, tuneInId: string, name: string, logo?: string) {
   return send(`/api/presets/${slot}`, 'PUT', { stationId: tuneInId, name: clean(name), logo: logo || '' });
 }
 
 // TuneIn OPML search via the same-origin /api/tunein proxy. The original walked
 // a nested OPML body; STLocal's tunein proxy mirrors the OPML query so we keep
 // the same walk. On failure the UI falls back to the curated catalog.
-export async function searchTuneIn(query) {
+export async function searchTuneIn(query: string): Promise<Station[]> {
   try {
     const r = await fetch(
       `/api/tunein/Search.ashx?query=${encodeURIComponent(query)}&types=station&render=json`,
     );
     if (!r.ok) throw new Error(`search -> ${r.status}`);
-    const data = await r.json();
-    const results = [];
-    const walk = (items) => {
+    const data = (await r.json()) as { body?: unknown };
+    const results: Station[] = [];
+    const walk = (items: unknown) => {
       if (!Array.isArray(items)) return;
-      for (const item of items) {
+      for (const item of items as Record<string, unknown>[]) {
         const isStation =
           (item.type === 'audio' || item.item === 'station') &&
-          (item.guide_id || '').startsWith('s');
+          String(item.guide_id || '').startsWith('s');
         if (isStation) {
           results.push({
-            tuneInId: item.guide_id,
-            name: item.text || item.name || '',
-            tagline: item.subtext || '',
+            tuneInId: item.guide_id as string,
+            name: (item.text as string) || (item.name as string) || '',
+            tagline: (item.subtext as string) || '',
             genre: '',
-            country: item.locale?.split('-')?.[1] || '',
-            logo: item.image || '',
+            country: String(item.locale || '').split('-')?.[1] || '',
+            logo: (item.image as string) || '',
           });
         }
         if (item.children) walk(item.children);
@@ -165,12 +172,12 @@ export async function searchTuneIn(query) {
 
 // Settings — speaker name + bass (with range) live on the box; UI language in the
 // local store. See STLocal /api/settings.
-export async function getSettings() {
-  try { return await getJSON('/api/settings'); } catch { return null; }
+export async function getSettings(): Promise<Settings | null> {
+  try { return await getJSON<Settings>('/api/settings'); } catch { return null; }
 }
 
 // saveSettings applies any subset of { name, bass, language } (live-apply).
-export async function saveSettings(patch) {
+export async function saveSettings(patch: Record<string, unknown>) {
   return send('/api/settings', 'PUT', patch);
 }
 
@@ -178,13 +185,13 @@ export async function saveSettings(patch) {
 // survey on the speaker (slow; show a spinner) and may come back empty on some
 // hardware, in which case the UI lets the user type the SSID in. Each network is
 // { ssid, signal, secure }.
-export async function scanWifi() {
-  try { return (await getJSON('/api/wifi/scan'))?.networks || []; } catch { return []; }
+export async function scanWifi(): Promise<WifiNetwork[]> {
+  try { return (await getJSON<{ networks?: WifiNetwork[] }>('/api/wifi/scan')).networks || []; } catch { return []; }
 }
 
 // setWifi joins the speaker to a network. security is 'wpa_or_wpa2' | 'wep' | 'none'.
 // Changing networks can briefly drop the speaker (and this app) — warn first.
-export async function setWifi({ ssid, security, password }) {
+export async function setWifi({ ssid, security, password }: { ssid: string; security: string; password: string }) {
   return send('/api/wifi', 'POST', { ssid, security, password });
 }
 
@@ -192,13 +199,13 @@ export async function setWifi({ ssid, security, password }) {
 // settings side of the API answers 401 without a session cookie.
 
 // getAuth returns { hasPassword, authenticated }.
-export async function getAuth() {
-  try { return await getJSON('/api/auth'); } catch { return null; }
+export async function getAuth(): Promise<Auth | null> {
+  try { return await getJSON<Auth>('/api/auth'); } catch { return null; }
 }
 
 // login exchanges the password for a session cookie. Throws (status 401) on a
 // wrong password.
-export async function login(password) {
+export async function login(password: string) {
   return send('/api/auth/login', 'POST', { password });
 }
 
@@ -207,12 +214,12 @@ export async function logout() {
 }
 
 // setPassword sets (no currentPassword needed) or changes the settings password.
-export async function setPassword({ currentPassword, newPassword }) {
+export async function setPassword({ currentPassword, newPassword }: { currentPassword: string; newPassword: string }) {
   return send('/api/auth/password', 'POST', { currentPassword, newPassword });
 }
 
 // getMqttStatus returns { connected, lastError } for the Home Assistant MQTT link.
-export async function getMqttStatus() {
+export async function getMqttStatus(): Promise<{ connected: boolean; lastError: string } | null> {
   try { return await getJSON('/api/mqtt/status'); } catch { return null; }
 }
 
@@ -221,39 +228,39 @@ export async function getMqttStatus() {
 // addZoneSlave / removeZoneSlave under the hood).
 
 // getMultiroom returns { self:{deviceId,name,ip}, isMaster, master, members }.
-export async function getMultiroom() {
-  try { return await getJSON('/api/multiroom'); } catch { return null; }
+export async function getMultiroom(): Promise<Multiroom | null> {
+  try { return await getJSON<Multiroom>('/api/multiroom'); } catch { return null; }
 }
 
 // findSpeakers sweeps the LAN for other SoundTouch speakers. Each row is
 // { deviceId, name, model, ip, grouped }. Slow (a network scan), so callers
 // should show a spinner. Returns [] on failure.
-export async function findSpeakers() {
-  try { return (await getJSON('/api/multiroom/speakers')) || []; } catch { return []; }
+export async function findSpeakers(): Promise<FoundSpeaker[]> {
+  try { return (await getJSON<FoundSpeaker[]>('/api/multiroom/speakers')) || []; } catch { return []; }
 }
 
 // groupSpeaker adds the speaker at ip to this speaker's zone (this one master).
-export async function groupSpeaker(ip) {
+export async function groupSpeaker(ip: string) {
   return send('/api/multiroom/group', 'POST', { ip });
 }
 
 // ungroupSpeaker removes the speaker at ip from this speaker's zone.
-export async function ungroupSpeaker(ip) {
+export async function ungroupSpeaker(ip: string) {
   return send('/api/multiroom/ungroup', 'POST', { ip });
 }
 
 // getVersion returns { version, updatable }. updatable is true only on an installed
 // speaker (where ReTouch can replace its own binary). Returns null if unreachable.
-export async function getVersion() {
-  try { return await getJSON('/api/version'); } catch { return null; }
+export async function getVersion(): Promise<VersionInfo | null> {
+  try { return await getJSON<VersionInfo>('/api/version'); } catch { return null; }
 }
 
 // getReleases returns what the speaker can update to:
 // { current, updatable, stable: {tag,name}|null, betas: [{tag,pr,name}] }.
 // betas are the open-PR builds published by the Beta Build workflow. Returns null
 // if unreachable (e.g. offline) so the UI can fall back to the plain Update button.
-export async function getReleases() {
-  try { return await getJSON('/api/releases'); } catch { return null; }
+export async function getReleases(): Promise<Releases | null> {
+  try { return await getJSON<Releases>('/api/releases'); } catch { return null; }
 }
 
 // --- Plugins --------------------------------------------------------------
@@ -262,34 +269,34 @@ export async function getReleases() {
 // catalog: [{name,title,description,...}] }. Each installed plugin serves its own
 // settings UI as a "manifest" that ReTouch proxies under /api/plugins/<name>/.
 
-export async function getPlugins() {
-  try { return await getJSON('/api/plugins'); } catch { return null; }
+export async function getPlugins(): Promise<PluginsResponse | null> {
+  try { return await getJSON<PluginsResponse>('/api/plugins'); } catch { return null; }
 }
 
 // getPluginLatest resolves the newest available release tag for a curated plugin
 // ({ tag }), so the UI can offer an over-the-air update. Returns null off-speaker
 // or when the release lookup fails (the UI then just hides the update affordance).
-export async function getPluginLatest(name) {
+export async function getPluginLatest(name: string): Promise<{ tag: string } | null> {
   try { return await getJSON(`/api/plugins/${encodeURIComponent(name)}/latest`); } catch { return null; }
 }
 
-export async function installPlugin(name, tag) {
+export async function installPlugin(name: string, tag?: string) {
   return send(`/api/plugins/${encodeURIComponent(name)}/install`, 'POST', tag ? { tag } : undefined);
 }
 
-export async function removePlugin(name) {
+export async function removePlugin(name: string) {
   return send(`/api/plugins/${encodeURIComponent(name)}`, 'DELETE');
 }
 
 // uploadPlugin sideloads a locally-built binary (multipart), for a plugin whose
 // release repo is still private.
-export async function uploadPlugin(name, file) {
+export async function uploadPlugin(name: string, file: File) {
   const fd = new FormData();
   fd.append('binary', file);
   const r = await fetch(`/api/plugins/${encodeURIComponent(name)}/upload`, { method: 'POST', body: fd });
   if (!r.ok) {
     let msg = `upload -> ${r.status}`;
-    try { msg = (await r.json()).error || msg; } catch { /* ignore */ }
+    try { msg = ((await r.json()) as { error?: string }).error || msg; } catch { /* ignore */ }
     throw new Error(msg);
   }
   return r.json().catch(() => null);
@@ -299,16 +306,16 @@ export async function uploadPlugin(name, file) {
 // schema: { title, status, sections:[{fields,rows,actions}] }). Returns null if
 // the plugin isn't running yet. The current UI language is passed as ?lang so a
 // plugin can localise its own manifest text (status, section copy, action labels).
-export async function getPluginManifest(name, lang) {
+export async function getPluginManifest(name: string, lang?: string): Promise<PluginManifest | null> {
   const q = lang ? `?lang=${encodeURIComponent(lang)}` : '';
-  try { return await getJSON(`/api/plugins/${encodeURIComponent(name)}/manifest${q}`); } catch { return null; }
+  try { return await getJSON<PluginManifest>(`/api/plugins/${encodeURIComponent(name)}/manifest${q}`); } catch { return null; }
 }
 
 // pluginAction performs a manifest action (e.g. log in, submit a 2FA code, save
 // devices). The plugin replies with the NEW manifest, which the UI re-renders —
 // that's how multi-step flows like 2FA fall out without any plugin-specific code.
 // lang is forwarded as ?lang so the returned manifest stays in the UI language.
-export async function pluginAction(name, id, body, lang) {
+export async function pluginAction(name: string, id: string, body?: unknown, lang?: string) {
   const q = lang ? `?lang=${encodeURIComponent(lang)}` : '';
   return send(`/api/plugins/${encodeURIComponent(name)}/action/${encodeURIComponent(id)}${q}`, 'POST', body || {});
 }
@@ -317,13 +324,13 @@ export async function pluginAction(name, id, body, lang) {
 // it installs the latest stable; pass a beta tag (e.g. "beta-pr-12") to install
 // that one instead. On a real update the speaker restarts, so the next
 // /api/version may briefly fail until it comes back — the caller polls for that.
-export async function startUpdate(tag) {
+export async function startUpdate(tag?: string): Promise<UpdateResult> {
   const r = await fetch('/api/update', {
     method: 'POST',
     headers: { Accept: 'application/json', ...(tag ? { 'Content-Type': 'application/json' } : {}) },
     body: tag ? JSON.stringify({ tag }) : undefined,
   });
-  let body = null;
+  let body: UpdateResult['body'] | null = null;
   try { body = await r.json(); } catch { /* ignore */ }
   return { ok: r.ok, status: r.status, body: body || {} };
 }

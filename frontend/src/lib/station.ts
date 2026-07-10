@@ -20,7 +20,7 @@ export function sameStation(a?: string | null, b?: string | null): boolean {
 // Containment counts only on word boundaries, so "radio 1" matches
 // "npo radio 1" but never "radio 10".
 const alnum = /[a-z0-9]/;
-function containsWord(long, short) {
+function containsWord(long: string, short: string): boolean {
   for (let i = long.indexOf(short); i !== -1; i = long.indexOf(short, i + 1)) {
     const okBefore = i === 0 || !alnum.test(long[i - 1]);
     const okAfter = i + short.length === long.length || !alnum.test(long[i + short.length]);
@@ -35,7 +35,10 @@ function containsWord(long, short) {
 // 1" match while either plays. Resolving to ONE index here fixes that: prefer an
 // exact TuneIn-id match, then an exact name, then a loose match only when it is
 // unambiguous (a single preset matches). Ambiguous -> none, never several.
-export function activePresetIndex(presets, station) {
+export function activePresetIndex(
+  presets: (Preset | null)[],
+  station: PlayerStation | null,
+): number {
   if (!station || !Array.isArray(presets)) return -1;
   if (station.tuneInId) {
     const byId = presets.findIndex((p) => p && p.tuneInId && p.tuneInId === station.tuneInId);
