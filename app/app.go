@@ -26,6 +26,7 @@ import (
 	"github.com/stein155/retouch/internal/habridge"
 	"github.com/stein155/retouch/internal/marge"
 	"github.com/stein155/retouch/internal/mdns"
+	"github.com/stein155/retouch/internal/nowplaying"
 	"github.com/stein155/retouch/internal/plugins"
 	"github.com/stein155/retouch/internal/settings"
 	"github.com/stein155/retouch/internal/speaker"
@@ -125,7 +126,10 @@ func Run() {
 	// The update manager owns self-updates (release lookup, verified install,
 	// restart); the web API and the Home Assistant bridge both drive it.
 	upd := update.New(version, filepath.Dir(*presets), logger.With("comp", "update"))
-	webSrv := web.New(tc, bc, st, set, upd, filepath.Dir(*presets), logger)
+	// The enricher fills in the live track/artist/cover for playing stations;
+	// the web UI and the Home Assistant bridge share it (and its caches).
+	enr := nowplaying.New(bc, tc)
+	webSrv := web.New(tc, bc, st, set, upd, enr, filepath.Dir(*presets), logger)
 	margeSrv, err := marge.New(base, info, *presets+".marge", nativePresets, tc, logger.With("comp", "marge"))
 	if err != nil {
 		logger.Error("init marge stub", "err", err)
@@ -166,7 +170,7 @@ func Run() {
 	}, upd, logger.With("comp", "habridge"))
 	// Feed the bridge the enriched now-playing so HA shows the live track/artist,
 	// not just the station name (the speaker no longer receives track metadata).
-	bridge.SetNowPlaying(webSrv.EnrichedNowPlaying)
+	bridge.SetNowPlaying(enr.NowPlaying)
 	webSrv.SetMQTTBridge(bridge)
 	go bridge.Run(ctx)
 
