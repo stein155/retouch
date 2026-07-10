@@ -18,6 +18,9 @@ func TestParseStreamTitle(t *testing.T) {
 		{"no semicolon terminator", "StreamTitle='Song'", "Song"},
 		{"empty value", "StreamTitle='';StreamUrl='';", ""},
 		{"absent", "StreamUrl='x';", ""},
+		{"latin-1 é", "StreamTitle='Andr\xe9 Hazes Jr';", "André Hazes Jr"},
+		{"windows-1252 em dash", "StreamTitle='A \x96 B';", "A – B"},
+		{"utf-8 kept as-is", "StreamTitle='André';", "André"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

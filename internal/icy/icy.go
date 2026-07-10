@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // maxMetaInt bounds how many audio bytes we are willing to read before a
@@ -93,7 +94,39 @@ func parseStreamTitle(meta string) string {
 	if end < 0 {
 		return ""
 	}
-	return strings.TrimSpace(rest[:end])
+	return strings.TrimSpace(decodeText(rest[:end]))
+}
+
+// decodeText normalises a StreamTitle value to UTF-8. The ICY spec nominally
+// wants UTF-8, but many stations send the block in Windows-1252 (or plain
+// Latin-1), so a byte like 0xE9 ("é") would otherwise be invalid UTF-8 and
+// render as the replacement character. Valid UTF-8 is returned untouched;
+// anything else is decoded byte-for-byte through Windows-1252.
+func decodeText(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if r, ok := win1252[s[i]]; ok {
+			b.WriteRune(r)
+		} else {
+			// Bytes outside the 0x80–0x9F block map straight to the matching
+			// Unicode code point (Latin-1 == the low Unicode range).
+			b.WriteRune(rune(s[i]))
+		}
+	}
+	return b.String()
+}
+
+// win1252 holds the Windows-1252 code points that differ from Latin-1, all in
+// the 0x80–0x9F range (curly quotes, dashes, the euro sign, and friends).
+var win1252 = map[byte]rune{
+	0x80: '€', 0x82: '‚', 0x83: 'ƒ', 0x84: '„', 0x85: '…', 0x86: '†', 0x87: '‡',
+	0x88: 'ˆ', 0x89: '‰', 0x8A: 'Š', 0x8B: '‹', 0x8C: 'Œ', 0x8E: 'Ž', 0x91: '‘',
+	0x92: '’', 0x93: '“', 0x94: '”', 0x95: '•', 0x96: '–', 0x97: '—', 0x98: '˜',
+	0x99: '™', 0x9A: 'š', 0x9B: '›', 0x9C: 'œ', 0x9E: 'ž', 0x9F: 'Ÿ',
 }
 
 // SplitArtistTitle splits a StreamTitle on the first " - " into artist and
