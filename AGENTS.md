@@ -36,6 +36,7 @@ internal/release/    shared release fetch+verify (download, SHA256SUMS, ed25519 
 internal/plugins/    plugin host: download/verify/supervise plugin binaries; reverse-proxy their config API
 internal/update/     self-update manager: release lookup, verified install + binary swap, restart
 internal/store/      small on-disk state (presets, etc.)
+internal/telnet/     LAN block on the :17000 diagnostic CLI (iptables + reboot-persistent marker)
 internal/web/        JSON API + the embedded web app (built from frontend/)
 internal/sim/        SoundTouch speaker simulator (REST :8090 + CLI :17000) for tests
 cmd/soundtouch-sim/  runs the simulator standalone on the real ports for manual use
