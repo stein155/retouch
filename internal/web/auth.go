@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -225,7 +224,7 @@ func (s *Server) setPassword(w http.ResponseWriter, r *http.Request) {
 // time changes nothing.
 func (s *Server) RecoverAfterFactoryReset() error {
 	hadPassword := s.settings.Get().Auth.PasswordHash != ""
-	hadTelnetClosed := fileExists(filepath.Join(s.homeDir, ".close-telnet"))
+	hadTelnetClosed := s.telnet.IsClosed()
 	if !hadPassword && !hadTelnetClosed {
 		return nil
 	}
@@ -235,7 +234,7 @@ func (s *Server) RecoverAfterFactoryReset() error {
 	}
 	s.sessions.clear()
 	if hadTelnetClosed {
-		return s.setCloseTelnet(false)
+		return s.telnet.Set(false)
 	}
 	return nil
 }

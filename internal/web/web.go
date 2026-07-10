@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -32,6 +31,7 @@ import (
 	"github.com/stein155/retouch/internal/settings"
 	"github.com/stein155/retouch/internal/speaker"
 	"github.com/stein155/retouch/internal/store"
+	"github.com/stein155/retouch/internal/telnet"
 	"github.com/stein155/retouch/internal/tunein"
 	"github.com/stein155/retouch/internal/update"
 )
@@ -60,11 +60,11 @@ type Server struct {
 	mirror    PresetMirror
 	mdns      Hostnamer
 	mqtt      MQTTBridge
-	update    *update.Manager         // self-update: release lookup, install, restart
-	np        *nowplaying.Enricher    // live track/artist/cover for playing stations
-	telnetFW  func(closed bool) error // applies/removes the LAN block on :17000
-	sessions  *sessionStore           // settings-login sessions (see auth.go)
-	loginMu   sync.Mutex              // serializes password verifies (see verifyPassword)
+	update    *update.Manager      // self-update: release lookup, install, restart
+	np        *nowplaying.Enricher // live track/artist/cover for playing stations
+	telnet    *telnet.Guard        // applies/persists the LAN block on :17000
+	sessions  *sessionStore        // settings-login sessions (see auth.go)
+	loginMu   sync.Mutex           // serializes password verifies (see verifyPassword)
 	log       *slog.Logger
 	version   string
 	homeDir   string
@@ -122,7 +122,7 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		proxy:     &http.Client{Timeout: 12 * time.Second, Transport: publicOnlyTransport()},
 	}
 	srv.hub = newHub(srv.pollState, log.With("comp", "events"))
-	srv.telnetFW = telnetFirewall
+	srv.telnet = telnet.New(homeDir, log.With("comp", "telnet"))
 	srv.sessions = openSessions(filepath.Join(homeDir, ".sessions"))
 	return srv
 }
@@ -130,7 +130,7 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 // SetTelnetFirewall overrides how the :17000 LAN block is applied/removed.
 // Tests inject a fake so toggling the setting never runs iptables.
 func (s *Server) SetTelnetFirewall(f func(closed bool) error) {
-	s.telnetFW = f
+	s.telnet.SetApplier(f)
 }
 
 // Run drives the background services the Server owns — currently the SSE hub's
@@ -138,12 +138,8 @@ func (s *Server) SetTelnetFirewall(f func(closed bool) error) {
 func (s *Server) Run(ctx context.Context) {
 	// Re-apply the telnet block right away on every start: the iptables rule does
 	// not survive a reboot, only the marker file does.
-	if fileExists(filepath.Join(s.homeDir, ".close-telnet")) {
-		if err := s.telnetFW(true); err != nil {
-			s.log.Warn("close telnet at startup failed", "err", err)
-		} else {
-			s.log.Info("closed LAN telnet", "port", 17000)
-		}
+	if err := s.telnet.ApplyAtStartup(); err != nil {
+		s.log.Warn("close telnet at startup failed", "err", err)
 	}
 	s.hub.run(ctx)
 }
@@ -519,7 +515,7 @@ func (s *Server) debugBundle(w http.ResponseWriter, r *http.Request) {
 	b.WriteString("\n== installer state (persistent; survives reboots) ==\n")
 	fmt.Fprintf(&b, ".version   : %s\n", readFileLine(filepath.Join(s.homeDir, ".version")))
 	fmt.Fprintf(&b, ".attempts  : %s\n", readFileLine(filepath.Join(s.homeDir, ".attempts")))
-	fmt.Fprintf(&b, ".close-telnet: %v\n", fileExists(filepath.Join(s.homeDir, ".close-telnet")))
+	fmt.Fprintf(&b, ".close-telnet: %v\n", s.telnet.IsClosed())
 	gaveUp := fileExists(filepath.Join(s.homeDir, ".gaveup"))
 	fmt.Fprintf(&b, ".gaveup    : %v", gaveUp)
 	if gaveUp {
@@ -936,7 +932,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, out)
 		return
 	}
-	out["closeTelnet"] = fileExists(filepath.Join(s.homeDir, ".close-telnet"))
+	out["closeTelnet"] = s.telnet.IsClosed()
 	if infoErr == nil {
 		out["model"] = info.Type // device model, e.g. "SoundTouch 10"
 	}
@@ -1056,7 +1052,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.CloseTelnet != nil {
-		if err := s.setCloseTelnet(*body.CloseTelnet); err != nil {
+		if err := s.telnet.Set(*body.CloseTelnet); err != nil {
 			s.fail(w, "set telnet close failed", err)
 			return
 		}
@@ -1099,43 +1095,6 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
-}
-
-// setCloseTelnet applies the toggle immediately: the marker file only makes the
-// choice survive a reboot, the firewall rule is what actually closes the port.
-// Enabling is open to anyone; disabling goes through the settings login (the PUT
-// handler is auth-gated), which is what makes "close telnet" trustworthy.
-func (s *Server) setCloseTelnet(on bool) error {
-	path := filepath.Join(s.homeDir, ".close-telnet")
-	if on {
-		if err := os.WriteFile(path, []byte("1\n"), 0o644); err != nil {
-			return err
-		}
-		if err := s.telnetFW(true); err != nil {
-			return err
-		}
-		s.log.Info("closed LAN telnet", "port", 17000)
-		return nil
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err := s.telnetFW(false); err != nil {
-		return err
-	}
-	s.log.Info("reopened LAN telnet", "port", 17000)
-	return nil
-}
-
-// telnetFirewall installs or removes the raw-table DROP that hides the :17000
-// diagnostic CLI from the LAN (loopback stays open), de-duplicating any earlier
-// copies first.
-func telnetFirewall(closed bool) error {
-	script := "while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 17000 -j DROP 2>/dev/null; do :; done"
-	if closed {
-		script += "; iptables -t raw -I PREROUTING 1 ! -i lo -p tcp --dport 17000 -j DROP"
-	}
-	return exec.Command("sh", "-c", script).Run()
 }
 
 // stationIDRe matches a TuneIn guide id (e.g. "s6712"). The id is interpolated
