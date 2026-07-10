@@ -15,6 +15,13 @@ type TuneIn interface {
 	Describe(ctx context.Context, stationID string) (name, logo string)
 }
 
+// NowPlayingSource returns the live "now playing" track line for a station id, if
+// known. Used to put the current track (not just the station name) on the
+// speaker's own display — see tuneinPlayback.
+type NowPlayingSource interface {
+	Track(stationID string) (string, bool)
+}
+
 // The BMX TuneIn playback response the firmware's TUNEIN worker expects when it
 // fetches the registry baseUrl + /v1/playback/station/<id>. Field names/casing
 // mirror the Bose wire format.
@@ -81,6 +88,19 @@ func (s *Server) tuneinPlayback(w http.ResponseWriter, r *http.Request, stationI
 		return
 	}
 	name, logo := s.tunein.Describe(ctx, stationID) // best-effort metadata for now-playing
+	// Put the live track on the speaker's own display when we can. The firmware
+	// shows whatever Name this playback doc carries; historically the Bose cloud
+	// pushed the rolling track here, but with the cloud gone the speaker only ever
+	// saw the station name. We only swap Name for the live track once the firmware
+	// has RE-FETCHED this station's playback doc — proof it polls for updates, so
+	// the track will actually refresh rather than freeze at select-time. The first
+	// fetch always keeps the station name, so this can never regress the display.
+	if s.nowPlaying != nil && s.sawRepoll(stationID) {
+		if track, ok := s.nowPlaying.Track(stationID); ok && track != "" {
+			s.log.Info("bmx tunein now-playing on display", "station", stationID, "track", track)
+			name = track
+		}
+	}
 	streams := make([]bmxStream, 0, len(urls))
 	for _, u := range urls {
 		streams = append(streams, bmxStream{HasPlaylist: true, IsRealtime: true, StreamUrl: u})

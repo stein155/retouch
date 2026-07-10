@@ -82,6 +82,33 @@ func (e *Enricher) NowPlaying(ctx context.Context) (*speaker.NowPlaying, error) 
 	return np, nil
 }
 
+// Track returns the live "now playing" line for a TuneIn station id — "Artist -
+// Song", or just "Song" when the artist is unknown or merely repeats the station
+// — and whether one is known. Like Enrich it applies the cache and kicks off a
+// background refresh when stale, so it stays fast; it returns ("", false) until
+// the first lookup lands. Used to drive the track onto the speaker's own display
+// via marge (the firmware only shows what the cloud playback doc carries).
+func (e *Enricher) Track(id string) (string, bool) {
+	if !strings.HasPrefix(id, "s") {
+		return "", false
+	}
+	e.mu.Lock()
+	ent, ok := e.cache[id]
+	if (!ok || time.Since(ent.at) >= ttl) && !ent.fetching {
+		ent.fetching = true
+		e.cache[id] = ent
+		go e.refresh(id)
+	}
+	e.mu.Unlock()
+	if !ok || ent.song == "" {
+		return "", false
+	}
+	if artist := strings.TrimSpace(ent.artist); artist != "" && !strings.EqualFold(artist, strings.TrimSpace(ent.song)) {
+		return artist + " - " + ent.song, true
+	}
+	return ent.song, true
+}
+
 // Enrich fills in the song/artist/cover for a playing station. The read happens
 // in the background so the caller's poll stays fast; this call only applies
 // whatever is cached and kicks off a refresh when the entry is stale.

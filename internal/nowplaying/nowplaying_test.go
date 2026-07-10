@@ -41,6 +41,31 @@ func TestEnrichDropsArtistEqualToStation(t *testing.T) {
 	}
 }
 
+func TestTrackLine(t *testing.T) {
+	e := New(speaker.New("127.0.0.1"), tunein.New())
+
+	// Artist + song -> "Artist - Song".
+	seed(e, "s1", entry{song: "Song", artist: "Artist"})
+	if got, ok := e.Track("s1"); !ok || got != "Artist - Song" {
+		t.Errorf("Track = %q,%v want \"Artist - Song\",true", got, ok)
+	}
+
+	// Artist repeating the song -> just the song.
+	seed(e, "s2", entry{song: "Song", artist: " song "})
+	if got, ok := e.Track("s2"); !ok || got != "Song" {
+		t.Errorf("Track = %q,%v want \"Song\",true", got, ok)
+	}
+
+	// No song cached, or non-TuneIn id -> not known.
+	seed(e, "s3", entry{})
+	if _, ok := e.Track("s3"); ok {
+		t.Error("Track ok for empty song, want false")
+	}
+	if _, ok := e.Track("p100"); ok {
+		t.Error("Track ok for non-TuneIn id, want false")
+	}
+}
+
 func TestEnrichSkipsWhenNotPlaying(t *testing.T) {
 	e := New(speaker.New("127.0.0.1"), tunein.New())
 	seed(e, "s1", entry{song: "Song"})

@@ -136,6 +136,9 @@ func Run() {
 		os.Exit(1)
 	}
 	webSrv.SetPresetMirror(margeSrv)
+	// Let marge put the live track on the speaker's own display by returning it in
+	// the TuneIn playback doc (self-gated on the firmware re-polling; see marge).
+	margeSrv.SetNowPlaying(enr)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()

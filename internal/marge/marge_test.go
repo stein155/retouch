@@ -420,6 +420,51 @@ func TestBmxTuneinPlayback(t *testing.T) {
 	}
 }
 
+// fakeNowPlaying is a stand-in live-track source.
+type fakeNowPlaying struct{ track string }
+
+func (f *fakeNowPlaying) Track(string) (string, bool) {
+	return f.track, f.track != ""
+}
+
+// The display-track injection is gated on the firmware re-fetching the station's
+// playback doc: the first fetch keeps the station name (so it can't freeze on a
+// select-time track), a repeat swaps in the live track.
+func TestBmxTuneinPlaybackNowPlayingGate(t *testing.T) {
+	tc := &fakeTuneIn{urls: []string{"http://s/aac"}, name: "Station One", logo: "http://l/one.png"}
+	s := newTestServer(t, nil, tc)
+	s.SetNowPlaying(&fakeNowPlaying{track: "Artist - Song"})
+
+	nameOf := func() string {
+		w := do(t, s, http.MethodGet, "/bmx/tunein/v1/playback/station/s6712", "", nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, body %s", w.Code, w.Body.String())
+		}
+		var pb bmxPlayback
+		if err := json.Unmarshal(w.Body.Bytes(), &pb); err != nil {
+			t.Fatalf("bad JSON: %v", err)
+		}
+		return pb.Name
+	}
+
+	if got := nameOf(); got != "Station One" {
+		t.Errorf("first fetch Name = %q, want station name (no injection yet)", got)
+	}
+	if got := nameOf(); got != "Artist - Song" {
+		t.Errorf("re-fetch Name = %q, want live track", got)
+	}
+
+	// Switching to a different station resets the gate: its first fetch keeps the
+	// station name again.
+	if w := do(t, s, http.MethodGet, "/bmx/tunein/v1/playback/station/s999", "", nil); w.Code == http.StatusOK {
+		var pb bmxPlayback
+		_ = json.Unmarshal(w.Body.Bytes(), &pb)
+		if pb.Name != "Station One" {
+			t.Errorf("new station first fetch Name = %q, want station name", pb.Name)
+		}
+	}
+}
+
 // TestBmxTuneinResolveFailure checks a resolver error yields 502 (so the worker
 // retries rather than caches a broken stream).
 func TestBmxTuneinResolveFailure(t *testing.T) {
