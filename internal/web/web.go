@@ -64,7 +64,7 @@ type Server struct {
 	np        *nowplaying.Enricher // live track/artist/cover for playing stations
 	telnet    *telnet.Guard        // applies/persists the LAN block on :17000
 	sessions  *sessionStore        // settings-login sessions (see auth.go)
-	loginMu   sync.Mutex              // serializes password verifies (see verifyPassword)
+	loginMu   sync.Mutex           // serializes password verifies (see verifyPassword)
 	log       *slog.Logger
 	version   string
 	homeDir   string
