@@ -77,3 +77,19 @@ func TestCloseFirewallErrorPropagates(t *testing.T) {
 		t.Fatal("Set(true) with failing applier returned nil, want error")
 	}
 }
+
+// A failed firewall apply must NOT leave the marker on disk: IsClosed() would
+// then report the port blocked while the DROP rule was never installed.
+func TestCloseFirewallFailureDoesNotPersist(t *testing.T) {
+	g, _, marker := newGuard(t)
+	g.SetApplier(func(bool) error { return errors.New("boom") })
+	if err := g.Set(true); err == nil {
+		t.Fatal("Set(true) returned nil, want error")
+	}
+	if g.IsClosed() {
+		t.Error("IsClosed() true after the firewall apply failed")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Errorf("marker written despite firewall failure: %v", err)
+	}
+}

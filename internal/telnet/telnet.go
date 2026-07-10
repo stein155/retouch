@@ -64,10 +64,13 @@ func (g *Guard) Set(closed bool) error {
 }
 
 func (g *Guard) close() error {
-	if err := os.WriteFile(g.marker, []byte("1\n"), 0o644); err != nil {
+	// Apply the firewall FIRST, persist the marker only on success — otherwise a
+	// failed iptables call would leave the marker on disk and IsClosed() reporting
+	// the port as blocked while root telnet is still LAN-reachable.
+	if err := g.apply(true); err != nil {
 		return err
 	}
-	if err := g.apply(true); err != nil {
+	if err := os.WriteFile(g.marker, []byte("1\n"), 0o644); err != nil {
 		return err
 	}
 	g.log.Info("closed LAN telnet", "port", 17000)
@@ -75,10 +78,12 @@ func (g *Guard) close() error {
 }
 
 func (g *Guard) open() error {
-	if err := os.Remove(g.marker); err != nil && !os.IsNotExist(err) {
+	// Remove the rule first; drop the marker only once it's actually open, so the
+	// persisted intent never says "open" while the DROP rule is still installed.
+	if err := g.apply(false); err != nil {
 		return err
 	}
-	if err := g.apply(false); err != nil {
+	if err := os.Remove(g.marker); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	g.log.Info("reopened LAN telnet", "port", 17000)

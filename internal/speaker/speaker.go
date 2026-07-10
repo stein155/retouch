@@ -683,7 +683,15 @@ func xmlEsc(s string) string {
 
 // Wake nudges the speaker out of standby via the :17000 CLI (`sys power`), then
 // briefly waits for it to leave STANDBY so a following Play is not dropped.
+//
+// `sys power` is a TOGGLE, not a power-on, so it is only sent when the speaker is
+// actually in standby — otherwise waking an already-playing speaker would switch
+// it OFF and then stall the full 6s waiting to leave a standby we just caused.
+// (Mirrors habridge.setPower, which guards Wake the same way.)
 func (c *Client) Wake(ctx context.Context) {
+	if np, err := c.NowPlaying(ctx); err == nil && np.Source != "STANDBY" {
+		return // already awake
+	}
 	_ = c.cli(ctx, "sys power")
 	deadline := time.Now().Add(6 * time.Second)
 	for time.Now().Before(deadline) {
