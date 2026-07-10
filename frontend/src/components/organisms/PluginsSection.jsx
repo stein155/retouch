@@ -70,6 +70,37 @@ const QrCopy = styled.span`
   color: var(--accent);
 `;
 
+// --- installed-plugin header: a tappable row that expands the plugin's settings.
+const PlugHead = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 0;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+`;
+
+const PlugName = styled.div`
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-transform: capitalize;
+`;
+
+const PlugMeta = styled.div`
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 2px;
+`;
+
+const PlugChevron = styled(Icon.chevron)`
+  flex-shrink: 0;
+  color: var(--ink-3);
+  transform: rotate(${(p) => (p.$open ? '90deg' : '0deg')});
+  transition: transform 180ms ease;
+`;
+
 function QrField({ field }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -104,7 +135,7 @@ function QrField({ field }) {
 // flows (log in → 2FA code → logged in) need no special-casing here: each step is just
 // the next manifest the plugin sends.
 function PluginPanel({ name }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [manifest, setManifest] = useState(null);
   const [values, setValues] = useState({}); // field.key -> string|bool
   const [rows, setRows] = useState({});      // row.id -> { toggleKey: bool }
@@ -138,7 +169,7 @@ function PluginPanel({ name }) {
     let timer;
     let tries = 0;
     const attempt = () => {
-      getPluginManifest(name).then((m) => {
+      getPluginManifest(name, lang).then((m) => {
         if (!on) return;
         if (m) { adopt(m); return; }
         if (tries++ < 20) timer = setTimeout(attempt, 1500);
@@ -146,7 +177,7 @@ function PluginPanel({ name }) {
     };
     attempt();
     return () => { on = false; clearTimeout(timer); };
-  }, [name, adopt]);
+  }, [name, lang, adopt]);
 
   const runAction = async (action) => {
     if (busy) return;
@@ -154,7 +185,7 @@ function PluginPanel({ name }) {
     setBusy(action.id);
     setErr('');
     try {
-      const next = await pluginAction(name, action.id, { values, rows });
+      const next = await pluginAction(name, action.id, { values, rows }, lang);
       adopt(next);
     } catch (e) {
       setErr(e.message || String(e));
@@ -164,7 +195,7 @@ function PluginPanel({ name }) {
   };
 
   if (!manifest) {
-    return <FieldHint>{t('pluginNotRunning')}…</FieldHint>;
+    return <FieldHint>{t('pluginLoading')}…</FieldHint>;
   }
 
   const st = manifest.status;
@@ -252,9 +283,13 @@ function PluginPanel({ name }) {
   );
 }
 
-// One installed plugin: a header row (name, run status, remove) plus its config panel.
+// One installed plugin: a tappable header (name + "installed") that expands to
+// reveal the plugin's own settings panel — the QR / pairing code lives in there —
+// plus a remove button at the bottom of that panel. Collapsed by default so the
+// list of plugins stays compact.
 function InstalledPlugin({ p, onRemove }) {
   const { t } = useI18n();
+  const [open, setOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
 
   const remove = async () => {
@@ -266,21 +301,30 @@ function InstalledPlugin({ p, onRemove }) {
   return (
     <div style={{ marginTop: 12 }}>
       <FieldCard>
-        <FieldRow>
-          <FieldRowLabel as="span" style={{ textTransform: 'capitalize' }}>{p.name}</FieldRowLabel>
-          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <FieldRowValue as="span" style={{ fontSize: 12, color: p.running ? '#2ecc71' : 'var(--muted, #9aa0a6)' }}>
-              {p.running ? t('pluginRunning') : t('pluginNotRunning')}
-            </FieldRowValue>
-            <Button $variant="ghost" onClick={remove} disabled={removing} aria-label={t('pluginRemove')} style={{ padding: '4px 10px' }}>
-              {removing ? <Spinner $scan /> : <span>{t('pluginRemove')}</span>}
-            </Button>
+        <PlugHead
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-label={t('pluginSettings')}
+        >
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <PlugName>{p.name}</PlugName>
+            <PlugMeta>{t('pluginInstalled')}</PlugMeta>
           </span>
-        </FieldRow>
+          <PlugChevron width="18" height="18" $open={open} />
+        </PlugHead>
       </FieldCard>
-      {p.sideloaded && <FieldHint>{t('pluginUpdatable')}</FieldHint>}
       {p.lastErr && !p.running && <FieldHint $error>{p.lastErr}</FieldHint>}
-      <PluginPanel name={p.name} />
+      {open && (
+        <>
+          {p.sideloaded && <FieldHint>{t('pluginUpdatable')}</FieldHint>}
+          <PluginPanel name={p.name} />
+          <Button $variant="delete" onClick={remove} disabled={removing}>
+            {removing ? <Spinner $scan /> : <Icon.trash width="17" height="17" />}
+            <span>{t('pluginRemove')}</span>
+          </Button>
+        </>
+      )}
     </div>
   );
 }
@@ -317,17 +361,15 @@ function CatalogPlugin({ entry, onChanged, sideloadAllowed }) {
 
   return (
     <div style={{ marginTop: 12 }}>
-      <FieldCard>
-        <FieldRow>
-          <span style={{ flex: 1, minWidth: 0 }}>
-            <FieldRowLabel as="div">{title}</FieldRowLabel>
-            {description && <FieldRowValue as="div" style={{ flex: 'none', fontSize: 12, marginTop: 2, textAlign: 'left', fontWeight: 400, color: 'var(--ink-3)' }}>{description}</FieldRowValue>}
-          </span>
-          <Button $variant="update" onClick={install} disabled={busy} style={{ flexShrink: 0 }}>
-            {busy ? <Spinner $scan /> : <Icon.download width="18" height="18" />}
-            <span>{busy ? t('pluginInstalling') : t('pluginInstall')}</span>
-          </Button>
-        </FieldRow>
+      <FieldCard style={{ padding: '14px 16px' }}>
+        <div style={{ fontSize: 14.5, fontWeight: 600, color: 'var(--ink-2)' }}>{title}</div>
+        {description && (
+          <div style={{ fontSize: 12.5, lineHeight: 1.4, marginTop: 4, color: 'var(--ink-3)' }}>{description}</div>
+        )}
+        <Button $variant="update" onClick={install} disabled={busy}>
+          {busy ? <Spinner $scan /> : <Icon.download width="18" height="18" />}
+          <span>{busy ? t('pluginInstalling') : t('pluginInstall')}</span>
+        </Button>
       </FieldCard>
       {sideloadAllowed && (
         <>

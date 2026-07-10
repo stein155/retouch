@@ -275,16 +275,20 @@ export async function uploadPlugin(name, file) {
 
 // getPluginManifest fetches the plugin's current settings UI (a server-driven
 // schema: { title, status, sections:[{fields,rows,actions}] }). Returns null if
-// the plugin isn't running yet.
-export async function getPluginManifest(name) {
-  try { return await getJSON(`/api/plugins/${encodeURIComponent(name)}/manifest`); } catch { return null; }
+// the plugin isn't running yet. The current UI language is passed as ?lang so a
+// plugin can localise its own manifest text (status, section copy, action labels).
+export async function getPluginManifest(name, lang) {
+  const q = lang ? `?lang=${encodeURIComponent(lang)}` : '';
+  try { return await getJSON(`/api/plugins/${encodeURIComponent(name)}/manifest${q}`); } catch { return null; }
 }
 
 // pluginAction performs a manifest action (e.g. log in, submit a 2FA code, save
 // devices). The plugin replies with the NEW manifest, which the UI re-renders —
 // that's how multi-step flows like 2FA fall out without any plugin-specific code.
-export async function pluginAction(name, id, body) {
-  return send(`/api/plugins/${encodeURIComponent(name)}/action/${encodeURIComponent(id)}`, 'POST', body || {});
+// lang is forwarded as ?lang so the returned manifest stays in the UI language.
+export async function pluginAction(name, id, body, lang) {
+  const q = lang ? `?lang=${encodeURIComponent(lang)}` : '';
+  return send(`/api/plugins/${encodeURIComponent(name)}/action/${encodeURIComponent(id)}${q}`, 'POST', body || {});
 }
 
 // startUpdate asks the speaker to fetch a release and replace itself. With no tag
