@@ -25,9 +25,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stein155/retouch/internal/artwork"
 	"github.com/stein155/retouch/internal/discover"
-	"github.com/stein155/retouch/internal/icy"
+	"github.com/stein155/retouch/internal/nowplaying"
 	"github.com/stein155/retouch/internal/plugins"
 	"github.com/stein155/retouch/internal/release"
 	"github.com/stein155/retouch/internal/settings"
@@ -62,6 +61,7 @@ type Server struct {
 	mdns      Hostnamer
 	mqtt      MQTTBridge
 	update    *update.Manager         // self-update: release lookup, install, restart
+	np        *nowplaying.Enricher    // live track/artist/cover for playing stations
 	telnetFW  func(closed bool) error // applies/removes the LAN block on :17000
 	sessions  *sessionStore           // settings-login sessions (see auth.go)
 	loginMu   sync.Mutex              // serializes password verifies (see verifyPassword)
@@ -70,39 +70,11 @@ type Server struct {
 	homeDir   string
 	startedAt time.Time
 	ui        http.Handler     // serves the embedded dist bundle
-	proxy     *http.Client     // for the same-origin TuneIn / logo proxies + artwork
-	stream    *http.Client     // reads ICY metadata off the audio stream
+	proxy     *http.Client     // for the same-origin TuneIn / logo proxies
 	hub       *hub             // pushes live state to browsers over SSE (/api/events)
 	plugins   *plugins.Manager // installs/supervises/proxies plugins; nil off-speaker
 	sideload  bool             // allow unverified plugin uploads (-allow-sideload)
-
-	npMu       sync.Mutex                // guards npCache and streamURLs
-	npCache    map[string]npCacheEntry   // now-playing, keyed by station id
-	streamURLs map[string]streamURLEntry // resolved stream URL, keyed by station id
 }
-
-// npCacheEntry is a now-playing lookup cached briefly so the UI's poll (every
-// few seconds) doesn't re-read the stream for the same station. fetching guards
-// against launching a second background refresh while one is already in flight.
-type npCacheEntry struct {
-	song, artist, art string
-	at                time.Time
-	fetching          bool
-}
-
-// streamURLEntry caches the stream URL resolved from TuneIn so each poll doesn't
-// re-hit Tune.ashx; the URL (and any embedded token) is stable for a while.
-type streamURLEntry struct {
-	url string
-	at  time.Time
-}
-
-// npTTL is how long a now-playing lookup stays fresh. Songs change every few
-// minutes, so a short cache keeps the line current without per-poll stream reads.
-const npTTL = 15 * time.Second
-
-// streamURLTTL is how long a resolved stream URL is reused before re-resolving.
-const streamURLTTL = 5 * time.Minute
 
 // PresetMirror receives successful direct speaker preset writes so the local cloud
 // emulation cannot later sync stale presets back to the speaker.
@@ -127,28 +99,27 @@ type MQTTBridge interface {
 }
 
 // New builds a Server. upd performs self-updates (release lookup, install,
-// restart); the server only maps it onto HTTP.
-func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Store, upd *update.Manager, homeDir string, log *slog.Logger) *Server {
+// restart) and np enriches now-playing with live track metadata; the server
+// only maps them onto HTTP.
+func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Store, upd *update.Manager, np *nowplaying.Enricher, homeDir string, log *slog.Logger) *Server {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		// dist is embedded at build time; this only fails if the build is broken.
 		panic("web: embedded dist missing: " + err.Error())
 	}
 	srv := &Server{
-		tunein:     tc,
-		speaker:    b,
-		store:      s,
-		settings:   set,
-		update:     upd,
-		log:        log,
-		version:    upd.Version(),
-		homeDir:    homeDir,
-		startedAt:  time.Now(),
-		ui:         http.FileServer(http.FS(sub)),
-		proxy:      &http.Client{Timeout: 12 * time.Second, Transport: publicOnlyTransport()},
-		stream:     &http.Client{Timeout: 12 * time.Second, Transport: publicOnlyTransport()},
-		npCache:    map[string]npCacheEntry{},
-		streamURLs: map[string]streamURLEntry{},
+		tunein:    tc,
+		speaker:   b,
+		store:     s,
+		settings:  set,
+		update:    upd,
+		np:        np,
+		log:       log,
+		version:   upd.Version(),
+		homeDir:   homeDir,
+		startedAt: time.Now(),
+		ui:        http.FileServer(http.FS(sub)),
+		proxy:     &http.Client{Timeout: 12 * time.Second, Transport: publicOnlyTransport()},
 	}
 	srv.hub = newHub(srv.pollState, log.With("comp", "events"))
 	srv.telnetFW = telnetFirewall
@@ -910,147 +881,8 @@ func (s *Server) now(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "now failed", err)
 		return
 	}
-	s.enrichNowPlaying(np)
+	s.np.Enrich(np)
 	writeJSON(w, 200, np)
-}
-
-// EnrichedNowPlaying returns the current now-playing with the live song/artist/
-// cover filled in from the stream metadata — the same view the web UI shows. The
-// MQTT bridge uses it so Home Assistant sees the track, not just the station name
-// (the speaker itself no longer receives track metadata; see enrichNowPlaying).
-func (s *Server) EnrichedNowPlaying(ctx context.Context) (*speaker.NowPlaying, error) {
-	np, err := s.speaker.NowPlaying(ctx)
-	if err != nil {
-		return nil, err
-	}
-	s.enrichNowPlaying(np)
-	return np, nil
-}
-
-// enrichNowPlaying fills in the song/artist/cover for a playing station. The
-// speaker no longer gets this metadata (it came from the retired Bose cloud), so
-// ReTouch reads it from the standard ICY stream metadata (see internal/icy),
-// falling back to TuneIn, and looks up cover art generically (see
-// internal/artwork). The read happens in the
-// background so the poll stays fast; this call only applies whatever is cached
-// and kicks off a refresh when the entry is stale. Best-effort: with nothing
-// cached yet the UI just shows the station until the next poll fills it in.
-func (s *Server) enrichNowPlaying(np *speaker.NowPlaying) {
-	if np == nil || !strings.HasPrefix(np.StationID, "s") {
-		return
-	}
-	if np.PlayStatus != "" && np.PlayStatus != "PLAY_STATE" && np.PlayStatus != "BUFFERING_STATE" {
-		return // nothing is playing — don't show a stale song
-	}
-	id := np.StationID
-	s.npMu.Lock()
-	e, ok := s.npCache[id]
-	if (!ok || time.Since(e.at) >= npTTL) && !e.fetching {
-		e.fetching = true
-		s.npCache[id] = e
-		go s.refreshNowPlaying(id)
-	}
-	s.npMu.Unlock()
-
-	if !ok {
-		return
-	}
-	// The speaker fills Track with the station name as a placeholder and never
-	// knows the artist, so the stream's live song wins whenever it has one.
-	if e.song != "" {
-		np.Track = e.song
-		np.Artist = e.artist
-		// Some streams (e.g. NPO) put the programme name where the artist goes;
-		// when that just repeats the station, drop it rather than show it twice.
-		if strings.EqualFold(strings.TrimSpace(np.Artist), strings.TrimSpace(np.Station)) {
-			np.Artist = ""
-		}
-		// The speaker's own art is the generic station logo; our track cover is
-		// more specific, so it takes priority when we have one.
-		if e.art != "" {
-			np.Art = e.art
-		}
-	} else if np.Art == "" && e.art != "" {
-		np.Art = e.art
-	}
-}
-
-// refreshNowPlaying reads the current track off the station's stream and looks
-// up cover art, then stores the result. Runs in its own goroutine off a fresh
-// context (the request that triggered it has already returned). Any failure
-// caches an empty entry so the poll doesn't retry until the TTL lapses.
-func (s *Server) refreshNowPlaying(id string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-	defer cancel()
-
-	var e npCacheEntry
-	// Primary: the standard ICY metadata in the stream itself.
-	if url := s.streamURL(ctx, id); url != "" {
-		if title, err := icy.StreamTitle(ctx, s.stream, url); err != nil {
-			s.invalidateStreamURL(id) // stale URL / expired token — re-resolve next time
-		} else {
-			e.artist, e.song = icy.SplitArtistTitle(title)
-		}
-	}
-	// Fallback: TuneIn's Describe when the stream carried no track metadata.
-	if e.song == "" {
-		if t, err := s.tunein.NowPlaying(ctx, id); err == nil && t.Song != "" {
-			e.song, e.artist, e.art = t.Song, t.Artist, t.Art
-		}
-	}
-	// Cover art for whatever we found: look it up generically when we don't
-	// already have one (ICY carries none; TuneIn sometimes does).
-	if e.song != "" && e.art == "" {
-		term := strings.TrimSpace(e.artist + " " + e.song)
-		if art, err := artwork.Search(ctx, s.proxy, term); err == nil {
-			e.art = art
-		}
-	}
-	e.at = time.Now()
-
-	s.npMu.Lock()
-	// The cache only needs the stations currently on screen; drop expired
-	// entries once it grows past that so it can't accumulate for months.
-	if len(s.npCache) > 64 {
-		for k, v := range s.npCache {
-			if k != id && time.Since(v.at) >= npTTL && !v.fetching {
-				delete(s.npCache, k)
-			}
-		}
-	}
-	s.npCache[id] = e
-	s.npMu.Unlock()
-}
-
-// streamURL returns the station's playable stream URL, resolved via TuneIn and
-// cached so each poll doesn't re-resolve. Empty on failure.
-func (s *Server) streamURL(ctx context.Context, id string) string {
-	s.npMu.Lock()
-	if e, ok := s.streamURLs[id]; ok && time.Since(e.at) < streamURLTTL {
-		s.npMu.Unlock()
-		return e.url
-	}
-	s.npMu.Unlock()
-
-	urls, err := s.tunein.Resolve(ctx, id)
-	if err != nil {
-		return ""
-	}
-	u := tunein.PlayableURL(urls)
-	if u == "" {
-		return ""
-	}
-	s.npMu.Lock()
-	s.streamURLs[id] = streamURLEntry{url: u, at: time.Now()}
-	s.npMu.Unlock()
-	return u
-}
-
-// invalidateStreamURL drops a cached stream URL so it is re-resolved next time.
-func (s *Server) invalidateStreamURL(id string) {
-	s.npMu.Lock()
-	delete(s.streamURLs, id)
-	s.npMu.Unlock()
 }
 
 func (s *Server) getVolume(w http.ResponseWriter, r *http.Request) {

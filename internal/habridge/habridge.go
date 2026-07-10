@@ -112,7 +112,7 @@ func New(sp *speaker.Client, cfgFn func() Config, updater Updater, log *slog.Log
 	}
 }
 
-// SetNowPlaying supplies the enriched now-playing source (the web layer's
+// SetNowPlaying supplies the enriched now-playing source (internal/nowplaying's
 // EnrichedNowPlaying), so Home Assistant sees the live track and artist, not just
 // the station. Optional; without it the bridge uses the speaker's raw read.
 func (b *Bridge) SetNowPlaying(fn func(context.Context) (*speaker.NowPlaying, error)) {

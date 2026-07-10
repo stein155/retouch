@@ -159,7 +159,7 @@ func (s *Server) pollState(ctx context.Context) (snapshot, bool) {
 	if err != nil {
 		return snapshot{}, false
 	}
-	s.enrichNowPlaying(np)
+	s.np.Enrich(np)
 	snap := snapshot{Now: np}
 	if v, err := s.speaker.Volume(c); err == nil {
 		snap.Volume = &v
