@@ -280,6 +280,7 @@ func (s *Server) Handler() http.Handler {
 	// registered per method (not as an all-method catch-all) so its pattern stays
 	// comparable to "GET /" — an all-method catch-all conflicts with it and panics.
 	mux.HandleFunc("GET /api/plugins", s.listPlugins)
+	mux.HandleFunc("GET /api/plugins/{name}/latest", s.pluginLatest)
 	mux.HandleFunc("POST /api/plugins/{name}/install", s.installPlugin)
 	mux.HandleFunc("POST /api/plugins/{name}/upload", s.uploadPlugin)
 	mux.HandleFunc("DELETE /api/plugins/{name}", s.removePlugin)
