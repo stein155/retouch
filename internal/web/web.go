@@ -7,6 +7,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -33,6 +34,7 @@ import (
 	"github.com/stein155/retouch/internal/speaker"
 	"github.com/stein155/retouch/internal/store"
 	"github.com/stein155/retouch/internal/tunein"
+	"github.com/stein155/retouch/internal/update"
 )
 
 // dist holds the built React UI (frontend/), embedded at build time. The
@@ -48,41 +50,7 @@ var distFS embed.FS
 const (
 	tuneInBase   = "https://opml.radiotime.com"
 	logoMaxBytes = 2 << 20 // 2 MiB
-	repo         = "stein155/retouch"
 )
-
-// releasePublicKey is the base64-encoded ed25519 public key that release SHA256SUMS
-// files are signed with. When set, a self-update refuses to install unless the
-// release ships a valid SHA256SUMS.sig — so a checksum that merely matches the
-// (same-origin) SHA256SUMS is no longer enough; the binary must be signed by the
-// holder of the private key, closing the "compromised GitHub release → root on
-// every speaker" gap that TLS + checksum alone leave open.
-//
-// Empty (the default) keeps the prior behaviour (TLS + checksum only). To enable
-// signing, generate a keypair, put the public half here, and sign releases in CI
-// with the private half — see docs/RELEASE_SIGNING.md.
-const releasePublicKey = "vmNYVuOZnDN7P7ipK43aJNZ2R6tT1IRX6TXvw7+IvX8="
-
-type releaseInfo struct {
-	TagName    string `json:"tag_name"`
-	Name       string `json:"name"`
-	Prerelease bool   `json:"prerelease"`
-	Draft      bool   `json:"draft"`
-}
-
-// betaPRRe matches the per-PR beta tag the Beta Build workflow publishes
-// (beta-pr-<number>), so the app can show "PR #<n>" and accept it as a target.
-var betaPRRe = regexp.MustCompile(`^beta-pr-(\d+)$`)
-
-// betaPR extracts the PR number from a beta-pr-<n> tag.
-func betaPR(tag string) (int, bool) {
-	m := betaPRRe.FindStringSubmatch(tag)
-	if m == nil {
-		return 0, false
-	}
-	n, _ := strconv.Atoi(m[1])
-	return n, true
-}
 
 // Server wires the UI to the speaker and TuneIn search.
 type Server struct {
@@ -93,6 +61,7 @@ type Server struct {
 	mirror    PresetMirror
 	mdns      Hostnamer
 	mqtt      MQTTBridge
+	update    *update.Manager         // self-update: release lookup, install, restart
 	telnetFW  func(closed bool) error // applies/removes the LAN block on :17000
 	sessions  *sessionStore           // settings-login sessions (see auth.go)
 	loginMu   sync.Mutex              // serializes password verifies (see verifyPassword)
@@ -100,7 +69,6 @@ type Server struct {
 	version   string
 	homeDir   string
 	startedAt time.Time
-	updateMu  sync.Mutex
 	ui        http.Handler     // serves the embedded dist bundle
 	proxy     *http.Client     // for the same-origin TuneIn / logo proxies + artwork
 	stream    *http.Client     // reads ICY metadata off the audio stream
@@ -133,8 +101,6 @@ type streamURLEntry struct {
 // minutes, so a short cache keeps the line current without per-poll stream reads.
 const npTTL = 15 * time.Second
 
-const updateDownloadTimeout = 5 * time.Minute
-
 // streamURLTTL is how long a resolved stream URL is reused before re-resolving.
 const streamURLTTL = 5 * time.Minute
 
@@ -160,8 +126,9 @@ type MQTTBridge interface {
 	Status() (connected bool, lastErr string)
 }
 
-// New builds a Server.
-func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Store, version, homeDir string, log *slog.Logger) *Server {
+// New builds a Server. upd performs self-updates (release lookup, install,
+// restart); the server only maps it onto HTTP.
+func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Store, upd *update.Manager, homeDir string, log *slog.Logger) *Server {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		// dist is embedded at build time; this only fails if the build is broken.
@@ -172,8 +139,9 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 		speaker:    b,
 		store:      s,
 		settings:   set,
+		update:     upd,
 		log:        log,
-		version:    version,
+		version:    upd.Version(),
 		homeDir:    homeDir,
 		startedAt:  time.Now(),
 		ui:         http.FileServer(http.FS(sub)),
@@ -517,14 +485,14 @@ func (s *Server) zoneTargetIP(w http.ResponseWriter, r *http.Request) (string, b
 }
 
 func (s *Server) versionInfo(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"version": s.version, "updatable": s.updatable()})
+	writeJSON(w, 200, map[string]any{"version": s.version, "updatable": s.update.Updatable()})
 }
 
 // releases lists what the app can update to: the latest stable release plus every
 // open-PR beta the Beta Build workflow has published. The frontend turns this into
 // the version picker so a beta can be installed over the air, no computer needed.
 func (s *Server) releases(w http.ResponseWriter, r *http.Request) {
-	all, err := s.listReleases(r.Context())
+	all, err := s.update.Releases(r.Context())
 	if err != nil {
 		s.fail(w, "release list failed", err)
 		return
@@ -536,7 +504,7 @@ func (s *Server) releases(w http.ResponseWriter, r *http.Request) {
 		if rel.Draft || tag == "" {
 			continue
 		}
-		if n, ok := betaPR(tag); ok && rel.Prerelease {
+		if n, ok := update.BetaPR(tag); ok && rel.Prerelease {
 			name := strings.TrimSpace(rel.Name)
 			if name == "" {
 				name = "PR #" + strconv.Itoa(n)
@@ -552,7 +520,7 @@ func (s *Server) releases(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{
 		"current":   s.version,
-		"updatable": s.updatable(),
+		"updatable": s.update.Updatable(),
 		"stable":    stable,
 		"betas":     betas,
 	})
@@ -571,7 +539,7 @@ func (s *Server) debugBundle(w http.ResponseWriter, r *http.Request) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ReTouch debug bundle\n")
 	fmt.Fprintf(&b, "version    : %s\n", s.version)
-	fmt.Fprintf(&b, "updatable  : %v\n", s.updatable())
+	fmt.Fprintf(&b, "updatable  : %v\n", s.update.Updatable())
 	fmt.Fprintf(&b, "home       : %s\n", s.homeDir)
 	fmt.Fprintf(&b, "clock      : %s\n", time.Now().Format(time.RFC3339))
 	fmt.Fprintf(&b, "uptime     : %s\n", time.Since(s.startedAt).Round(time.Second))
@@ -653,10 +621,6 @@ func tailFile(path string, max int64) string {
 	return out
 }
 
-func (s *Server) updatable() bool {
-	return filepath.IsAbs(s.homeDir) && s.homeDir != "/" && fileExists(filepath.Join(s.homeDir, "retouch"))
-}
-
 func fileExists(path string) bool {
 	st, err := os.Stat(path)
 	return err == nil && !st.IsDir()
@@ -671,256 +635,32 @@ func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) {
 	s.ui.ServeHTTP(w, r)
 }
 
+// updateApp maps POST /api/update onto the update manager: an optional
+// {"tag": "..."} body targets a specific release (e.g. a beta); an empty body
+// means "latest stable", the default Update button.
 func (s *Server) updateApp(w http.ResponseWriter, r *http.Request) {
-	if !s.updatable() {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "updates are only available on an installed speaker"})
-		return
-	}
-	// An optional {"tag": "..."} body targets a specific release (e.g. a beta);
-	// an empty body means "latest stable", the default Update button.
 	var body struct {
 		Tag string `json:"tag"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&body)
 	}
-	target := strings.TrimSpace(body.Tag)
-
-	if !s.updateMu.TryLock() {
+	target, current, err := s.update.Start(r.Context(), body.Tag)
+	var unknown update.UnknownTagError
+	switch {
+	case errors.Is(err, update.ErrNotUpdatable):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+	case errors.Is(err, update.ErrBusy):
 		writeJSON(w, http.StatusConflict, map[string]string{"status": "updating"})
-		return
-	}
-
-	if target == "" {
-		latest, err := s.latestRelease(r.Context())
-		if err != nil {
-			s.updateMu.Unlock()
-			s.fail(w, "latest release check failed", err)
-			return
-		}
-		if latest == "" {
-			s.updateMu.Unlock()
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "latest release missing tag"})
-			return
-		}
-		target = latest
-	} else {
-		// Only ever install a tag we actually publish — never an arbitrary ref —
-		// so a crafted request can't point the speaker at a foreign download.
-		ok, err := s.isOfferedTag(r.Context(), target)
-		if err != nil {
-			s.updateMu.Unlock()
-			s.fail(w, "release check failed", err)
-			return
-		}
-		if !ok {
-			s.updateMu.Unlock()
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown release " + target})
-			return
-		}
-	}
-
-	if target == s.version {
-		s.updateMu.Unlock()
+	case errors.As(err, &unknown):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case err != nil:
+		s.fail(w, "release check failed", err)
+	case current:
 		writeJSON(w, 200, map[string]string{"status": "current", "version": s.version})
-		return
+	default:
+		writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": target})
 	}
-
-	s.startUpdate(s.version, target)
-	writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": target})
-}
-
-// startUpdate installs release `to` and restarts, in the background. The caller must
-// already hold updateMu (via TryLock); startUpdate hands the lock off to the
-// goroutine and releases it when the install finishes or fails.
-func (s *Server) startUpdate(from, to string) {
-	go func() {
-		defer s.updateMu.Unlock()
-		if err := s.installRelease(context.Background(), to); err != nil {
-			s.log.Warn("self-update failed", "from", from, "to", to, "err", err)
-			return
-		}
-		s.log.Info("self-update installed; restarting", "from", from, "to", to)
-		s.restartAfterUpdate()
-	}()
-}
-
-// UpdateInfo reports the running version, the latest available stable release, its
-// release URL, and whether updating is possible here (only on an installed speaker).
-// It backs the Home Assistant `update` entity so HA can show an update notification.
-// Off-speaker (not updatable) it reports latest == installed and skips the GitHub
-// call, so no false update is offered.
-func (s *Server) UpdateInfo(ctx context.Context) (installed, latest, releaseURL string, updatable bool, err error) {
-	installed = s.version
-	updatable = s.updatable()
-	if !updatable {
-		return installed, installed, "", false, nil
-	}
-	latest, err = s.latestRelease(ctx)
-	if err != nil {
-		return installed, "", "", true, err
-	}
-	if latest == "" {
-		latest = installed
-	}
-	if latest != installed {
-		releaseURL = "https://github.com/" + repo + "/releases/tag/" + latest
-	}
-	return installed, latest, releaseURL, true, nil
-}
-
-// UpdateToLatest installs the latest stable release and restarts, reusing the same
-// path as POST /api/update. It backs the Home Assistant update entity's Install
-// action. It returns quickly: the download + restart run in the background on success.
-func (s *Server) UpdateToLatest(ctx context.Context) error {
-	if !s.updatable() {
-		return fmt.Errorf("updates are only available on an installed speaker")
-	}
-	if !s.updateMu.TryLock() {
-		return fmt.Errorf("an update is already in progress")
-	}
-	target, err := s.latestRelease(ctx)
-	if err != nil {
-		s.updateMu.Unlock()
-		return fmt.Errorf("latest release check failed: %w", err)
-	}
-	if target == "" {
-		s.updateMu.Unlock()
-		return fmt.Errorf("latest release missing tag")
-	}
-	if target == s.version {
-		s.updateMu.Unlock()
-		return nil // already current
-	}
-	s.startUpdate(s.version, target)
-	return nil
-}
-
-func (s *Server) latestRelease(ctx context.Context) (string, error) {
-	var rel releaseInfo
-	if err := s.getJSON(ctx, "https://api.github.com/repos/"+repo+"/releases/latest", &rel); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(rel.TagName), nil
-}
-
-// listReleases returns the repo's releases, newest first (GitHub's order).
-func (s *Server) listReleases(ctx context.Context) ([]releaseInfo, error) {
-	var rels []releaseInfo
-	if err := s.getJSON(ctx, "https://api.github.com/repos/"+repo+"/releases?per_page=100", &rels); err != nil {
-		return nil, err
-	}
-	return rels, nil
-}
-
-// isOfferedTag reports whether tag is a real, non-draft release of this repo.
-func (s *Server) isOfferedTag(ctx context.Context, tag string) (bool, error) {
-	rels, err := s.listReleases(ctx)
-	if err != nil {
-		return false, err
-	}
-	for _, rel := range rels {
-		if !rel.Draft && strings.TrimSpace(rel.TagName) == tag {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func (s *Server) installRelease(ctx context.Context, tag string) error {
-	bin := filepath.Join(s.homeDir, "retouch")
-	newBin := bin + ".new"
-	sums := filepath.Join(s.homeDir, "SHA256SUMS")
-	base := "https://github.com/" + repo + "/releases/download/" + tag
-	if err := s.downloadFile(ctx, base+"/retouch-armv7l", newBin, 0o755); err != nil {
-		return err
-	}
-	if err := s.downloadFile(ctx, base+"/SHA256SUMS", sums, 0o644); err != nil {
-		_ = os.Remove(newBin)
-		return err
-	}
-	// When signing is enabled, the checksums file itself must carry a valid
-	// signature before we trust any checksum in it. Betas are exempt: they are
-	// built from PR code by the Beta Build workflow, which must never be given
-	// the release signing key, so a beta ships no SHA256SUMS.sig. Betas stay
-	// gated by being maintainer-triggered, opt-in prereleases over TLS + checksum.
-	if _, isBeta := betaPR(tag); releasePublicKey != "" && !isBeta {
-		sig := filepath.Join(s.homeDir, "SHA256SUMS.sig")
-		if err := s.downloadFile(ctx, base+"/SHA256SUMS.sig", sig, 0o644); err != nil {
-			_ = os.Remove(newBin)
-			return err
-		}
-		if err := verifyReleaseSignature(releasePublicKey, sums, sig); err != nil {
-			_ = os.Remove(newBin)
-			return err
-		}
-	}
-	want, err := release.ChecksumFor(sums, "retouch-armv7l")
-	if err != nil {
-		_ = os.Remove(newBin)
-		return err
-	}
-	if err := release.VerifyChecksum(newBin, want); err != nil {
-		_ = os.Remove(newBin)
-		return err
-	}
-	// Keep the outgoing binary as retouch.old so a bad release can be rolled back
-	// by hand (best-effort; a first install has none). Restore it if the swap fails,
-	// so we never leave the speaker with no binary.
-	old := bin + ".old"
-	hadOld := fileExists(bin)
-	if hadOld {
-		_ = os.Rename(bin, old)
-	}
-	if err := os.Rename(newBin, bin); err != nil {
-		_ = os.Remove(newBin)
-		if hadOld {
-			_ = os.Rename(old, bin)
-		}
-		return err
-	}
-	return os.WriteFile(filepath.Join(s.homeDir, ".version"), []byte(tag+"\n"), 0o644)
-}
-
-// verifyReleaseSignature is a thin alias over release.VerifySignature (kept so the
-// on-speaker OTA reads naturally at the call site and the signature test targets it).
-func verifyReleaseSignature(pubKeyB64, sumsPath, sigPath string) error {
-	return release.VerifySignature(pubKeyB64, sumsPath, sigPath)
-}
-
-func (s *Server) getJSON(ctx context.Context, target string, out any) error {
-	return release.GetJSON(ctx, s.proxy, "ReTouch/"+s.version, target, out)
-}
-
-func (s *Server) downloadFile(ctx context.Context, target, path string, mode fs.FileMode) error {
-	ctx, cancel := context.WithTimeout(ctx, updateDownloadTimeout)
-	defer cancel()
-	client := &http.Client{Timeout: updateDownloadTimeout}
-	return release.Download(ctx, client, "ReTouch/"+s.version, target, path, mode)
-}
-
-func (s *Server) restartAfterUpdate() {
-	// Stop plugin children first: os.Exit skips context cancellation, so without
-	// this they'd be orphaned to init and duplicated by the relaunched ReTouch
-	// (two Ring agents then invalidate each other's rotating refresh token).
-	if s.plugins != nil {
-		s.plugins.Shutdown(3 * time.Second)
-	}
-	start := filepath.Join(s.homeDir, "start.sh")
-	if fileExists(start) {
-		cmd := exec.Command("sh", "-c", "sleep 1; "+shellQuote(start)+" >/tmp/retouch-start.log 2>&1 &")
-		if err := cmd.Start(); err != nil {
-			s.log.Warn("schedule restart", "err", err)
-			return
-		}
-		time.Sleep(200 * time.Millisecond)
-		os.Exit(0)
-	}
-	s.log.Warn("start script missing after update", "path", start)
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {

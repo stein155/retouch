@@ -21,6 +21,7 @@ import (
 	"github.com/stein155/retouch/internal/speaker"
 	"github.com/stein155/retouch/internal/store"
 	"github.com/stein155/retouch/internal/tunein"
+	"github.com/stein155/retouch/internal/update"
 	"github.com/stein155/retouch/internal/web"
 )
 
@@ -70,7 +71,7 @@ func newServerAt(t *testing.T, dir string) (*web.Server, *sim.Speaker, string) {
 	// homeDir is a temp dir with no "retouch" binary, so updatable() is false:
 	// /api/version reports updatable:false and /api/update returns 409 without
 	// ever reaching GitHub.
-	srv := web.New(tunein.New(), sc, st, set, "test", dir, log)
+	srv := web.New(tunein.New(), sc, st, set, update.New("test", dir, log), dir, log)
 	// Toggling closeTelnet applies a firewall rule immediately; stub it out so
 	// tests never run iptables.
 	srv.SetTelnetFirewall(func(bool) error { return nil })

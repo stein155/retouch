@@ -31,6 +31,7 @@ import (
 	"github.com/stein155/retouch/internal/speaker"
 	"github.com/stein155/retouch/internal/store"
 	"github.com/stein155/retouch/internal/tunein"
+	"github.com/stein155/retouch/internal/update"
 	"github.com/stein155/retouch/internal/web"
 )
 
@@ -121,7 +122,10 @@ func Run() {
 
 	tc := tunein.New()
 	set := settings.Open(*presets + ".settings")
-	webSrv := web.New(tc, bc, st, set, version, filepath.Dir(*presets), logger)
+	// The update manager owns self-updates (release lookup, verified install,
+	// restart); the web API and the Home Assistant bridge both drive it.
+	upd := update.New(version, filepath.Dir(*presets), logger.With("comp", "update"))
+	webSrv := web.New(tc, bc, st, set, upd, filepath.Dir(*presets), logger)
 	margeSrv, err := marge.New(base, info, *presets+".marge", nativePresets, tc, logger.With("comp", "marge"))
 	if err != nil {
 		logger.Error("init marge stub", "err", err)
@@ -146,7 +150,7 @@ func Run() {
 
 	// Home Assistant MQTT bridge: reads its config from the settings store on every
 	// (re)connect, so the web UI's MQTT section takes effect via bridge.Reload().
-	// The HA update entity reuses the web server's version-check + self-update path.
+	// The HA update entity drives the same update manager as POST /api/update.
 	bridge := habridge.New(bc, func() habridge.Config {
 		m := set.Get().MQTT
 		return habridge.Config{
@@ -159,7 +163,7 @@ func Run() {
 			DiscoveryPrefix: m.DiscoveryPrefix,
 			TLS:             m.TLS,
 		}
-	}, webSrv, logger.With("comp", "habridge"))
+	}, upd, logger.With("comp", "habridge"))
 	// Feed the bridge the enriched now-playing so HA shows the live track/artist,
 	// not just the station name (the speaker no longer receives track metadata).
 	bridge.SetNowPlaying(webSrv.EnrichedNowPlaying)
@@ -194,6 +198,11 @@ func Run() {
 		logger.Warn("plugin host disabled", "err", err)
 	} else {
 		webSrv.SetPlugins(pm, *sideload)
+		// Stop plugin children before the post-update restart: os.Exit skips
+		// context cancellation, so without this they'd be orphaned to init and
+		// duplicated by the relaunched ReTouch (two Ring agents then invalidate
+		// each other's rotating refresh token).
+		upd.SetBeforeRestart(func() { pm.Shutdown(3 * time.Second) })
 		go pm.Run(ctx)
 	}
 
