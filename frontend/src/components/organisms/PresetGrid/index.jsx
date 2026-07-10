@@ -1,33 +1,9 @@
 import { useMemo } from 'react';
-import styled from 'styled-components';
 import { Section } from '../../atoms/Section';
 import { PresetTile, PresetTileSkeleton } from '../../molecules/PresetTile';
 import { useI18n } from '../../../lib/i18n';
 import { activePresetIndex } from '../../../lib/station';
-
-const SectHead = styled.div`
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 14px;
-`;
-
-const SectTitle = styled.span`
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-`;
-
-const SectSub = styled.span`
-  font-size: 12px;
-  color: var(--ink-2);
-`;
-
-const Grid = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-`;
+import { SectHead, SectTitle, SectSub, Grid } from './styled';
 
 export function PresetGrid({ presets, player, loading, onPlay, onAssign }) {
   const { t } = useI18n();

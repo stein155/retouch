@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import styled from 'styled-components';
 import { Icon } from '../../atoms/Icon';
 import { StationRow } from '../../molecules/StationRow';
 import {
@@ -7,66 +6,11 @@ import {
 } from '../../molecules/Sheet';
 import { searchTuneIn } from '../../../lib/api';
 import { useI18n } from '../../../lib/i18n';
+import {
+  SheetSearch, SheetClear, SheetRows, SheetEmpty, SheetEmptyQ,
+} from './styled';
 
 const clean = (value) => (typeof value === 'string' ? value.trim() : '');
-
-const SheetSearch = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 20px 10px;
-  padding: 14px 16px;
-  background: var(--surface);
-  border-radius: 16px;
-  color: var(--ink-2);
-  box-shadow: var(--shadow-sm);
-  transition: box-shadow 200ms ease;
-
-  &:focus-within { box-shadow: var(--shadow); }
-
-  input {
-    flex: 1;
-    background: transparent;
-    border: 0;
-    outline: none;
-    color: var(--ink);
-    font-size: 15px;
-    font-weight: 500;
-  }
-  input::placeholder { color: var(--ink-3); font-weight: 400; }
-`;
-
-const SheetClear = styled.button`
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  color: var(--ink-2);
-  background: var(--surface-3);
-
-  &:hover { background: var(--ink); color: var(--bg); }
-`;
-
-const SheetRows = styled.div`
-  display: flex;
-  flex-direction: column;
-`;
-
-const SheetEmpty = styled.div`
-  padding: 60px 20px;
-  text-align: center;
-  color: var(--ink-2);
-  font-size: 13px;
-  font-weight: 500;
-`;
-
-const SheetEmptyQ = styled.div`
-  color: var(--ink);
-  font-size: 18px;
-  font-weight: 700;
-  margin-bottom: 8px;
-`;
 
 export function SearchSheet({ open, mode, speakerName, onClose, onPick }) {
   const { t } = useI18n();

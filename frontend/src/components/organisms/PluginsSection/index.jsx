@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import styled from 'styled-components';
 import { Icon } from '../../atoms/Icon';
 import { Spinner } from '../../atoms/Spinner';
 import { Button } from '../../atoms/Button';
@@ -13,96 +12,15 @@ import {
   getPlugins, installPlugin, removePlugin, uploadPlugin,
   getPluginManifest, pluginAction, getPluginLatest,
 } from '../../../lib/api';
+import {
+  QrCardEl, QrQuiet, QrCodeBtn, QrCodeText, QrCopy,
+  PlugHead, PlugName, PlugMeta, PlugAction,
+} from './styled';
 
 // A coloured status dot, matching the MQTT section's convention.
 const statusColor = (level) => ({
   ok: '#2ecc71', warn: '#f1c40f', error: '#e74c3c',
 }[level] || 'var(--muted, #9aa0a6)');
-
-// --- qr field: a scannable pairing code plus its typeable digits -----------
-// Used by plugins like Apple Home. The field carries { value } (the payload the QR
-// encodes) and an optional { code } (the human-readable version, tap to copy).
-const QrCardEl = styled(FieldCard)`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 20px 18px 16px;
-`;
-
-const QrQuiet = styled.div`
-  padding: 12px;
-  background: #fff;
-  border-radius: 14px;
-  box-shadow: 0 0 0 1px rgba(31, 24, 20, 0.06);
-  line-height: 0;
-`;
-
-const QrCodeBtn = styled.button`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 18px;
-  padding: 8px 10px 8px 16px;
-  background: var(--surface-2);
-  border-radius: 12px;
-  -webkit-tap-highlight-color: transparent;
-`;
-
-const QrCodeText = styled.span`
-  font-size: 21px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-`;
-
-const QrCopy = styled.span`
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-shrink: 0;
-  padding: 6px 10px;
-  border-radius: 9px;
-  background: #fff;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--accent);
-`;
-
-// --- installed-plugin header: a tappable row that expands the plugin's settings.
-const PlugHead = styled.button`
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 14px 0;
-  text-align: left;
-  -webkit-tap-highlight-color: transparent;
-`;
-
-const PlugName = styled.div`
-  font-size: 14.5px;
-  font-weight: 600;
-  color: var(--ink-2);
-`;
-
-const PlugMeta = styled.div`
-  font-size: 12px;
-  color: var(--ink-3);
-  margin-top: 2px;
-`;
-
-// The "Instellingen ›" affordance on an installed-plugin row.
-const PlugAction = styled.span`
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--accent);
-`;
 
 // catStr prefers a localised catalog string (pluginCat_<name>_<suffix>) when the
 // app ships one, else falls back to the server-provided English value. makeT
