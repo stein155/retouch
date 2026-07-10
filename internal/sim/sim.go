@@ -177,6 +177,12 @@ func (s *Speaker) handleCLI(conn net.Conn) {
 func (s *Speaker) togglePower() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.powerToggleLocked()
+}
+
+// powerToggleLocked flips standby <-> the last active source. Caller holds s.mu.
+// Shared by the CLI `sys power` and the /key POWER press so both behave identically.
+func (s *Speaker) powerToggleLocked() {
 	if s.source == "STANDBY" {
 		if s.lastSource == "" {
 			s.lastSource = "TUNEIN"
@@ -422,16 +428,7 @@ func (s *Speaker) applyKey(key string) {
 			s.playStatus = "PLAY_STATE"
 		}
 	case "POWER":
-		// handled like the CLI toggle
-		if s.source == "STANDBY" {
-			if s.lastSource == "" {
-				s.lastSource = "TUNEIN"
-			}
-			s.source = s.lastSource
-		} else {
-			s.lastSource = s.source
-			s.source = "STANDBY"
-		}
+		s.powerToggleLocked() // same as the CLI `sys power`
 	default:
 		// PRESET_1..PRESET_6: play the station stored on that slot, like the
 		// firmware does when a preset button is pressed.
