@@ -105,3 +105,21 @@ func TestDownloadAndGetJSON(t *testing.T) {
 		t.Fatalf("GetJSON tag = %q, want v9", rel.TagName)
 	}
 }
+
+func TestDownloadRemovesPartialFile(t *testing.T) {
+	// An upstream that dies mid-body (Content-Length says 10, sends 5) must not
+	// leave a truncated file behind.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "10")
+		_, _ = w.Write([]byte("short"))
+	}))
+	defer ts.Close()
+
+	dst := filepath.Join(t.TempDir(), "out")
+	if err := Download(context.Background(), ts.Client(), "test", ts.URL, dst, 0o755); err == nil {
+		t.Fatal("Download succeeded, want error")
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Fatalf("partial file exists after failed download: %v", err)
+	}
+}

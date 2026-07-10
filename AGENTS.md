@@ -34,7 +34,9 @@ internal/auth/       password hashing (stdlib PBKDF2) + session tokens for the s
 internal/settings/   persisted app settings (name, bass, language, MQTT config, settings password)
 internal/release/    shared release fetch+verify (download, SHA256SUMS, ed25519 sig, SSRF-safe transport)
 internal/plugins/    plugin host: download/verify/supervise plugin binaries; reverse-proxy their config API
+internal/update/     self-update manager: release lookup, verified install + binary swap, restart
 internal/store/      small on-disk state (presets, etc.)
+internal/telnet/     LAN block on the :17000 diagnostic CLI (iptables + reboot-persistent marker)
 internal/web/        JSON API + the embedded web app (built from frontend/)
 internal/sim/        SoundTouch speaker simulator (REST :8090 + CLI :17000) for tests
 cmd/soundtouch-sim/  runs the simulator standalone on the real ports for manual use
@@ -76,7 +78,7 @@ docker run --rm -v "$PWD":/src -w /src golang:1.22-alpine sh -c 'go vet ./... &&
 The web app is built separately and embedded via `go:embed` into `internal/web/dist`:
 
 ```sh
-docker run --rm -v "$PWD/frontend":/app -w /app node:20-alpine \
+docker run --rm -v "$PWD/frontend":/app -w /app node:24-alpine \
   sh -c 'npm ci && npm run build'
 ```
 

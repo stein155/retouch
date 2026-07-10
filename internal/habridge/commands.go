@@ -142,8 +142,7 @@ func (b *Bridge) selectPreset(ctx context.Context, client *mqtt.Client, tp topic
 	}
 	for _, p := range presets {
 		if p.Name == name {
-			b.sp.Wake(ctx)
-			if err := b.sp.Key(ctx, "PRESET_"+strconv.Itoa(p.Slot)); err != nil {
+			if err := b.sp.PlayPreset(ctx, p.Slot); err != nil {
 				b.log.Warn("mqtt preset play", "slot", p.Slot, "err", err)
 				return
 			}

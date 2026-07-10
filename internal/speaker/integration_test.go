@@ -318,8 +318,9 @@ func TestPresetPlayback(t *testing.T) {
 	if err := c.StorePreset(ctx(), 2, "TUNEIN", "stationurl", "/v1/playback/station/s1", "Jazz FM", ""); err != nil {
 		t.Fatal(err)
 	}
-	// Pressing the preset key plays the stored station, like the hardware button.
-	if err := c.Key(ctx(), "PRESET_2"); err != nil {
+	// Playing the preset wakes the speaker and presses the matching key, like the
+	// hardware button.
+	if err := c.PlayPreset(ctx(), 2); err != nil {
 		t.Fatal(err)
 	}
 	np, err := c.NowPlaying(ctx())

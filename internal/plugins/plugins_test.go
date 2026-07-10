@@ -99,6 +99,29 @@ func TestInstallAndRemove(t *testing.T) {
 	}
 }
 
+func TestLatestTag(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/releases/latest") {
+			_, _ = w.Write([]byte(`{"tag_name":"v1.0.1"}`))
+			return
+		}
+		http.Error(w, "no", http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	m := testManager(t)
+	m.client = ts.Client()
+	m.apiBase = ts.URL
+
+	tag, err := m.LatestTag(context.Background(), "stein155/retouch-homekit")
+	if err != nil {
+		t.Fatalf("LatestTag: %v", err)
+	}
+	if tag != "v1.0.1" {
+		t.Fatalf("LatestTag = %q, want v1.0.1", tag)
+	}
+}
+
 func TestProxyRewriteAndDown(t *testing.T) {
 	var seenPath string
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

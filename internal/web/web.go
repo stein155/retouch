@@ -7,6 +7,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -15,7 +16,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -24,15 +24,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stein155/retouch/internal/artwork"
 	"github.com/stein155/retouch/internal/discover"
-	"github.com/stein155/retouch/internal/icy"
+	"github.com/stein155/retouch/internal/nowplaying"
 	"github.com/stein155/retouch/internal/plugins"
 	"github.com/stein155/retouch/internal/release"
 	"github.com/stein155/retouch/internal/settings"
 	"github.com/stein155/retouch/internal/speaker"
 	"github.com/stein155/retouch/internal/store"
+	"github.com/stein155/retouch/internal/telnet"
 	"github.com/stein155/retouch/internal/tunein"
+	"github.com/stein155/retouch/internal/update"
 )
 
 // dist holds the built React UI (frontend/), embedded at build time. The
@@ -48,41 +49,7 @@ var distFS embed.FS
 const (
 	tuneInBase   = "https://opml.radiotime.com"
 	logoMaxBytes = 2 << 20 // 2 MiB
-	repo         = "stein155/retouch"
 )
-
-// releasePublicKey is the base64-encoded ed25519 public key that release SHA256SUMS
-// files are signed with. When set, a self-update refuses to install unless the
-// release ships a valid SHA256SUMS.sig — so a checksum that merely matches the
-// (same-origin) SHA256SUMS is no longer enough; the binary must be signed by the
-// holder of the private key, closing the "compromised GitHub release → root on
-// every speaker" gap that TLS + checksum alone leave open.
-//
-// Empty (the default) keeps the prior behaviour (TLS + checksum only). To enable
-// signing, generate a keypair, put the public half here, and sign releases in CI
-// with the private half — see docs/RELEASE_SIGNING.md.
-const releasePublicKey = "vmNYVuOZnDN7P7ipK43aJNZ2R6tT1IRX6TXvw7+IvX8="
-
-type releaseInfo struct {
-	TagName    string `json:"tag_name"`
-	Name       string `json:"name"`
-	Prerelease bool   `json:"prerelease"`
-	Draft      bool   `json:"draft"`
-}
-
-// betaPRRe matches the per-PR beta tag the Beta Build workflow publishes
-// (beta-pr-<number>), so the app can show "PR #<n>" and accept it as a target.
-var betaPRRe = regexp.MustCompile(`^beta-pr-(\d+)$`)
-
-// betaPR extracts the PR number from a beta-pr-<n> tag.
-func betaPR(tag string) (int, bool) {
-	m := betaPRRe.FindStringSubmatch(tag)
-	if m == nil {
-		return 0, false
-	}
-	n, _ := strconv.Atoi(m[1])
-	return n, true
-}
 
 // Server wires the UI to the speaker and TuneIn search.
 type Server struct {
@@ -93,50 +60,21 @@ type Server struct {
 	mirror    PresetMirror
 	mdns      Hostnamer
 	mqtt      MQTTBridge
-	telnetFW  func(closed bool) error // applies/removes the LAN block on :17000
-	sessions  *sessionStore           // settings-login sessions (see auth.go)
-	loginMu   sync.Mutex              // serializes password verifies (see verifyPassword)
+	update    *update.Manager      // self-update: release lookup, install, restart
+	np        *nowplaying.Enricher // live track/artist/cover for playing stations
+	telnet    *telnet.Guard        // applies/persists the LAN block on :17000
+	sessions  *sessionStore        // settings-login sessions (see auth.go)
+	loginMu   sync.Mutex           // serializes password verifies (see verifyPassword)
 	log       *slog.Logger
 	version   string
 	homeDir   string
 	startedAt time.Time
-	updateMu  sync.Mutex
 	ui        http.Handler     // serves the embedded dist bundle
-	proxy     *http.Client     // for the same-origin TuneIn / logo proxies + artwork
-	stream    *http.Client     // reads ICY metadata off the audio stream
+	proxy     *http.Client     // for the same-origin TuneIn / logo proxies
 	hub       *hub             // pushes live state to browsers over SSE (/api/events)
 	plugins   *plugins.Manager // installs/supervises/proxies plugins; nil off-speaker
 	sideload  bool             // allow unverified plugin uploads (-allow-sideload)
-
-	npMu       sync.Mutex                // guards npCache and streamURLs
-	npCache    map[string]npCacheEntry   // now-playing, keyed by station id
-	streamURLs map[string]streamURLEntry // resolved stream URL, keyed by station id
 }
-
-// npCacheEntry is a now-playing lookup cached briefly so the UI's poll (every
-// few seconds) doesn't re-read the stream for the same station. fetching guards
-// against launching a second background refresh while one is already in flight.
-type npCacheEntry struct {
-	song, artist, art string
-	at                time.Time
-	fetching          bool
-}
-
-// streamURLEntry caches the stream URL resolved from TuneIn so each poll doesn't
-// re-hit Tune.ashx; the URL (and any embedded token) is stable for a while.
-type streamURLEntry struct {
-	url string
-	at  time.Time
-}
-
-// npTTL is how long a now-playing lookup stays fresh. Songs change every few
-// minutes, so a short cache keeps the line current without per-poll stream reads.
-const npTTL = 15 * time.Second
-
-const updateDownloadTimeout = 5 * time.Minute
-
-// streamURLTTL is how long a resolved stream URL is reused before re-resolving.
-const streamURLTTL = 5 * time.Minute
 
 // PresetMirror receives successful direct speaker preset writes so the local cloud
 // emulation cannot later sync stale presets back to the speaker.
@@ -160,30 +98,31 @@ type MQTTBridge interface {
 	Status() (connected bool, lastErr string)
 }
 
-// New builds a Server.
-func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Store, version, homeDir string, log *slog.Logger) *Server {
+// New builds a Server. upd performs self-updates (release lookup, install,
+// restart) and np enriches now-playing with live track metadata; the server
+// only maps them onto HTTP.
+func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Store, upd *update.Manager, np *nowplaying.Enricher, homeDir string, log *slog.Logger) *Server {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		// dist is embedded at build time; this only fails if the build is broken.
 		panic("web: embedded dist missing: " + err.Error())
 	}
 	srv := &Server{
-		tunein:     tc,
-		speaker:    b,
-		store:      s,
-		settings:   set,
-		log:        log,
-		version:    version,
-		homeDir:    homeDir,
-		startedAt:  time.Now(),
-		ui:         http.FileServer(http.FS(sub)),
-		proxy:      &http.Client{Timeout: 12 * time.Second, Transport: publicOnlyTransport()},
-		stream:     &http.Client{Timeout: 12 * time.Second, Transport: publicOnlyTransport()},
-		npCache:    map[string]npCacheEntry{},
-		streamURLs: map[string]streamURLEntry{},
+		tunein:    tc,
+		speaker:   b,
+		store:     s,
+		settings:  set,
+		update:    upd,
+		np:        np,
+		log:       log,
+		version:   upd.Version(),
+		homeDir:   homeDir,
+		startedAt: time.Now(),
+		ui:        http.FileServer(http.FS(sub)),
+		proxy:     &http.Client{Timeout: 12 * time.Second, Transport: publicOnlyTransport()},
 	}
 	srv.hub = newHub(srv.pollState, log.With("comp", "events"))
-	srv.telnetFW = telnetFirewall
+	srv.telnet = telnet.New(homeDir, log.With("comp", "telnet"))
 	srv.sessions = openSessions(filepath.Join(homeDir, ".sessions"))
 	return srv
 }
@@ -191,7 +130,7 @@ func New(tc *tunein.Client, b *speaker.Client, s *store.Store, set *settings.Sto
 // SetTelnetFirewall overrides how the :17000 LAN block is applied/removed.
 // Tests inject a fake so toggling the setting never runs iptables.
 func (s *Server) SetTelnetFirewall(f func(closed bool) error) {
-	s.telnetFW = f
+	s.telnet.SetApplier(f)
 }
 
 // Run drives the background services the Server owns — currently the SSE hub's
@@ -199,12 +138,8 @@ func (s *Server) SetTelnetFirewall(f func(closed bool) error) {
 func (s *Server) Run(ctx context.Context) {
 	// Re-apply the telnet block right away on every start: the iptables rule does
 	// not survive a reboot, only the marker file does.
-	if fileExists(filepath.Join(s.homeDir, ".close-telnet")) {
-		if err := s.telnetFW(true); err != nil {
-			s.log.Warn("close telnet at startup failed", "err", err)
-		} else {
-			s.log.Info("closed LAN telnet", "port", 17000)
-		}
+	if err := s.telnet.ApplyAtStartup(); err != nil {
+		s.log.Warn("close telnet at startup failed", "err", err)
 	}
 	s.hub.run(ctx)
 }
@@ -282,6 +217,7 @@ func (s *Server) Handler() http.Handler {
 	// registered per method (not as an all-method catch-all) so its pattern stays
 	// comparable to "GET /" — an all-method catch-all conflicts with it and panics.
 	mux.HandleFunc("GET /api/plugins", s.listPlugins)
+	mux.HandleFunc("GET /api/plugins/{name}/latest", s.pluginLatest)
 	mux.HandleFunc("POST /api/plugins/{name}/install", s.installPlugin)
 	mux.HandleFunc("POST /api/plugins/{name}/upload", s.uploadPlugin)
 	mux.HandleFunc("DELETE /api/plugins/{name}", s.removePlugin)
@@ -518,14 +454,14 @@ func (s *Server) zoneTargetIP(w http.ResponseWriter, r *http.Request) (string, b
 }
 
 func (s *Server) versionInfo(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"version": s.version, "updatable": s.updatable()})
+	writeJSON(w, 200, map[string]any{"version": s.version, "updatable": s.update.Updatable()})
 }
 
 // releases lists what the app can update to: the latest stable release plus every
 // open-PR beta the Beta Build workflow has published. The frontend turns this into
 // the version picker so a beta can be installed over the air, no computer needed.
 func (s *Server) releases(w http.ResponseWriter, r *http.Request) {
-	all, err := s.listReleases(r.Context())
+	all, err := s.update.Releases(r.Context())
 	if err != nil {
 		s.fail(w, "release list failed", err)
 		return
@@ -537,7 +473,7 @@ func (s *Server) releases(w http.ResponseWriter, r *http.Request) {
 		if rel.Draft || tag == "" {
 			continue
 		}
-		if n, ok := betaPR(tag); ok && rel.Prerelease {
+		if n, ok := update.BetaPR(tag); ok && rel.Prerelease {
 			name := strings.TrimSpace(rel.Name)
 			if name == "" {
 				name = "PR #" + strconv.Itoa(n)
@@ -553,7 +489,7 @@ func (s *Server) releases(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{
 		"current":   s.version,
-		"updatable": s.updatable(),
+		"updatable": s.update.Updatable(),
 		"stable":    stable,
 		"betas":     betas,
 	})
@@ -572,7 +508,7 @@ func (s *Server) debugBundle(w http.ResponseWriter, r *http.Request) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ReTouch debug bundle\n")
 	fmt.Fprintf(&b, "version    : %s\n", s.version)
-	fmt.Fprintf(&b, "updatable  : %v\n", s.updatable())
+	fmt.Fprintf(&b, "updatable  : %v\n", s.update.Updatable())
 	fmt.Fprintf(&b, "home       : %s\n", s.homeDir)
 	fmt.Fprintf(&b, "clock      : %s\n", time.Now().Format(time.RFC3339))
 	fmt.Fprintf(&b, "uptime     : %s\n", time.Since(s.startedAt).Round(time.Second))
@@ -581,7 +517,7 @@ func (s *Server) debugBundle(w http.ResponseWriter, r *http.Request) {
 	b.WriteString("\n== installer state (persistent; survives reboots) ==\n")
 	fmt.Fprintf(&b, ".version   : %s\n", readFileLine(filepath.Join(s.homeDir, ".version")))
 	fmt.Fprintf(&b, ".attempts  : %s\n", readFileLine(filepath.Join(s.homeDir, ".attempts")))
-	fmt.Fprintf(&b, ".close-telnet: %v\n", fileExists(filepath.Join(s.homeDir, ".close-telnet")))
+	fmt.Fprintf(&b, ".close-telnet: %v\n", s.telnet.IsClosed())
 	gaveUp := fileExists(filepath.Join(s.homeDir, ".gaveup"))
 	fmt.Fprintf(&b, ".gaveup    : %v", gaveUp)
 	if gaveUp {
@@ -654,10 +590,6 @@ func tailFile(path string, max int64) string {
 	return out
 }
 
-func (s *Server) updatable() bool {
-	return filepath.IsAbs(s.homeDir) && s.homeDir != "/" && fileExists(filepath.Join(s.homeDir, "retouch"))
-}
-
 func fileExists(path string) bool {
 	st, err := os.Stat(path)
 	return err == nil && !st.IsDir()
@@ -672,256 +604,32 @@ func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) {
 	s.ui.ServeHTTP(w, r)
 }
 
+// updateApp maps POST /api/update onto the update manager: an optional
+// {"tag": "..."} body targets a specific release (e.g. a beta); an empty body
+// means "latest stable", the default Update button.
 func (s *Server) updateApp(w http.ResponseWriter, r *http.Request) {
-	if !s.updatable() {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "updates are only available on an installed speaker"})
-		return
-	}
-	// An optional {"tag": "..."} body targets a specific release (e.g. a beta);
-	// an empty body means "latest stable", the default Update button.
 	var body struct {
 		Tag string `json:"tag"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&body)
 	}
-	target := strings.TrimSpace(body.Tag)
-
-	if !s.updateMu.TryLock() {
+	target, current, err := s.update.Start(r.Context(), body.Tag)
+	var unknown update.UnknownTagError
+	switch {
+	case errors.Is(err, update.ErrNotUpdatable):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+	case errors.Is(err, update.ErrBusy):
 		writeJSON(w, http.StatusConflict, map[string]string{"status": "updating"})
-		return
-	}
-
-	if target == "" {
-		latest, err := s.latestRelease(r.Context())
-		if err != nil {
-			s.updateMu.Unlock()
-			s.fail(w, "latest release check failed", err)
-			return
-		}
-		if latest == "" {
-			s.updateMu.Unlock()
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "latest release missing tag"})
-			return
-		}
-		target = latest
-	} else {
-		// Only ever install a tag we actually publish — never an arbitrary ref —
-		// so a crafted request can't point the speaker at a foreign download.
-		ok, err := s.isOfferedTag(r.Context(), target)
-		if err != nil {
-			s.updateMu.Unlock()
-			s.fail(w, "release check failed", err)
-			return
-		}
-		if !ok {
-			s.updateMu.Unlock()
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown release " + target})
-			return
-		}
-	}
-
-	if target == s.version {
-		s.updateMu.Unlock()
+	case errors.As(err, &unknown):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case err != nil:
+		s.fail(w, "release check failed", err)
+	case current:
 		writeJSON(w, 200, map[string]string{"status": "current", "version": s.version})
-		return
+	default:
+		writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": target})
 	}
-
-	s.startUpdate(s.version, target)
-	writeJSON(w, 202, map[string]string{"status": "updating", "from": s.version, "to": target})
-}
-
-// startUpdate installs release `to` and restarts, in the background. The caller must
-// already hold updateMu (via TryLock); startUpdate hands the lock off to the
-// goroutine and releases it when the install finishes or fails.
-func (s *Server) startUpdate(from, to string) {
-	go func() {
-		defer s.updateMu.Unlock()
-		if err := s.installRelease(context.Background(), to); err != nil {
-			s.log.Warn("self-update failed", "from", from, "to", to, "err", err)
-			return
-		}
-		s.log.Info("self-update installed; restarting", "from", from, "to", to)
-		s.restartAfterUpdate()
-	}()
-}
-
-// UpdateInfo reports the running version, the latest available stable release, its
-// release URL, and whether updating is possible here (only on an installed speaker).
-// It backs the Home Assistant `update` entity so HA can show an update notification.
-// Off-speaker (not updatable) it reports latest == installed and skips the GitHub
-// call, so no false update is offered.
-func (s *Server) UpdateInfo(ctx context.Context) (installed, latest, releaseURL string, updatable bool, err error) {
-	installed = s.version
-	updatable = s.updatable()
-	if !updatable {
-		return installed, installed, "", false, nil
-	}
-	latest, err = s.latestRelease(ctx)
-	if err != nil {
-		return installed, "", "", true, err
-	}
-	if latest == "" {
-		latest = installed
-	}
-	if latest != installed {
-		releaseURL = "https://github.com/" + repo + "/releases/tag/" + latest
-	}
-	return installed, latest, releaseURL, true, nil
-}
-
-// UpdateToLatest installs the latest stable release and restarts, reusing the same
-// path as POST /api/update. It backs the Home Assistant update entity's Install
-// action. It returns quickly: the download + restart run in the background on success.
-func (s *Server) UpdateToLatest(ctx context.Context) error {
-	if !s.updatable() {
-		return fmt.Errorf("updates are only available on an installed speaker")
-	}
-	if !s.updateMu.TryLock() {
-		return fmt.Errorf("an update is already in progress")
-	}
-	target, err := s.latestRelease(ctx)
-	if err != nil {
-		s.updateMu.Unlock()
-		return fmt.Errorf("latest release check failed: %w", err)
-	}
-	if target == "" {
-		s.updateMu.Unlock()
-		return fmt.Errorf("latest release missing tag")
-	}
-	if target == s.version {
-		s.updateMu.Unlock()
-		return nil // already current
-	}
-	s.startUpdate(s.version, target)
-	return nil
-}
-
-func (s *Server) latestRelease(ctx context.Context) (string, error) {
-	var rel releaseInfo
-	if err := s.getJSON(ctx, "https://api.github.com/repos/"+repo+"/releases/latest", &rel); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(rel.TagName), nil
-}
-
-// listReleases returns the repo's releases, newest first (GitHub's order).
-func (s *Server) listReleases(ctx context.Context) ([]releaseInfo, error) {
-	var rels []releaseInfo
-	if err := s.getJSON(ctx, "https://api.github.com/repos/"+repo+"/releases?per_page=100", &rels); err != nil {
-		return nil, err
-	}
-	return rels, nil
-}
-
-// isOfferedTag reports whether tag is a real, non-draft release of this repo.
-func (s *Server) isOfferedTag(ctx context.Context, tag string) (bool, error) {
-	rels, err := s.listReleases(ctx)
-	if err != nil {
-		return false, err
-	}
-	for _, rel := range rels {
-		if !rel.Draft && strings.TrimSpace(rel.TagName) == tag {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func (s *Server) installRelease(ctx context.Context, tag string) error {
-	bin := filepath.Join(s.homeDir, "retouch")
-	newBin := bin + ".new"
-	sums := filepath.Join(s.homeDir, "SHA256SUMS")
-	base := "https://github.com/" + repo + "/releases/download/" + tag
-	if err := s.downloadFile(ctx, base+"/retouch-armv7l", newBin, 0o755); err != nil {
-		return err
-	}
-	if err := s.downloadFile(ctx, base+"/SHA256SUMS", sums, 0o644); err != nil {
-		_ = os.Remove(newBin)
-		return err
-	}
-	// When signing is enabled, the checksums file itself must carry a valid
-	// signature before we trust any checksum in it. Betas are exempt: they are
-	// built from PR code by the Beta Build workflow, which must never be given
-	// the release signing key, so a beta ships no SHA256SUMS.sig. Betas stay
-	// gated by being maintainer-triggered, opt-in prereleases over TLS + checksum.
-	if _, isBeta := betaPR(tag); releasePublicKey != "" && !isBeta {
-		sig := filepath.Join(s.homeDir, "SHA256SUMS.sig")
-		if err := s.downloadFile(ctx, base+"/SHA256SUMS.sig", sig, 0o644); err != nil {
-			_ = os.Remove(newBin)
-			return err
-		}
-		if err := verifyReleaseSignature(releasePublicKey, sums, sig); err != nil {
-			_ = os.Remove(newBin)
-			return err
-		}
-	}
-	want, err := release.ChecksumFor(sums, "retouch-armv7l")
-	if err != nil {
-		_ = os.Remove(newBin)
-		return err
-	}
-	if err := release.VerifyChecksum(newBin, want); err != nil {
-		_ = os.Remove(newBin)
-		return err
-	}
-	// Keep the outgoing binary as retouch.old so a bad release can be rolled back
-	// by hand (best-effort; a first install has none). Restore it if the swap fails,
-	// so we never leave the speaker with no binary.
-	old := bin + ".old"
-	hadOld := fileExists(bin)
-	if hadOld {
-		_ = os.Rename(bin, old)
-	}
-	if err := os.Rename(newBin, bin); err != nil {
-		_ = os.Remove(newBin)
-		if hadOld {
-			_ = os.Rename(old, bin)
-		}
-		return err
-	}
-	return os.WriteFile(filepath.Join(s.homeDir, ".version"), []byte(tag+"\n"), 0o644)
-}
-
-// verifyReleaseSignature is a thin alias over release.VerifySignature (kept so the
-// on-speaker OTA reads naturally at the call site and the signature test targets it).
-func verifyReleaseSignature(pubKeyB64, sumsPath, sigPath string) error {
-	return release.VerifySignature(pubKeyB64, sumsPath, sigPath)
-}
-
-func (s *Server) getJSON(ctx context.Context, target string, out any) error {
-	return release.GetJSON(ctx, s.proxy, "ReTouch/"+s.version, target, out)
-}
-
-func (s *Server) downloadFile(ctx context.Context, target, path string, mode fs.FileMode) error {
-	ctx, cancel := context.WithTimeout(ctx, updateDownloadTimeout)
-	defer cancel()
-	client := &http.Client{Timeout: updateDownloadTimeout}
-	return release.Download(ctx, client, "ReTouch/"+s.version, target, path, mode)
-}
-
-func (s *Server) restartAfterUpdate() {
-	// Stop plugin children first: os.Exit skips context cancellation, so without
-	// this they'd be orphaned to init and duplicated by the relaunched ReTouch
-	// (two Ring agents then invalidate each other's rotating refresh token).
-	if s.plugins != nil {
-		s.plugins.Shutdown(3 * time.Second)
-	}
-	start := filepath.Join(s.homeDir, "start.sh")
-	if fileExists(start) {
-		cmd := exec.Command("sh", "-c", "sleep 1; "+shellQuote(start)+" >/tmp/retouch-start.log 2>&1 &")
-		if err := cmd.Start(); err != nil {
-			s.log.Warn("schedule restart", "err", err)
-			return
-		}
-		time.Sleep(200 * time.Millisecond)
-		os.Exit(0)
-	}
-	s.log.Warn("start script missing after update", "path", start)
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
@@ -1114,8 +822,7 @@ func (s *Server) playPreset(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
-	s.speaker.Wake(ctx)
-	if err := s.speaker.Key(ctx, "PRESET_"+strconv.Itoa(slot)); err != nil {
+	if err := s.speaker.PlayPreset(ctx, slot); err != nil {
 		s.fail(w, "play failed", err)
 		return
 	}
@@ -1171,147 +878,8 @@ func (s *Server) now(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "now failed", err)
 		return
 	}
-	s.enrichNowPlaying(np)
+	s.np.Enrich(np)
 	writeJSON(w, 200, np)
-}
-
-// EnrichedNowPlaying returns the current now-playing with the live song/artist/
-// cover filled in from the stream metadata — the same view the web UI shows. The
-// MQTT bridge uses it so Home Assistant sees the track, not just the station name
-// (the speaker itself no longer receives track metadata; see enrichNowPlaying).
-func (s *Server) EnrichedNowPlaying(ctx context.Context) (*speaker.NowPlaying, error) {
-	np, err := s.speaker.NowPlaying(ctx)
-	if err != nil {
-		return nil, err
-	}
-	s.enrichNowPlaying(np)
-	return np, nil
-}
-
-// enrichNowPlaying fills in the song/artist/cover for a playing station. The
-// speaker no longer gets this metadata (it came from the retired Bose cloud), so
-// ReTouch reads it from the standard ICY stream metadata (see internal/icy),
-// falling back to TuneIn, and looks up cover art generically (see
-// internal/artwork). The read happens in the
-// background so the poll stays fast; this call only applies whatever is cached
-// and kicks off a refresh when the entry is stale. Best-effort: with nothing
-// cached yet the UI just shows the station until the next poll fills it in.
-func (s *Server) enrichNowPlaying(np *speaker.NowPlaying) {
-	if np == nil || !strings.HasPrefix(np.StationID, "s") {
-		return
-	}
-	if np.PlayStatus != "" && np.PlayStatus != "PLAY_STATE" && np.PlayStatus != "BUFFERING_STATE" {
-		return // nothing is playing — don't show a stale song
-	}
-	id := np.StationID
-	s.npMu.Lock()
-	e, ok := s.npCache[id]
-	if (!ok || time.Since(e.at) >= npTTL) && !e.fetching {
-		e.fetching = true
-		s.npCache[id] = e
-		go s.refreshNowPlaying(id)
-	}
-	s.npMu.Unlock()
-
-	if !ok {
-		return
-	}
-	// The speaker fills Track with the station name as a placeholder and never
-	// knows the artist, so the stream's live song wins whenever it has one.
-	if e.song != "" {
-		np.Track = e.song
-		np.Artist = e.artist
-		// Some streams (e.g. NPO) put the programme name where the artist goes;
-		// when that just repeats the station, drop it rather than show it twice.
-		if strings.EqualFold(strings.TrimSpace(np.Artist), strings.TrimSpace(np.Station)) {
-			np.Artist = ""
-		}
-		// The speaker's own art is the generic station logo; our track cover is
-		// more specific, so it takes priority when we have one.
-		if e.art != "" {
-			np.Art = e.art
-		}
-	} else if np.Art == "" && e.art != "" {
-		np.Art = e.art
-	}
-}
-
-// refreshNowPlaying reads the current track off the station's stream and looks
-// up cover art, then stores the result. Runs in its own goroutine off a fresh
-// context (the request that triggered it has already returned). Any failure
-// caches an empty entry so the poll doesn't retry until the TTL lapses.
-func (s *Server) refreshNowPlaying(id string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-	defer cancel()
-
-	var e npCacheEntry
-	// Primary: the standard ICY metadata in the stream itself.
-	if url := s.streamURL(ctx, id); url != "" {
-		if title, err := icy.StreamTitle(ctx, s.stream, url); err != nil {
-			s.invalidateStreamURL(id) // stale URL / expired token — re-resolve next time
-		} else {
-			e.artist, e.song = icy.SplitArtistTitle(title)
-		}
-	}
-	// Fallback: TuneIn's Describe when the stream carried no track metadata.
-	if e.song == "" {
-		if t, err := s.tunein.NowPlaying(ctx, id); err == nil && t.Song != "" {
-			e.song, e.artist, e.art = t.Song, t.Artist, t.Art
-		}
-	}
-	// Cover art for whatever we found: look it up generically when we don't
-	// already have one (ICY carries none; TuneIn sometimes does).
-	if e.song != "" && e.art == "" {
-		term := strings.TrimSpace(e.artist + " " + e.song)
-		if art, err := artwork.Search(ctx, s.proxy, term); err == nil {
-			e.art = art
-		}
-	}
-	e.at = time.Now()
-
-	s.npMu.Lock()
-	// The cache only needs the stations currently on screen; drop expired
-	// entries once it grows past that so it can't accumulate for months.
-	if len(s.npCache) > 64 {
-		for k, v := range s.npCache {
-			if k != id && time.Since(v.at) >= npTTL && !v.fetching {
-				delete(s.npCache, k)
-			}
-		}
-	}
-	s.npCache[id] = e
-	s.npMu.Unlock()
-}
-
-// streamURL returns the station's playable stream URL, resolved via TuneIn and
-// cached so each poll doesn't re-resolve. Empty on failure.
-func (s *Server) streamURL(ctx context.Context, id string) string {
-	s.npMu.Lock()
-	if e, ok := s.streamURLs[id]; ok && time.Since(e.at) < streamURLTTL {
-		s.npMu.Unlock()
-		return e.url
-	}
-	s.npMu.Unlock()
-
-	urls, err := s.tunein.Resolve(ctx, id)
-	if err != nil {
-		return ""
-	}
-	u := tunein.PlayableURL(urls)
-	if u == "" {
-		return ""
-	}
-	s.npMu.Lock()
-	s.streamURLs[id] = streamURLEntry{url: u, at: time.Now()}
-	s.npMu.Unlock()
-	return u
-}
-
-// invalidateStreamURL drops a cached stream URL so it is re-resolved next time.
-func (s *Server) invalidateStreamURL(id string) {
-	s.npMu.Lock()
-	delete(s.streamURLs, id)
-	s.npMu.Unlock()
 }
 
 func (s *Server) getVolume(w http.ResponseWriter, r *http.Request) {
@@ -1366,7 +934,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, out)
 		return
 	}
-	out["closeTelnet"] = fileExists(filepath.Join(s.homeDir, ".close-telnet"))
+	out["closeTelnet"] = s.telnet.IsClosed()
 	if infoErr == nil {
 		out["model"] = info.Type // device model, e.g. "SoundTouch 10"
 	}
@@ -1486,7 +1054,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.CloseTelnet != nil {
-		if err := s.setCloseTelnet(*body.CloseTelnet); err != nil {
+		if err := s.telnet.Set(*body.CloseTelnet); err != nil {
 			s.fail(w, "set telnet close failed", err)
 			return
 		}
@@ -1569,43 +1137,6 @@ func (s *Server) setWifi(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
-}
-
-// setCloseTelnet applies the toggle immediately: the marker file only makes the
-// choice survive a reboot, the firewall rule is what actually closes the port.
-// Enabling is open to anyone; disabling goes through the settings login (the PUT
-// handler is auth-gated), which is what makes "close telnet" trustworthy.
-func (s *Server) setCloseTelnet(on bool) error {
-	path := filepath.Join(s.homeDir, ".close-telnet")
-	if on {
-		if err := os.WriteFile(path, []byte("1\n"), 0o644); err != nil {
-			return err
-		}
-		if err := s.telnetFW(true); err != nil {
-			return err
-		}
-		s.log.Info("closed LAN telnet", "port", 17000)
-		return nil
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err := s.telnetFW(false); err != nil {
-		return err
-	}
-	s.log.Info("reopened LAN telnet", "port", 17000)
-	return nil
-}
-
-// telnetFirewall installs or removes the raw-table DROP that hides the :17000
-// diagnostic CLI from the LAN (loopback stays open), de-duplicating any earlier
-// copies first.
-func telnetFirewall(closed bool) error {
-	script := "while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 17000 -j DROP 2>/dev/null; do :; done"
-	if closed {
-		script += "; iptables -t raw -I PREROUTING 1 ! -i lo -p tcp --dport 17000 -j DROP"
-	}
-	return exec.Command("sh", "-c", script).Run()
 }
 
 // stationIDRe matches a TuneIn guide id (e.g. "s6712"). The id is interpolated

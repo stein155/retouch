@@ -66,12 +66,20 @@ type doc struct {
 
 // Server answers the speaker's cloud calls by replaying captured responses.
 type Server struct {
-	log    *slog.Logger
-	token  string // association token handed to the speaker during pairing
-	tunein TuneIn
+	log        *slog.Logger
+	token      string // association token handed to the speaker during pairing
+	tunein     TuneIn
+	nowPlaying NowPlayingSource // live track for the display; nil disables it
 
 	recMu  sync.Mutex
 	recent []string // ring buffer of recent speaker requests, for /debug/requests
+
+	// repoll gates the display-track injection: the station whose playback doc was
+	// last fetched, and how many times in a row. Only one station plays at a time,
+	// so tracking the last id is enough to spot a re-fetch (see sawRepoll).
+	repollMu    sync.Mutex
+	lastStation string
+	lastCount   int
 
 	registry        doc
 	availability    doc
@@ -139,6 +147,28 @@ func New(base string, info *speaker.Info, presetsPath string, nativePresets []Pr
 	s.presets = newPresets(seed.body, presetsPath)
 	s.presets.seedNative(nativePresets)
 	return s, nil
+}
+
+// SetNowPlaying attaches the live-track source used to drive the current track
+// onto the speaker's display. Optional; nil leaves the display showing just the
+// station name, as before. Call before Handler().
+func (s *Server) SetNowPlaying(np NowPlayingSource) { s.nowPlaying = np }
+
+// sawRepoll records a playback-doc fetch for stationID and reports whether the
+// firmware has fetched THIS station's doc more than once in a row — i.e. it polls
+// for updates. The first fetch of a station returns false (so the display keeps
+// the station name and never freezes on a select-time track); a repeat returns
+// true. A new station resets the count.
+func (s *Server) sawRepoll(stationID string) bool {
+	s.repollMu.Lock()
+	defer s.repollMu.Unlock()
+	if stationID == s.lastStation {
+		s.lastCount++
+	} else {
+		s.lastStation = stationID
+		s.lastCount = 1
+	}
+	return s.lastCount > 1
 }
 
 func rewriteFirmware(d doc, software string) doc {

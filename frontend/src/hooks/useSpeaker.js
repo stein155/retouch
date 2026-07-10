@@ -172,6 +172,9 @@ export function useSpeaker() {
     nudgeTimersRef.current = [500, 1200, 2500, 4500, 7000, 10000, 13000]
       .map((ms) => setTimeout(refresh, ms));
   }, [refresh]);
+  // Clear any outstanding nudge timers on unmount so a late refresh can't fetch
+  // and setState after the hook is gone.
+  useEffect(() => () => nudgeTimersRef.current.forEach(clearTimeout), []);
 
   // Derived player state the components render. status: idle | starting | buffering | playing.
   const player = useMemo(() => {

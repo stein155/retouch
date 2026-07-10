@@ -1,6 +1,6 @@
 // Package release fetches and verifies release artifacts (binaries + a SHA256SUMS
 // manifest) from an HTTP source such as a GitHub release. It is the shared core
-// behind both ReTouch's own self-update (internal/web) and plugin installs
+// behind both ReTouch's own self-update (internal/update) and plugin installs
 // (internal/plugins): download over an SSRF-safe transport, match a SHA-256 from a
 // SHA256SUMS file, and optionally require a valid ed25519 signature over that
 // checksums file before any checksum in it is trusted.
