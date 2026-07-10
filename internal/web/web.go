@@ -824,8 +824,7 @@ func (s *Server) playPreset(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
-	s.speaker.Wake(ctx)
-	if err := s.speaker.Key(ctx, "PRESET_"+strconv.Itoa(slot)); err != nil {
+	if err := s.speaker.PlayPreset(ctx, slot); err != nil {
 		s.fail(w, "play failed", err)
 		return
 	}
