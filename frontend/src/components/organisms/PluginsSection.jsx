@@ -11,7 +11,7 @@ import {
 import { useI18n } from '../../lib/i18n';
 import {
   getPlugins, installPlugin, removePlugin, uploadPlugin,
-  getPluginManifest, pluginAction,
+  getPluginManifest, pluginAction, getPluginLatest,
 } from '../../lib/api';
 
 // A coloured status dot, matching the MQTT section's convention.
@@ -322,11 +322,40 @@ function InstalledPlugin({ p, entry, onOpen }) {
 }
 
 // PluginSettings is the subpage a plugin opens into: its server-driven config
-// panel (status, fields, QR / pairing code, actions) plus a remove button. The
+// panel (status, fields, QR / pairing code, actions), then a maintenance block —
+// version, an over-the-air update when a newer release exists, and remove. The
 // enclosing sheet supplies the header + back arrow, so this renders body only.
 export function PluginSettings({ p, onRemoved }) {
   const { t } = useI18n();
   const [removing, setRemoving] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [version, setVersion] = useState(p.version || '');
+  const [latest, setLatest] = useState(null); // newest available tag, or null
+  const [panelKey, setPanelKey] = useState(0); // bump to re-mount the panel after an update
+
+  // Look up the newest release so we can offer an update. Sideloaded plugins have
+  // no release to compare against, so skip the lookup for them.
+  useEffect(() => {
+    if (p.sideloaded) return undefined;
+    let on = true;
+    getPluginLatest(p.name).then((r) => { if (on) setLatest(r?.tag || null); });
+    return () => { on = false; };
+  }, [p.name, p.sideloaded]);
+
+  // A re-install pulls the latest release over the existing one: the binary is
+  // replaced and the child restarted, but its state dir (the HomeKit pairing) is
+  // kept. Re-mount the panel afterwards so it re-polls the restarted plugin.
+  const update = async () => {
+    if (updating) return;
+    setUpdating(true);
+    try {
+      await installPlugin(p.name);
+      setVersion(latest);
+      setPanelKey((k) => k + 1);
+    } catch { /* leave the current version in place */ } finally {
+      setUpdating(false);
+    }
+  };
 
   const remove = async () => {
     if (!window.confirm(t('pluginRemoveConfirm'))) return;
@@ -334,11 +363,30 @@ export function PluginSettings({ p, onRemoved }) {
     try { await removePlugin(p.name); onRemoved(); } catch { setRemoving(false); }
   };
 
+  const updatable = !p.sideloaded && latest && latest !== version;
+
   return (
     <>
-      {p.sideloaded && <FieldHint style={{ marginTop: 0 }}>{t('pluginUpdatable')}</FieldHint>}
-      {p.lastErr && !p.running && <FieldHint $error>{p.lastErr}</FieldHint>}
-      <PluginPanel name={p.name} />
+      {p.lastErr && !p.running && <FieldHint style={{ marginTop: 0 }} $error>{p.lastErr}</FieldHint>}
+      <PluginPanel key={panelKey} name={p.name} />
+
+      {version && (
+        <FieldCard style={{ marginTop: 12 }}>
+          <FieldRow>
+            <FieldRowLabel as="span">{t('version')}</FieldRowLabel>
+            <FieldRowValue>{version}</FieldRowValue>
+          </FieldRow>
+        </FieldCard>
+      )}
+      {p.sideloaded && <FieldHint>{t('pluginUpdatable')}</FieldHint>}
+      {updatable && (
+        <Button $variant="update" onClick={update} disabled={updating}>
+          {updating ? <Spinner $scan /> : <Icon.download width="18" height="18" />}
+          <span>{updating ? t('pluginUpdating') : `${t('pluginUpdate')} ${latest}`}</span>
+        </Button>
+      )}
+      {!p.sideloaded && latest && latest === version && <FieldHint>{t('upToDate')}</FieldHint>}
+
       <Button $variant="delete" onClick={remove} disabled={removing}>
         {removing ? <Spinner $scan /> : <Icon.trash width="17" height="17" />}
         <span>{t('pluginRemove')}</span>

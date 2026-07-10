@@ -58,6 +58,34 @@ func (s *Server) installPlugin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "installed", "plugin": name})
 }
 
+// pluginLatestTimeout bounds the single release-API lookup behind /latest.
+const pluginLatestTimeout = 15 * time.Second
+
+// pluginLatest reports the newest available release tag for a curated plugin, so
+// the UI can offer an over-the-air update when it differs from the installed
+// version. A re-install (POST …/install) upgrades the binary in place, keeping the
+// plugin's persisted state (e.g. HomeKit pairing).
+func (s *Server) pluginLatest(w http.ResponseWriter, r *http.Request) {
+	if s.plugins == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "plugins are only available on an installed speaker"})
+		return
+	}
+	name := r.PathValue("name")
+	entry, ok := plugins.LookupCatalog(name)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown plugin " + name})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), pluginLatestTimeout)
+	defer cancel()
+	tag, err := s.plugins.LatestTag(ctx, entry.Repo)
+	if err != nil {
+		s.fail(w, "resolve latest release failed: "+err.Error(), err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"tag": tag})
+}
+
 // pluginUploadMax caps a sideloaded plugin binary. A plugin is a few MB; 32 MiB
 // leaves headroom while bounding the write on the memory-constrained speaker.
 const pluginUploadMax = 32 << 20

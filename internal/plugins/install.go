@@ -61,6 +61,22 @@ type releaseInfo struct {
 	TagName string `json:"tag_name"`
 }
 
+// LatestTag resolves the newest release tag for repo — the tag Install would pick
+// with an empty tag. The UI uses it to offer an over-the-air update when it differs
+// from the installed version.
+func (m *Manager) LatestTag(ctx context.Context, repo string) (string, error) {
+	var rel releaseInfo
+	api := m.apiBase + "/repos/" + repo + "/releases/latest"
+	if err := release.GetJSON(ctx, m.client, m.ua, api, &rel); err != nil {
+		return "", fmt.Errorf("resolve latest release: %w", err)
+	}
+	tag := strings.TrimSpace(rel.TagName)
+	if tag == "" {
+		return "", fmt.Errorf("latest release of %s has no tag", repo)
+	}
+	return tag, nil
+}
+
 // Install downloads, verifies and records the plugin described by entry, then starts
 // supervising it. tag targets a specific release; "" means the repo's latest.
 // Verification mirrors ReTouch's own OTA: the binary must match its SHA256SUMS entry,
@@ -75,13 +91,9 @@ func (m *Manager) Install(ctx context.Context, entry CatalogEntry, tag string) e
 		return fmt.Errorf("invalid plugin name %q", entry.Name)
 	}
 	if tag == "" {
-		var rel releaseInfo
-		api := m.apiBase + "/repos/" + entry.Repo + "/releases/latest"
-		if err := release.GetJSON(ctx, m.client, m.ua, api, &rel); err != nil {
-			return fmt.Errorf("resolve latest release: %w", err)
-		}
-		if tag = strings.TrimSpace(rel.TagName); tag == "" {
-			return fmt.Errorf("latest release of %s has no tag", entry.Repo)
+		var err error
+		if tag, err = m.LatestTag(ctx, entry.Repo); err != nil {
+			return err
 		}
 	}
 

@@ -251,6 +251,13 @@ export async function getPlugins() {
   try { return await getJSON('/api/plugins'); } catch { return null; }
 }
 
+// getPluginLatest resolves the newest available release tag for a curated plugin
+// ({ tag }), so the UI can offer an over-the-air update. Returns null off-speaker
+// or when the release lookup fails (the UI then just hides the update affordance).
+export async function getPluginLatest(name) {
+  try { return await getJSON(`/api/plugins/${encodeURIComponent(name)}/latest`); } catch { return null; }
+}
+
 export async function installPlugin(name, tag) {
   return send(`/api/plugins/${encodeURIComponent(name)}/install`, 'POST', tag ? { tag } : undefined);
 }
