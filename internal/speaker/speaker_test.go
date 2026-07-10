@@ -22,3 +22,20 @@ func TestXMLEsc(t *testing.T) {
 		t.Errorf("xmlEsc wrong: %q", got)
 	}
 }
+
+func TestContentItemXML(t *testing.T) {
+	// Preset shape: blank account, optional art present. Must match the wire format
+	// /storePreset previously built inline.
+	got := contentItemXML("TUNEIN", "stationurl", "/v1/playback/station/s99", "", "Radio 538", "http://logo")
+	want := `<ContentItem source="TUNEIN" type="stationurl" location="/v1/playback/station/s99" sourceAccount="" isPresetable="true"><itemName>Radio 538</itemName><containerArt>http://logo</containerArt></ContentItem>`
+	if got != want {
+		t.Errorf("preset ContentItem:\n got %q\nwant %q", got, want)
+	}
+
+	// Select shape: account set, no art.
+	got = contentItemXML("TUNEIN", "stationurl", "/loc", "acct", "X", "")
+	want = `<ContentItem source="TUNEIN" type="stationurl" location="/loc" sourceAccount="acct" isPresetable="true"><itemName>X</itemName></ContentItem>`
+	if got != want {
+		t.Errorf("select ContentItem:\n got %q\nwant %q", got, want)
+	}
+}

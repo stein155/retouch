@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -393,15 +394,23 @@ func prettySignal(s string) string {
 // StorePreset writes a native preset on the speaker (slot 1..6) via /storePreset,
 // so it persists as a real button — exactly what the web UI's "save preset" needs.
 func (c *Client) StorePreset(ctx context.Context, slot int, source, itemType, location, name, art string) error {
-	ci := `<ContentItem source="` + xmlEsc(source) + `" type="` + xmlEsc(itemType) +
-		`" location="` + xmlEsc(location) + `" sourceAccount="" isPresetable="true"><itemName>` + xmlEsc(name) + `</itemName>`
-	if art != "" {
-		ci += `<containerArt>` + xmlEsc(art) + `</containerArt>`
-	}
-	ci += `</ContentItem>`
+	ci := contentItemXML(source, itemType, location, "", name, art)
 	now := time.Now().Unix()
 	body := fmt.Sprintf(`<preset id="%d" createdOn="%d" updatedOn="%d">%s</preset>`, slot, now, now, ci)
 	return c.post(ctx, "/storePreset", body)
+}
+
+// contentItemXML builds the <ContentItem> element shared by /storePreset and
+// /select. Field names/casing mirror the SoundTouch wire format; account and art
+// are optional (empty ones are omitted/blank exactly as the firmware expects).
+func contentItemXML(source, itemType, location, account, name, art string) string {
+	ci := `<ContentItem source="` + xmlEsc(source) + `" type="` + xmlEsc(itemType) +
+		`" location="` + xmlEsc(location) + `" sourceAccount="` + xmlEsc(account) +
+		`" isPresetable="true"><itemName>` + xmlEsc(name) + `</itemName>`
+	if art != "" {
+		ci += `<containerArt>` + xmlEsc(art) + `</containerArt>`
+	}
+	return ci + `</ContentItem>`
 }
 
 // RemovePreset clears a native preset slot (1..6) via /removePreset.
@@ -444,16 +453,21 @@ func (c *Client) Key(ctx context.Context, key string) error {
 	return c.post(ctx, "/key", `<key state="release" sender="Gabbo">`+xmlEsc(key)+`</key>`)
 }
 
+// PlayPreset plays the speaker's native preset in slot (1..6) by waking it and
+// pressing the matching PRESET_n key. Centralises the wake-then-key sequence and
+// the "PRESET_"+n key-name convention so callers don't reassemble the protocol.
+func (c *Client) PlayPreset(ctx context.Context, slot int) error {
+	c.Wake(ctx)
+	return c.Key(ctx, "PRESET_"+strconv.Itoa(slot))
+}
+
 // Select tells the speaker to play a NATIVE ContentItem (e.g. a TUNEIN station or
 // a LOCAL_INTERNET_RADIO custom stream). The speaker resolves the location against
 // our local BMX service and plays it itself, so now_playing reports the real
 // source (TUNEIN), not UPNP. location is a service-relative path such as
 // "/v1/playback/station/s47309".
 func (c *Client) Select(ctx context.Context, source, itemType, location, name, account string) error {
-	ci := `<ContentItem source="` + xmlEsc(source) + `" type="` + xmlEsc(itemType) +
-		`" location="` + xmlEsc(location) + `" sourceAccount="` + xmlEsc(account) +
-		`" isPresetable="true"><itemName>` + xmlEsc(name) + `</itemName></ContentItem>`
-	return c.post(ctx, "/select", ci)
+	return c.post(ctx, "/select", contentItemXML(source, itemType, location, account, name, ""))
 }
 
 // Member is one speaker in a multiroom zone: its deviceID (which is also the
