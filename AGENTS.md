@@ -78,7 +78,7 @@ docker run --rm -v "$PWD":/src -w /src golang:1.22-alpine sh -c 'go vet ./... &&
 The web app is built separately and embedded via `go:embed` into `internal/web/dist`:
 
 ```sh
-docker run --rm -v "$PWD/frontend":/app -w /app node:20-alpine \
+docker run --rm -v "$PWD/frontend":/app -w /app node:24-alpine \
   sh -c 'npm ci && npm run build'
 ```
 
