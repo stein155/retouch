@@ -11,7 +11,7 @@
 import type {
   NowPlaying, Preset, Station, Settings, Auth, WifiNetwork, VersionInfo,
   Releases, FoundSpeaker, Multiroom, PluginsResponse, PluginManifest,
-  ApiError, UpdateResult,
+  ApiError, UpdateResult, BrowseCategory, BrowseResult,
 } from './types';
 
 async function getJSON<T>(path: string): Promise<T> {
@@ -147,19 +147,8 @@ export async function searchTuneIn(query: string): Promise<Station[]> {
     const walk = (items: unknown) => {
       if (!Array.isArray(items)) return;
       for (const item of items as Record<string, unknown>[]) {
-        const isStation =
-          (item.type === 'audio' || item.item === 'station') &&
-          String(item.guide_id || '').startsWith('s');
-        if (isStation) {
-          results.push({
-            tuneInId: item.guide_id as string,
-            name: (item.text as string) || (item.name as string) || '',
-            tagline: (item.subtext as string) || '',
-            genre: '',
-            country: String(item.locale || '').split('-')?.[1] || '',
-            logo: (item.image as string) || '',
-          });
-        }
+        const station = itemToStation(item);
+        if (station) results.push(station);
         if (item.children) walk(item.children);
       }
     };
@@ -169,6 +158,65 @@ export async function searchTuneIn(query: string): Promise<Station[]> {
     return [];
   }
 }
+
+// itemToStation maps a TuneIn OPML "audio" outline to a Station, or null when it
+// isn't a real station (no s-prefixed guide id).
+function itemToStation(item: Record<string, unknown>): Station | null {
+  const isStation = (item.type === 'audio' || item.item === 'station') &&
+    String(item.guide_id || '').startsWith('s');
+  if (!isStation) return null;
+  return {
+    tuneInId: item.guide_id as string,
+    name: (item.text as string) || (item.name as string) || '',
+    tagline: (item.subtext as string) || '',
+    genre: '',
+    country: String(item.locale || '').split('-')?.[1] || '',
+    logo: (item.image as string) || '',
+  };
+}
+
+// browseTuneIn walks one level of TuneIn's Browse.ashx directory. path is a
+// proxy-relative path (defaults to the root browse); it returns the drill-down
+// categories and any stations at this level. Empty result on failure so the UI
+// falls back to plain search.
+export async function browseTuneIn(path = '/Browse.ashx?render=json'): Promise<BrowseResult> {
+  const categories: BrowseCategory[] = [];
+  const stations: Station[] = [];
+  try {
+    const r = await fetch(`/api/tunein${path}`);
+    if (!r.ok) throw new Error(`browse -> ${r.status}`);
+    const data = (await r.json()) as { body?: unknown };
+    const walk = (items: unknown) => {
+      if (!Array.isArray(items)) return;
+      for (const item of items as Record<string, unknown>[]) {
+        const station = itemToStation(item);
+        if (station) { stations.push(station); continue; }
+        // A "link" outline with a URL is a drill-down category (genre/region).
+        if (item.type === 'link' && typeof item.URL === 'string' && item.text) {
+          const p = browsePath(item.URL);
+          if (p) { categories.push({ title: item.text as string, path: p }); continue; }
+        }
+        // A grouping outline (e.g. "Stations") nests its entries as children.
+        if (item.children) walk(item.children);
+      }
+    };
+    walk(data.body);
+  } catch { /* leave empty */ }
+  return { categories, stations };
+}
+
+// browsePath turns an absolute TuneIn Browse URL into a proxy-relative path with
+// render=json forced, so it goes back through /api/tunein. Empty on a bad URL.
+function browsePath(url: string): string {
+  try {
+    const u = new URL(url);
+    u.searchParams.set('render', 'json');
+    return u.pathname + u.search;
+  } catch {
+    return '';
+  }
+}
+
 
 // Settings — speaker name + bass (with range) live on the box; UI language in the
 // local store. See STLocal /api/settings.

@@ -57,3 +57,46 @@ export const SheetEmptyQ = styled.div`
   font-weight: 700;
   margin-bottom: 8px;
 `;
+
+// --- Browse ----------------------------------------------------------------
+
+// Top bar of the browse view: an optional back button + the "surprise me" action.
+export const BrowseBar = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 20px 10px;
+`;
+
+export const BrowseBack = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--surface-3);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+
+  &:hover { background: var(--ink); color: var(--bg); }
+`;
+
+
+// A drill-down category row (genre / region / …).
+export const CatRow = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 14px 20px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: left;
+  border-bottom: 1px solid var(--surface-3);
+
+  &:hover { background: var(--surface); }
+
+  span:last-child { color: var(--ink-3); }
+`;
