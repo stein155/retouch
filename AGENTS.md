@@ -40,7 +40,7 @@ internal/telnet/     LAN block on the :17000 diagnostic CLI (iptables + reboot-p
 internal/web/        JSON API + the embedded web app (built from frontend/)
 internal/sim/        SoundTouch speaker simulator (REST :8090 + CLI :17000) for tests
 cmd/soundtouch-sim/  runs the simulator standalone on the real ports for manual use
-frontend/            web app source (React + Vite, embedded via go:embed)
+frontend/            web app source (React + TypeScript + Vite, embedded via go:embed)
 install/             wireless install: install.sh / netinstall.sh / uninstall.sh
 .github/             CI: build + publish releases, Release Drafter
 ```
