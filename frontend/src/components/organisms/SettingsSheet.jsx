@@ -7,7 +7,7 @@ import { Button } from '../atoms/Button';
 import { Toggle } from '../atoms/Toggle';
 import { BassSlider } from '../molecules/BassSlider';
 import { SpeakerRow } from '../molecules/SpeakerRow';
-import { PluginsSection } from './PluginsSection';
+import { PluginsSection, PluginSettings } from './PluginsSection';
 import {
   SheetScrim, SheetEl, SheetHandle, SheetBody, SheetHeader,
 } from '../molecules/Sheet';
@@ -483,6 +483,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
   const [upd, setUpd] = useState({ phase: 'idle', text: '' }); // idle | busy | done | error
   const [loading, setLoading] = useState(true); // true until the first settings fetch resolves
   const [page, setPage] = useState(null); // null = category menu; else the open subpage key
+  const [pluginPage, setPluginPage] = useState(null); // selected plugin object within the plugins subpage
   const [auth, setAuth] = useState(null); // { hasPassword, authenticated } | null = unknown
   const nameTimer = useRef(null);
   const pollRef = useRef(null);
@@ -513,7 +514,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
   }, []);
 
   useEffect(() => {
-    if (!open) { setLoading(true); setPage(null); setAuth(null); return; }
+    if (!open) { setLoading(true); setPage(null); setPluginPage(null); setAuth(null); return; }
     // Auth first: when the settings are locked, don't load (the API would only
     // return the restricted view anyway) — show the login gate instead.
     getAuth().then((a) => {
@@ -523,6 +524,10 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
       loadAll();
     });
   }, [open, loadAll]);
+
+  // Leaving the plugins category drops any plugin the user had drilled into, so
+  // reopening the category lands back on the list rather than a stale detail view.
+  useEffect(() => { if (page !== 'plugins') setPluginPage(null); }, [page]);
 
   // A 401 on any live-apply call means the session expired (or the password was
   // set from another browser): drop back to the login gate.
@@ -832,7 +837,9 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
         )}
       </>
     ),
-    plugins: <PluginsSection open={open && page === 'plugins'} />,
+    plugins: pluginPage
+      ? <PluginSettings p={pluginPage} onRemoved={() => setPluginPage(null)} />
+      : <PluginsSection open={open && page === 'plugins'} onOpen={setPluginPage} />,
     software: ver && (
       <>
         <FieldCard>
@@ -889,8 +896,13 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
     ),
   };
 
-  // On a subpage the header arrow returns to the menu; on the menu it closes.
-  const onBack = page ? () => setPage(null) : onClose;
+  // The header arrow walks the stack back one level: plugin detail → plugins list
+  // → category menu → close.
+  const onBack = pluginPage
+    ? () => setPluginPage(null)
+    : page
+      ? () => setPage(null)
+      : onClose;
 
   return (
     <>
@@ -899,10 +911,10 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
         <SheetHandle />
         <SheetHeader
           onClose={onBack}
-          closeLabel={page ? t('back') : t('close')}
-          headline={page ? t(page) : t('settings')}
+          closeLabel={(page || pluginPage) ? t('back') : t('close')}
+          headline={pluginPage ? pluginPage.title : page ? t(page) : t('settings')}
         >
-          <SetEyebrow>{page ? t('settings') : t('thisRadio')}</SetEyebrow>
+          <SetEyebrow>{pluginPage ? t('plugins') : page ? t('settings') : t('thisRadio')}</SetEyebrow>
         </SheetHeader>
         <SheetBody>
           {loading ? (

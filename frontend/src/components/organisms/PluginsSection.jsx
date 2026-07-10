@@ -85,7 +85,6 @@ const PlugName = styled.div`
   font-size: 14.5px;
   font-weight: 600;
   color: var(--ink-2);
-  text-transform: capitalize;
 `;
 
 const PlugMeta = styled.div`
@@ -94,12 +93,25 @@ const PlugMeta = styled.div`
   margin-top: 2px;
 `;
 
-const PlugChevron = styled(Icon.chevron)`
+// The "Instellingen ›" affordance on an installed-plugin row.
+const PlugAction = styled.span`
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
-  color: var(--ink-3);
-  transform: rotate(${(p) => (p.$open ? '90deg' : '0deg')});
-  transition: transform 180ms ease;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
 `;
+
+// catStr prefers a localised catalog string (pluginCat_<name>_<suffix>) when the
+// app ships one, else falls back to the server-provided English value. makeT
+// returns the key itself when a translation is missing, which is how we detect it.
+function catStr(t, name, suffix, fallback) {
+  const key = `pluginCat_${name}_${suffix}`;
+  const v = t(key);
+  return v === key ? fallback : v;
+}
 
 function QrField({ field }) {
   const { t } = useI18n();
@@ -283,49 +295,55 @@ function PluginPanel({ name }) {
   );
 }
 
-// One installed plugin: a tappable header (name + "installed") that expands to
-// reveal the plugin's own settings panel — the QR / pairing code lives in there —
-// plus a remove button at the bottom of that panel. Collapsed by default so the
-// list of plugins stays compact.
-function InstalledPlugin({ p, onRemove }) {
+// One installed plugin, shown as a single tappable row: name + "Geïnstalleerd" on
+// the left and an "Instellingen ›" affordance on the right. Tapping it opens the
+// plugin's own settings as a subpage (see PluginSettings) — that's where the QR /
+// pairing code and the remove button live — so this list stays compact.
+function InstalledPlugin({ p, entry, onOpen }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const title = catStr(t, p.name, 'title', entry?.title || p.name);
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <FieldCard>
+        <PlugHead type="button" onClick={() => onOpen({ ...p, title })}>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <PlugName>{title}</PlugName>
+            <PlugMeta>{t('pluginInstalled')}</PlugMeta>
+          </span>
+          <PlugAction>
+            <span>{t('pluginSettings')}</span>
+            <Icon.chevron width="17" height="17" />
+          </PlugAction>
+        </PlugHead>
+      </FieldCard>
+    </div>
+  );
+}
+
+// PluginSettings is the subpage a plugin opens into: its server-driven config
+// panel (status, fields, QR / pairing code, actions) plus a remove button. The
+// enclosing sheet supplies the header + back arrow, so this renders body only.
+export function PluginSettings({ p, onRemoved }) {
+  const { t } = useI18n();
   const [removing, setRemoving] = useState(false);
 
   const remove = async () => {
     if (!window.confirm(t('pluginRemoveConfirm'))) return;
     setRemoving(true);
-    try { await removePlugin(p.name); onRemove(); } catch { setRemoving(false); }
+    try { await removePlugin(p.name); onRemoved(); } catch { setRemoving(false); }
   };
 
   return (
-    <div style={{ marginTop: 12 }}>
-      <FieldCard>
-        <PlugHead
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          aria-label={t('pluginSettings')}
-        >
-          <span style={{ flex: 1, minWidth: 0 }}>
-            <PlugName>{p.name}</PlugName>
-            <PlugMeta>{t('pluginInstalled')}</PlugMeta>
-          </span>
-          <PlugChevron width="18" height="18" $open={open} />
-        </PlugHead>
-      </FieldCard>
+    <>
+      {p.sideloaded && <FieldHint style={{ marginTop: 0 }}>{t('pluginUpdatable')}</FieldHint>}
       {p.lastErr && !p.running && <FieldHint $error>{p.lastErr}</FieldHint>}
-      {open && (
-        <>
-          {p.sideloaded && <FieldHint>{t('pluginUpdatable')}</FieldHint>}
-          <PluginPanel name={p.name} />
-          <Button $variant="delete" onClick={remove} disabled={removing}>
-            {removing ? <Spinner $scan /> : <Icon.trash width="17" height="17" />}
-            <span>{t('pluginRemove')}</span>
-          </Button>
-        </>
-      )}
-    </div>
+      <PluginPanel name={p.name} />
+      <Button $variant="delete" onClick={remove} disabled={removing}>
+        {removing ? <Spinner $scan /> : <Icon.trash width="17" height="17" />}
+        <span>{t('pluginRemove')}</span>
+      </Button>
+    </>
   );
 }
 
@@ -348,16 +366,10 @@ function CatalogPlugin({ entry, onChanged, sideloadAllowed }) {
     try { await uploadPlugin(entry.name, file); onChanged(); } catch (e) { setErr(e.message || String(e)); setBusy(false); }
   };
 
-  // Catalog entries carry English title/description from the server. Prefer a
-  // localised string when the app ships one for this plugin (key present), else
-  // fall back to the server value. makeT returns the key itself when missing.
-  const local = (suffix, fallback) => {
-    const key = `pluginCat_${entry.name}_${suffix}`;
-    const v = t(key);
-    return v === key ? fallback : v;
-  };
-  const title = local('title', entry.title || entry.name);
-  const description = local('desc', entry.description);
+  // Catalog entries carry English title/description from the server; prefer a
+  // localised string when the app ships one for this plugin.
+  const title = catStr(t, entry.name, 'title', entry.title || entry.name);
+  const description = catStr(t, entry.name, 'desc', entry.description);
 
   return (
     <div style={{ marginTop: 12 }}>
@@ -394,7 +406,7 @@ function CatalogPlugin({ entry, onChanged, sideloadAllowed }) {
 // PluginsSection lists installed plugins (each with its config panel) and the catalog
 // of installable ones. Off-speaker the API returns nothing, so the section shows a
 // hint instead. Refetches on open and after every install/remove.
-export function PluginsSection({ open }) {
+export function PluginsSection({ open, onOpen }) {
   const { t } = useI18n();
   const [data, setData] = useState(null); // { installed, catalog } | null
 
@@ -403,7 +415,9 @@ export function PluginsSection({ open }) {
 
   const installed = data?.installed || [];
   const installedNames = new Set(installed.map((p) => p.name));
-  const available = (data?.catalog || []).filter((e) => !installedNames.has(e.name));
+  const catalog = data?.catalog || [];
+  const catalogByName = new Map(catalog.map((e) => [e.name, e]));
+  const available = catalog.filter((e) => !installedNames.has(e.name));
   const onSpeaker = !!data; // /api/plugins answered
 
   return (
@@ -411,7 +425,7 @@ export function PluginsSection({ open }) {
       <FieldHint style={{ marginTop: 0, marginBottom: 8 }}>{t('pluginsHint')}</FieldHint>
       {!onSpeaker && <FieldHint>{t('pluginsOnSpeaker')}</FieldHint>}
       {installed.map((p) => (
-        <InstalledPlugin key={p.name} p={p} onRemove={refresh} />
+        <InstalledPlugin key={p.name} p={p} entry={catalogByName.get(p.name)} onOpen={onOpen} />
       ))}
       {available.map((e) => (
         <CatalogPlugin key={e.name} entry={e} onChanged={refresh} sideloadAllowed={!!data?.sideload} />
