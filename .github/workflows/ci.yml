@@ -26,6 +26,7 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
+          npm run typecheck   # tsc --noEmit: enforce the TypeScript types (vite build doesn't)
           npm run build   # outputs to ../internal/web/dist (embedded by go:embed)
 
       - name: Test web UI

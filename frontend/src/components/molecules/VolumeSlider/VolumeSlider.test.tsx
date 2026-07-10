@@ -5,8 +5,8 @@ import { VolumeSlider } from '.';
 
 // The slider maps a pointer's clientX within its box to a 0..100 value. jsdom
 // reports a zero-size box, so we stub getBoundingClientRect to a known geometry.
-function stubRect(el, { left = 0, width = 200 } = {}) {
-  el.getBoundingClientRect = () => ({ left, width, top: 0, height: 24, right: left + width, bottom: 24 });
+function stubRect(el: Element, { left = 0, width = 200 } = {}) {
+  el.getBoundingClientRect = () => ({ left, width, top: 0, height: 24, right: left + width, bottom: 24 } as DOMRect);
 }
 
 describe('VolumeSlider', () => {
@@ -15,7 +15,7 @@ describe('VolumeSlider', () => {
   it('reports the clicked value via onChange (mousedown)', () => {
     const onChange = vi.fn();
     const { container } = renderWithTheme(<VolumeSlider value={20} onChange={onChange} />);
-    const root = container.firstChild;
+    const root = container.firstChild as Element;
     stubRect(root, { left: 0, width: 200 });
 
     // Click at 150px of a 200px-wide track => 75%.
@@ -26,7 +26,7 @@ describe('VolumeSlider', () => {
   it('clamps below 0 and above 100', () => {
     const onChange = vi.fn();
     const { container } = renderWithTheme(<VolumeSlider value={50} onChange={onChange} />);
-    const root = container.firstChild;
+    const root = container.firstChild as Element;
     stubRect(root, { left: 0, width: 200 });
 
     fireEvent.mouseDown(root, { clientX: -40 });
@@ -39,7 +39,7 @@ describe('VolumeSlider', () => {
   it('continues to update while dragging after mousedown', () => {
     const onChange = vi.fn();
     const { container } = renderWithTheme(<VolumeSlider value={0} onChange={onChange} />);
-    const root = container.firstChild;
+    const root = container.firstChild as Element;
     stubRect(root, { left: 0, width: 200 });
 
     fireEvent.mouseDown(root, { clientX: 20 }); // 10%

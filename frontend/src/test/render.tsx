@@ -1,3 +1,4 @@
+import type { ReactElement, ReactNode } from 'react';
 import { render } from '@testing-library/react';
 import { ThemeProvider } from 'styled-components';
 import { theme } from '../theme/theme';
@@ -5,9 +6,9 @@ import { I18nContext, makeT } from '../lib/i18n';
 
 // Render a component inside the styled-components theme. Pass { lang } to also
 // wrap an I18n provider (defaults to English so assertions read in English).
-export function renderWithTheme(ui, { lang = 'en', ...options } = {}) {
+export function renderWithTheme(ui: ReactElement, { lang = 'en', ...options }: { lang?: string } = {}) {
   const t = makeT(lang);
-  const Wrapper = ({ children }) => (
+  const Wrapper = ({ children }: { children: ReactNode }) => (
     <ThemeProvider theme={theme}>
       <I18nContext.Provider value={{ t, lang }}>{children}</I18nContext.Provider>
     </ThemeProvider>

@@ -126,7 +126,7 @@ export const WifiText = styled.span`
   gap: 1px;
 `;
 
-export const WifiName = styled.span`
+export const WifiName = styled.span<{ $active?: boolean }>`
   font-size: 15px;
   font-weight: 600;
   color: var(--ink);

@@ -10,7 +10,7 @@ vi.mock('../lib/api', () => ({
   getVolume: vi.fn().mockResolvedValue(20),
   getPresets: vi.fn().mockResolvedValue(Array(6).fill(null)),
   setVolume: vi.fn(),
-  normalizeNowPlaying: (x) => x,
+  normalizeNowPlaying: (x: unknown) => x,
 }));
 vi.mock('../lib/events', () => ({ subscribeState: () => () => {} }));
 
@@ -19,10 +19,10 @@ describe('useSpeaker changeVolume', () => {
 
   it('serialises writes and skips intermediate values while one is in flight', async () => {
     // First write hangs so 20 and 30 pile up behind it; only the latest survives.
-    let release;
-    api.setVolume
-      .mockImplementationOnce(() => new Promise((r) => { release = r; }))
-      .mockResolvedValue();
+    let release: () => void = () => {};
+    vi.mocked(api.setVolume)
+      .mockImplementationOnce(() => new Promise<void>((r) => { release = r; }))
+      .mockResolvedValue(undefined);
 
     const { result } = renderHook(() => useSpeaker());
 

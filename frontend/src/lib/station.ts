@@ -49,7 +49,8 @@ export function activePresetIndex(
   if (byExact >= 0) return byExact;
   let loose = -1;
   for (let i = 0; i < presets.length; i++) {
-    if (presets[i] && sameStation(presets[i].name, station.name)) {
+    const p = presets[i];
+    if (p && sameStation(p.name, station.name)) {
       if (loose >= 0) return -1; // more than one loose match — don't guess
       loose = i;
     }

@@ -29,7 +29,7 @@ describe('dictionaries', () => {
     const langs = LANGS.map((l) => l.code);
     const reference = Object.keys(I18N[DEFAULT_LANG]).sort();
     for (const lang of langs) {
-      expect(Object.keys(I18N[lang]).sort(), `keys for ${lang}`).toEqual(reference);
+      expect(Object.keys(I18N[lang as keyof typeof I18N]).sort(), `keys for ${lang}`).toEqual(reference);
     }
   });
 });

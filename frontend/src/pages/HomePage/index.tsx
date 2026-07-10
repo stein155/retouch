@@ -14,6 +14,7 @@ import {
 } from '../../lib/api';
 import { makeT, I18nContext, useI18n, detectInitialLang, LANGS } from '../../lib/i18n';
 import { useThemeMode } from '../../theme/themeMode';
+import type { ThemeMode } from '../../theme/themeMode';
 
 const clean = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
@@ -26,7 +27,7 @@ type SearchMode = { mode: 'browse' } | { mode: 'assign'; slot: number };
 interface HomeBodyProps {
   lang: string;
   onSetLang: (code: string) => void;
-  themeMode: string;
+  themeMode: ThemeMode;
   onSetTheme: (mode: string) => void;
   speakerName: string;
   setSpeakerName: (name: string) => void;
@@ -178,7 +179,7 @@ export default function HomePage() {
 
   // Colour scheme: 'system' | 'light' | 'dark', persisted per device. The hook
   // applies the resolved theme to <html> and follows the OS in 'system' mode.
-  const [themeMode, setThemeMode] = useThemeMode() as [string, (mode: string) => void];
+  const [themeMode, setThemeMode] = useThemeMode();
 
   const [search, setSearch] = useState<SearchMode | null>(null); // null | { mode:'browse' } | { mode:'assign', slot:N }
   const [settingsOpen, setSettingsOpen] = useState(false);

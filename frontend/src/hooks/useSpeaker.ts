@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { getNowPlaying, getVolume, getPresets, setVolume } from '../lib/api';
 import { subscribeState } from '../lib/events';
 import { sameStation } from '../lib/station';
-import type { NowPlaying, Preset, Player, PlayTarget } from '../lib/types';
+import type { NowPlaying, Preset, Player, PlayerStatus, PlayTarget } from '../lib/types';
 
 type Pending = { name: string; tuneInId: string | null; logo: string; since: number; prevName: string };
 type VolumeHold = { value: number; until: number };
@@ -183,9 +183,9 @@ export function useSpeaker() {
   useEffect(() => () => nudgeTimersRef.current.forEach(clearTimeout), []);
 
   // Derived player state the components render. status: idle | starting | buffering | playing.
-  const player = useMemo(() => {
+  const player = useMemo<Player>(() => {
     if (pending) {
-      let status = 'starting';
+      let status: PlayerStatus = 'starting';
       if (nowPlaying && !nowPlaying.standby) {
         if (nowPlaying.playStatus === 'BUFFERING_STATE') status = 'buffering';
         else if (nowPlaying.playStatus === 'PLAY_STATE' && sameStation(nowPlaying.stationName, pending.name))
@@ -199,7 +199,7 @@ export function useSpeaker() {
     }
     if (!nowPlaying || nowPlaying.standby) return { status: 'idle', station: null };
     const ps = nowPlaying.playStatus;
-    let status;
+    let status: PlayerStatus;
     if (ps === 'PLAY_STATE') status = 'playing';
     else if (ps === 'STOP_STATE') return { status: 'idle', station: null };
     else status = 'buffering'; // BUFFERING_STATE or a transient non-standby state
@@ -211,7 +211,7 @@ export function useSpeaker() {
     return {
       status,
       station: {
-        name: nowPlaying.stationName,
+        name: nowPlaying.stationName || '',
         art: nowPlaying.art || (known ? known.logo : ''),
         tuneInId: nowPlaying.tuneInId || (known ? known.tuneInId : null),
         track: nowPlaying.track || '',

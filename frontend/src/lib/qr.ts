@@ -215,7 +215,7 @@ function placeData(m: Matrix, reserved: boolean[][], codewords: number[]) {
   }
 }
 
-const MASKS = [
+const MASKS: ((r: number, c: number) => boolean)[] = [
   (r, c) => (r + c) % 2 === 0,
   (r) => r % 2 === 0,
   (r, c) => c % 3 === 0,

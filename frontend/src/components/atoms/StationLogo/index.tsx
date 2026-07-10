@@ -2,7 +2,7 @@ import type * as React from 'react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 type Props = {
-  id?: string;
+  id?: string | null;
   name?: string;
   tuneInId?: string | null;
   logo?: string;
@@ -39,7 +39,7 @@ const initialsStyle: React.CSSProperties = {
   textAlign: 'center',
 };
 
-export function StationLogo({ id, name, tuneInId, logo }) {
+export function StationLogo({ id, name, tuneInId, logo }: Props) {
   // Prefer an explicit logo URL (from a preset / search result), else derive
   // one from the TuneIn id. Everything is proxied.
   const logoUrl = (logo ? proxiedLogo(logo) : null) || tuneInLogoUrl(tuneInId);
@@ -47,14 +47,14 @@ export function StationLogo({ id, name, tuneInId, logo }) {
   // 'loading' | 'loaded' | 'error'. Keyed off logoUrl via the effect below so
   // state doesn't leak across stations when this component is reused in place
   // (the MiniPlayer keeps one StationLogo mounted across station switches).
-  const [status, setStatus] = useState('loading');
-  const imgRef = useRef(null);
+  const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const imgRef = useRef<HTMLImageElement | null>(null);
 
   // Ref callback: fires when the <img> mounts. This catches a cached image whose
   // load event beats React attaching onLoad — including the case the effect below
   // misses, where the previous render was in the error state (no <img> mounted),
   // so switching to a new, already-cached logo would otherwise sit invisible.
-  const setImg = useCallback((img) => {
+  const setImg = useCallback((img: HTMLImageElement | null) => {
     imgRef.current = img;
     if (!img || !img.complete) return;
     if (img.naturalWidth === 0) setStatus('error');

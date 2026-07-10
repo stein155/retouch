@@ -16,22 +16,46 @@ import {
   QrCardEl, QrQuiet, QrCodeBtn, QrCodeText, QrCopy,
   PlugHead, PlugName, PlugMeta, PlugAction,
 } from './styled';
+import type {
+  PluginsResponse, InstalledPluginInfo, CatalogPluginInfo,
+  PluginManifest, ManifestSection, ManifestField, ManifestAction,
+} from '../../../lib/types';
+
+// The plugin manifest is server-driven and dynamic; these locally refine the
+// shared Manifest* shapes with the concrete extra properties this renderer reads.
+type ManifestFieldT = ManifestField & {
+  key: string;
+  code?: string;
+  placeholder?: string;
+  value?: string | boolean;
+};
+type ManifestToggleT = { key: string; label?: string; value?: unknown };
+type ManifestRowT = { id: string; label?: string; toggles?: ManifestToggleT[] };
+type ManifestActionT = ManifestAction & { confirm?: string; style?: string };
+type ManifestSectionT = ManifestSection & { text?: string };
+type ManifestStatus = { level?: string; text?: string };
+
+// A plugin shown in the settings subpage carries its resolved (localised) title.
+type OpenPlugin = InstalledPluginInfo & { title: string };
 
 // A coloured status dot, matching the MQTT section's convention.
-const statusColor = (level) => ({
-  ok: '#2ecc71', warn: '#f1c40f', error: '#e74c3c',
-}[level] || 'var(--muted, #9aa0a6)');
+const statusColor = (level: unknown): string => {
+  const map: Record<string, string> = {
+    ok: '#2ecc71', warn: '#f1c40f', error: '#e74c3c',
+  };
+  return (typeof level === 'string' && map[level]) || 'var(--muted, #9aa0a6)';
+};
 
 // catStr prefers a localised catalog string (pluginCat_<name>_<suffix>) when the
 // app ships one, else falls back to the server-provided English value. makeT
 // returns the key itself when a translation is missing, which is how we detect it.
-function catStr(t, name, suffix, fallback) {
+function catStr(t: (key: string) => string, name: string, suffix: string, fallback: string): string {
   const key = `pluginCat_${name}_${suffix}`;
   const v = t(key);
   return v === key ? fallback : v;
 }
 
-function QrField({ field }) {
+function QrField({ field }: { field: ManifestFieldT }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -45,7 +69,7 @@ function QrField({ field }) {
   return (
     <QrCardEl>
       {field.label && <SetEyebrow style={{ marginBottom: 14 }}>{field.label}</SetEyebrow>}
-      {field.value && <QrQuiet><QRCode value={field.value} size={150} /></QrQuiet>}
+      {field.value && <QrQuiet><QRCode value={String(field.value)} size={150} /></QrQuiet>}
       {field.code && (
         <QrCodeBtn type="button" onClick={copy} aria-label={t('copy')}>
           <QrCodeText>{field.code}</QrCodeText>
@@ -64,11 +88,11 @@ function QrField({ field }) {
 // the current inputs back and returns the NEW manifest, which we re-render. Multi-step
 // flows (log in → 2FA code → logged in) need no special-casing here: each step is just
 // the next manifest the plugin sends.
-function PluginPanel({ name }) {
+function PluginPanel({ name }: { name: string }) {
   const { t, lang } = useI18n();
-  const [manifest, setManifest] = useState(null);
-  const [values, setValues] = useState({}); // field.key -> string|bool
-  const [rows, setRows] = useState({});      // row.id -> { toggleKey: bool }
+  const [manifest, setManifest] = useState<PluginManifest | null>(null);
+  const [values, setValues] = useState<Record<string, string | boolean>>({}); // field.key -> string|bool
+  const [rows, setRows] = useState<Record<string, Record<string, boolean>>>({}); // row.id -> { toggleKey: bool }
   const [busy, setBusy] = useState('');      // action id in flight
   const [err, setErr] = useState('');
   const alive = useRef(true);
@@ -76,14 +100,14 @@ function PluginPanel({ name }) {
   useEffect(() => () => { alive.current = false; }, []);
 
   // Adopt a manifest: replace the schema and seed the editable state from it.
-  const adopt = useCallback((m) => {
+  const adopt = useCallback((m: PluginManifest | null) => {
     if (!m || !alive.current) return;
     setManifest(m);
-    const v = {};
-    const r = {};
+    const v: Record<string, string | boolean> = {};
+    const r: Record<string, Record<string, boolean>> = {};
     for (const sec of m.sections || []) {
-      for (const f of sec.fields || []) v[f.key] = f.value ?? (f.type === 'toggle' ? false : '');
-      for (const row of sec.rows || []) {
+      for (const f of (sec.fields || []) as ManifestFieldT[]) v[f.key] = f.value ?? (f.type === 'toggle' ? false : '');
+      for (const row of (sec.rows || []) as ManifestRowT[]) {
         r[row.id] = {};
         for (const tg of row.toggles || []) r[row.id][tg.key] = !!tg.value;
       }
@@ -96,7 +120,7 @@ function PluginPanel({ name }) {
   // install the child needs a moment before its HTTP server answers).
   useEffect(() => {
     let on = true;
-    let timer;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     let tries = 0;
     const attempt = () => {
       getPluginManifest(name, lang).then((m) => {
@@ -109,16 +133,16 @@ function PluginPanel({ name }) {
     return () => { on = false; clearTimeout(timer); };
   }, [name, lang, adopt]);
 
-  const runAction = async (action) => {
+  const runAction = async (action: ManifestActionT) => {
     if (busy) return;
     if (action.confirm && !window.confirm(action.confirm)) return;
     setBusy(action.id);
     setErr('');
     try {
       const next = await pluginAction(name, action.id, { values, rows }, lang);
-      adopt(next);
+      adopt(next as PluginManifest | null);
     } catch (e) {
-      setErr(e.message || String(e));
+      setErr(e instanceof Error ? e.message : String(e));
     } finally {
       if (alive.current) setBusy('');
     }
@@ -128,7 +152,7 @@ function PluginPanel({ name }) {
     return <FieldHint>{t('pluginLoading')}…</FieldHint>;
   }
 
-  const st = manifest.status;
+  const st = manifest.status as unknown as ManifestStatus | undefined;
   return (
     <>
       {st && (
@@ -140,18 +164,18 @@ function PluginPanel({ name }) {
           {st.text}
         </FieldHint>
       )}
-      {(manifest.sections || []).map((sec, si) => (
+      {((manifest.sections || []) as ManifestSectionT[]).map((sec, si) => (
         <div key={si} style={{ marginTop: si === 0 ? 4 : 14 }}>
           {sec.title && <FieldRowLabel as="div" style={{ fontWeight: 600, marginBottom: 6 }}>{sec.title}</FieldRowLabel>}
           {sec.text && <FieldHint style={{ marginTop: 0, marginBottom: 8 }}>{sec.text}</FieldHint>}
 
-          {(sec.fields || []).filter((f) => f.type === 'qr').map((f) => (
+          {((sec.fields || []) as ManifestFieldT[]).filter((f) => f.type === 'qr').map((f) => (
             <QrField key={f.key} field={f} />
           ))}
 
-          {((sec.fields || []).some((f) => f.type !== 'qr') || sec.rows?.length > 0) && (
+          {(((sec.fields || []) as ManifestFieldT[]).some((f) => f.type !== 'qr') || (sec.rows?.length ?? 0) > 0) && (
             <FieldCard>
-              {(sec.fields || []).filter((f) => f.type !== 'qr').map((f) => (
+              {((sec.fields || []) as ManifestFieldT[]).filter((f) => f.type !== 'qr').map((f) => (
                 <FieldRow key={f.key}>
                   <FieldRowLabel htmlFor={`pl-${name}-${f.key}`}>{f.label}</FieldRowLabel>
                   {f.type === 'toggle' ? (
@@ -166,7 +190,7 @@ function PluginPanel({ name }) {
                       id={`pl-${name}-${f.key}`}
                       type={f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}
                       inputMode={f.type === 'otp' ? 'numeric' : undefined}
-                      value={values[f.key] ?? ''}
+                      value={(values[f.key] as string) ?? ''}
                       placeholder={f.placeholder || ''}
                       autoComplete={f.type === 'password' ? 'current-password' : 'off'}
                       onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
@@ -174,7 +198,7 @@ function PluginPanel({ name }) {
                   )}
                 </FieldRow>
               ))}
-              {(sec.rows || []).map((row) => (
+              {((sec.rows || []) as ManifestRowT[]).map((row) => (
                 <FieldRow key={row.id}>
                   <FieldRowLabel as="span">{row.label}</FieldRowLabel>
                   <span style={{ marginLeft: 'auto', display: 'flex', gap: 14, alignItems: 'center' }}>
@@ -194,7 +218,7 @@ function PluginPanel({ name }) {
             </FieldCard>
           )}
 
-          {(sec.actions || []).map((a) => (
+          {((sec.actions || []) as ManifestActionT[]).map((a) => (
             <Button
               key={a.id}
               $variant="update"
@@ -217,7 +241,11 @@ function PluginPanel({ name }) {
 // the left and an "Instellingen ›" affordance on the right. Tapping it opens the
 // plugin's own settings as a subpage (see PluginSettings) — that's where the QR /
 // pairing code and the remove button live — so this list stays compact.
-function InstalledPlugin({ p, entry, onOpen }) {
+function InstalledPlugin({ p, entry, onOpen }: {
+  p: InstalledPluginInfo;
+  entry?: CatalogPluginInfo;
+  onOpen: (p: OpenPlugin) => void;
+}) {
   const { t } = useI18n();
   const title = catStr(t, p.name, 'title', entry?.title || p.name);
 
@@ -243,12 +271,12 @@ function InstalledPlugin({ p, entry, onOpen }) {
 // panel (status, fields, QR / pairing code, actions), then a maintenance block —
 // version, an over-the-air update when a newer release exists, and remove. The
 // enclosing sheet supplies the header + back arrow, so this renders body only.
-export function PluginSettings({ p, onRemoved }) {
+export function PluginSettings({ p, onRemoved }: { p: InstalledPluginInfo; onRemoved: () => void }) {
   const { t } = useI18n();
   const [removing, setRemoving] = useState(false);
   const [updating, setUpdating] = useState(false);
-  const [version, setVersion] = useState(p.version || '');
-  const [latest, setLatest] = useState(null); // newest available tag, or null
+  const [version, setVersion] = useState<string | null>(p.version || '');
+  const [latest, setLatest] = useState<string | null>(null); // newest available tag, or null
   const [panelKey, setPanelKey] = useState(0); // bump to re-mount the panel after an update
 
   // Look up the newest release so we can offer an update. Sideloaded plugins have
@@ -315,21 +343,25 @@ export function PluginSettings({ p, onRemoved }) {
 
 // A catalog entry that isn't installed yet: install from its release, or sideload a
 // locally-built binary (for a plugin whose release repo is still private).
-function CatalogPlugin({ entry, onChanged, sideloadAllowed }) {
+function CatalogPlugin({ entry, onChanged, sideloadAllowed }: {
+  entry: CatalogPluginInfo;
+  onChanged: () => void;
+  sideloadAllowed: boolean;
+}) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const fileRef = useRef(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   const install = async () => {
     setBusy(true); setErr('');
-    try { await installPlugin(entry.name); onChanged(); } catch (e) { setErr(e.message || String(e)); setBusy(false); }
+    try { await installPlugin(entry.name); onChanged(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
   };
 
-  const sideload = async (file) => {
+  const sideload = async (file: File | undefined) => {
     if (!file) return;
     setBusy(true); setErr('');
-    try { await uploadPlugin(entry.name, file); onChanged(); } catch (e) { setErr(e.message || String(e)); setBusy(false); }
+    try { await uploadPlugin(entry.name, file); onChanged(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
   };
 
   // Catalog entries carry English title/description from the server; prefer a
@@ -372,9 +404,12 @@ function CatalogPlugin({ entry, onChanged, sideloadAllowed }) {
 // PluginsSection lists installed plugins (each with its config panel) and the catalog
 // of installable ones. Off-speaker the API returns nothing, so the section shows a
 // hint instead. Refetches on open and after every install/remove.
-export function PluginsSection({ open, onOpen }) {
+export function PluginsSection({ open, onOpen }: {
+  open: boolean;
+  onOpen: (p: OpenPlugin) => void;
+}) {
   const { t } = useI18n();
-  const [data, setData] = useState(null); // { installed, catalog } | null
+  const [data, setData] = useState<PluginsResponse | null>(null); // { installed, catalog } | null
 
   const refresh = useCallback(() => { getPlugins().then(setData); }, []);
   useEffect(() => { if (open) refresh(); }, [open, refresh]);
@@ -382,7 +417,7 @@ export function PluginsSection({ open, onOpen }) {
   const installed = data?.installed || [];
   const installedNames = new Set(installed.map((p) => p.name));
   const catalog = data?.catalog || [];
-  const catalogByName = new Map(catalog.map((e) => [e.name, e]));
+  const catalogByName = new Map(catalog.map((e) => [e.name, e] as const));
   const available = catalog.filter((e) => !installedNames.has(e.name));
   const onSpeaker = !!data; // /api/plugins answered
 
@@ -394,7 +429,7 @@ export function PluginsSection({ open, onOpen }) {
         <InstalledPlugin key={p.name} p={p} entry={catalogByName.get(p.name)} onOpen={onOpen} />
       ))}
       {available.map((e) => (
-        <CatalogPlugin key={e.name} entry={e} onChanged={refresh} sideloadAllowed={!!data?.sideload} />
+        <CatalogPlugin key={e.name} entry={e} onChanged={refresh} sideloadAllowed={!!(data as (PluginsResponse & { sideload?: boolean }) | null)?.sideload} />
       ))}
     </>
   );

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import { Icon } from '../../atoms/Icon';
 import { Spinner } from '../../atoms/Spinner';
 import { Skeleton } from '../../atoms/Skeleton';
@@ -16,23 +17,29 @@ import {
   BassCard, BassHead, BassName, BassVal, BassScale,
 } from '../../molecules/Field';
 import { useI18n, LANGS } from '../../../lib/i18n';
+import type { TranslateFn } from '../../../lib/i18n';
 import {
   getSettings, saveSettings, getVersion, getReleases, startUpdate,
   findSpeakers, groupSpeaker, ungroupSpeaker, scanWifi, setWifi,
   getMqttStatus, getAuth, login, logout, setPassword,
 } from '../../../lib/api';
+import type {
+  Auth, VersionInfo, ReleaseRef, MqttConfig, NetworkInfo,
+  FoundSpeaker, WifiNetwork, ApiError, InstalledPluginInfo,
+} from '../../../lib/types';
 import {
   ScanButton, UpdateOverlay, UpdateCard, UpdateTitle, UpdateSub,
   MenuItem, MenuIcon, MenuLabel, MenuChev,
   WifiRow, WifiLead, WifiText, WifiName, WifiSub, WifiTrail, WifiHead,
 } from './styled';
 
-const fmtBass = (v) => (v > 0 ? '+' + v : String(v));
+const fmtBass = (v: number) => (v > 0 ? '+' + v : String(v));
 const betaUpdatesKey = 'retouch-beta-updates';
 
 // Map the speaker's signal token to a localised label.
-const sigLabel = (t, sig) => {
-  const key = { excellent: 'sigExcellent', good: 'sigGood', fair: 'sigFair', poor: 'sigPoor' }[sig];
+const sigLabel = (t: TranslateFn, sig: string) => {
+  const map: Record<string, string> = { excellent: 'sigExcellent', good: 'sigGood', fair: 'sigFair', poor: 'sigPoor' };
+  const key = map[sig];
   return key ? t(key) : sig;
 };
 
@@ -41,12 +48,12 @@ const sigLabel = (t, sig) => {
 // list comes from a network sweep, so it auto-scans on open and offers a manual
 // rescan. Each row toggles membership; toggles apply optimistically and revert
 // on failure.
-function MultiroomSection({ open }) {
+function MultiroomSection({ open }: { open: boolean }) {
   const { t } = useI18n();
-  const [speakers, setSpeakers] = useState(null); // null = not scanned yet; [] = scanned, none found
-  const [scanning, setScanning] = useState(false);
-  const [busy, setBusy] = useState({}); // ip -> in-flight toggle
-  const scanGen = useRef(0); // bumped per scan so a slow one can't clobber a newer
+  const [speakers, setSpeakers] = useState<FoundSpeaker[] | null>(null); // null = not scanned yet; [] = scanned, none found
+  const [scanning, setScanning] = useState<boolean>(false);
+  const [busy, setBusy] = useState<Record<string, boolean>>({}); // ip -> in-flight toggle
+  const scanGen = useRef<number>(0); // bumped per scan so a slow one can't clobber a newer
 
   const scan = useCallback(async () => {
     const gen = ++scanGen.current;
@@ -66,15 +73,15 @@ function MultiroomSection({ open }) {
     return () => { scanGen.current += 1; };
   }, [open, scan]);
 
-  const toggle = async (sp) => {
+  const toggle = async (sp: FoundSpeaker) => {
     if (busy[sp.ip]) return;
     const want = !sp.grouped;
     setBusy((b) => ({ ...b, [sp.ip]: true }));
-    setSpeakers((list) => list.map((x) => (x.ip === sp.ip ? { ...x, grouped: want } : x)));
+    setSpeakers((list) => (list ? list.map((x) => (x.ip === sp.ip ? { ...x, grouped: want } : x)) : list));
     try {
       await (want ? groupSpeaker(sp.ip) : ungroupSpeaker(sp.ip));
     } catch {
-      setSpeakers((list) => list.map((x) => (x.ip === sp.ip ? { ...x, grouped: !want } : x)));
+      setSpeakers((list) => (list ? list.map((x) => (x.ip === sp.ip ? { ...x, grouped: !want } : x)) : list));
     } finally {
       setBusy((b) => ({ ...b, [sp.ip]: false }));
     }
@@ -108,10 +115,10 @@ function MultiroomSection({ open }) {
 
 // Wi-Fi signal-strength glyph, iOS-style: the arcs light up according to strength
 // and the rest dim out, so the list reads at a glance instead of via a word.
-const SIG_LEVEL = { poor: 1, fair: 2, good: 3, excellent: 4 };
-function WifiSignal({ sig }) {
+const SIG_LEVEL: Record<string, number> = { poor: 1, fair: 2, good: 3, excellent: 4 };
+function WifiSignal({ sig }: { sig: string }) {
   const lvl = SIG_LEVEL[sig] || 0;
-  const o = (n) => (lvl >= n ? 1 : 0.22);
+  const o = (n: number) => (lvl >= n ? 1 : 0.22);
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M2.5 8.5a15 15 0 0 1 19 0" opacity={o(4)} />
@@ -122,18 +129,22 @@ function WifiSignal({ sig }) {
   );
 }
 
+// A selected network in the Wi-Fi form. Scanned entries carry a signal token;
+// a manual entry is typed by hand, so it has no signal and starts open.
+type WifiSelection = { ssid: string; secure: boolean; manual: boolean; signal?: string };
+
 // Wi-Fi setup: shows the connected network at the top (with a check, like iOS),
 // then surveys nearby networks and lists them with a lock + signal glyph. Tapping
 // a network reveals its password field below; "Other network…" always lets the
 // user type an SSID for hardware that returns nothing. Joining can briefly drop
 // the speaker's own connection while it switches, which the hint warns about.
-function WifiSection({ network }) {
+function WifiSection({ network }: { network: NetworkInfo | null }) {
   const { t } = useI18n();
-  const [nets, setNets] = useState(null); // null = not scanned yet; [] = scanned, none
-  const [scanning, setScanning] = useState(false);
-  const [sel, setSel] = useState(null);   // { ssid, secure, manual }
-  const [pw, setPw] = useState('');
-  const [status, setStatus] = useState({ phase: 'idle', text: '' }); // idle|busy|done|error
+  const [nets, setNets] = useState<WifiNetwork[] | null>(null); // null = not scanned yet; [] = scanned, none
+  const [scanning, setScanning] = useState<boolean>(false);
+  const [sel, setSel] = useState<WifiSelection | null>(null);   // { ssid, secure, manual }
+  const [pw, setPw] = useState<string>('');
+  const [status, setStatus] = useState<{ phase: string; text: string }>({ phase: 'idle', text: '' }); // idle|busy|done|error
 
   const scan = useCallback(async () => {
     setScanning(true);
@@ -145,7 +156,7 @@ function WifiSection({ network }) {
   // "change network" button standing in front of it.
   useEffect(() => { scan(); }, [scan]);
 
-  const choose = (n) => { setSel({ ...n, manual: false }); setPw(''); setStatus({ phase: 'idle', text: '' }); };
+  const choose = (n: WifiNetwork) => { setSel({ ...n, manual: false }); setPw(''); setStatus({ phase: 'idle', text: '' }); };
   const chooseManual = () => { setSel({ ssid: '', secure: true, manual: true }); setPw(''); setStatus({ phase: 'idle', text: '' }); };
 
   const ssid = (sel?.ssid || '').trim();
@@ -205,7 +216,7 @@ function WifiSection({ network }) {
               </WifiRow>
             ))
           : others.map((n) => {
-              const active = sel && !sel.manual && sel.ssid === n.ssid;
+              const active = !!(sel && !sel.manual && sel.ssid === n.ssid);
               return (
                 <WifiRow key={n.ssid} type="button" onClick={() => choose(n)}>
                   <WifiName $active={active}>{n.ssid}</WifiName>
@@ -230,7 +241,7 @@ function WifiSection({ network }) {
                 <FieldRowLabel as="span">{t('wifiNetwork')}</FieldRowLabel>
                 <FieldRowInput
                   value={sel.ssid}
-                  onChange={(e) => setSel((s) => ({ ...s, ssid: e.target.value }))}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSel((s) => (s ? { ...s, ssid: e.target.value } : s))}
                   placeholder={t('wifiSsidPlaceholder')}
                   maxLength={32}
                   autoComplete="off"
@@ -244,7 +255,7 @@ function WifiSection({ network }) {
                   id="wifi-pw"
                   type="password"
                   value={pw}
-                  onChange={(e) => setPw(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPw(e.target.value)}
                   placeholder={t('wifiPassword')}
                   autoComplete="off"
                 />
@@ -272,24 +283,37 @@ function WifiSection({ network }) {
   );
 }
 
+// Editable MQTT form state. The password field is write-only here (blank keeps
+// the stored one), and the port is a string while being typed in the input.
+type MqttForm = {
+  enabled: boolean;
+  host: string;
+  port: number | string;
+  username: string;
+  password: string;
+  baseTopic: string;
+  discoveryPrefix: string;
+  tls: boolean;
+};
+
 // MQTT / Home Assistant: connect this speaker to a broker so it appears in Home
 // Assistant (via the on-box bridge, internal/habridge). The form is self-contained
 // — it loads the stored config from /api/settings, saves the whole block on demand
 // (a reconnect churns the broker link, so it's a deliberate action, not per-key),
 // and polls the live connection status while enabled. The password is never sent
 // back to the browser, so an empty password field keeps the stored one.
-function MqttSection({ open, onAuthError }) {
+function MqttSection({ open, onAuthError }: { open: boolean; onAuthError?: () => void }) {
   const { t } = useI18n();
-  const [cfg, setCfg] = useState(null);        // null until loaded
-  const [hasPassword, setHasPassword] = useState(false);
-  const [status, setStatus] = useState({ connected: false, lastError: '' });
-  const [saving, setSaving] = useState(false);
-  const pollRef = useRef(null);
+  const [cfg, setCfg] = useState<MqttForm | null>(null);        // null until loaded
+  const [hasPassword, setHasPassword] = useState<boolean>(false);
+  const [status, setStatus] = useState<{ connected: boolean; lastError: string }>({ connected: false, lastError: '' });
+  const [saving, setSaving] = useState<boolean>(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (!open) return;
     getSettings().then((s) => {
-      const m = (s && s.mqtt) || {};
+      const m: Partial<MqttConfig> = (s && s.mqtt) || {};
       setCfg({
         enabled: !!m.enabled,
         host: m.host || '',
@@ -307,21 +331,21 @@ function MqttSection({ open, onAuthError }) {
 
   // Poll the live broker status while the section is open and enabled.
   useEffect(() => {
-    clearInterval(pollRef.current);
+    clearInterval(pollRef.current ?? undefined);
     if (!open || !cfg?.enabled) return undefined;
     pollRef.current = setInterval(async () => {
       const s = await getMqttStatus();
       if (s) setStatus(s);
     }, 4000);
-    return () => clearInterval(pollRef.current);
+    return () => clearInterval(pollRef.current ?? undefined);
   }, [open, cfg?.enabled]);
 
   if (!cfg) return null;
-  const set = (k, v) => setCfg((c) => ({ ...c, [k]: v }));
+  const set = <K extends keyof MqttForm>(k: K, v: MqttForm[K]) => setCfg((c) => (c ? ({ ...c, [k]: v }) : c));
 
   const save = async () => {
     setSaving(true);
-    const patch = {
+    const patch: Record<string, unknown> = {
       enabled: cfg.enabled,
       host: cfg.host.trim(),
       port: Number(cfg.port) || 0,
@@ -337,13 +361,13 @@ function MqttSection({ open, onAuthError }) {
       set('password', '');
       setTimeout(async () => { const s = await getMqttStatus(); if (s) setStatus(s); }, 1200);
     } catch (e) {
-      if (e?.status === 401) onAuthError?.(); // session expired mid-edit
+      if ((e as ApiError)?.status === 401) onAuthError?.(); // session expired mid-edit
     } finally {
       setSaving(false);
     }
   };
 
-  const dot = {
+  const dot: React.CSSProperties = {
     display: 'inline-block', width: 8, height: 8, borderRadius: 99,
     marginRight: 6, verticalAlign: 'middle',
     background: status.connected ? '#2ecc71' : 'var(--muted, #9aa0a6)',
@@ -363,19 +387,19 @@ function MqttSection({ open, onAuthError }) {
           <FieldCard style={{ marginTop: 12 }}>
             <FieldRow>
               <FieldRowLabel htmlFor="mqtt-host">{t('mqttHost')}</FieldRowLabel>
-              <FieldRowInput id="mqtt-host" type="text" value={cfg.host} onChange={(e) => set('host', e.target.value)} placeholder="192.168.1.10" autoComplete="off" />
+              <FieldRowInput id="mqtt-host" type="text" value={cfg.host} onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('host', e.target.value)} placeholder="192.168.1.10" autoComplete="off" />
             </FieldRow>
             <FieldRow>
               <FieldRowLabel htmlFor="mqtt-port">{t('mqttPort')}</FieldRowLabel>
-              <FieldRowInput id="mqtt-port" type="number" value={cfg.port} onChange={(e) => set('port', e.target.value)} placeholder="1883" />
+              <FieldRowInput id="mqtt-port" type="number" value={cfg.port} onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('port', e.target.value)} placeholder="1883" />
             </FieldRow>
             <FieldRow>
               <FieldRowLabel htmlFor="mqtt-user">{t('mqttUsername')}</FieldRowLabel>
-              <FieldRowInput id="mqtt-user" type="text" value={cfg.username} onChange={(e) => set('username', e.target.value)} autoComplete="off" />
+              <FieldRowInput id="mqtt-user" type="text" value={cfg.username} onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('username', e.target.value)} autoComplete="off" />
             </FieldRow>
             <FieldRow>
               <FieldRowLabel htmlFor="mqtt-pass">{t('mqttPassword')}</FieldRowLabel>
-              <FieldRowInput id="mqtt-pass" type="password" value={cfg.password} onChange={(e) => set('password', e.target.value)} placeholder={hasPassword ? '••••••••' : ''} autoComplete="new-password" />
+              <FieldRowInput id="mqtt-pass" type="password" value={cfg.password} onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('password', e.target.value)} placeholder={hasPassword ? '••••••••' : ''} autoComplete="new-password" />
             </FieldRow>
             <FieldRow>
               <FieldRowLabel as="span">{t('mqttTls')}</FieldRowLabel>
@@ -383,11 +407,11 @@ function MqttSection({ open, onAuthError }) {
             </FieldRow>
             <FieldRow>
               <FieldRowLabel htmlFor="mqtt-base">{t('mqttBaseTopic')}</FieldRowLabel>
-              <FieldRowInput id="mqtt-base" type="text" value={cfg.baseTopic} onChange={(e) => set('baseTopic', e.target.value)} placeholder="retouch/…" autoComplete="off" />
+              <FieldRowInput id="mqtt-base" type="text" value={cfg.baseTopic} onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('baseTopic', e.target.value)} placeholder="retouch/…" autoComplete="off" />
             </FieldRow>
             <FieldRow>
               <FieldRowLabel htmlFor="mqtt-disc">{t('mqttDiscoveryPrefix')}</FieldRowLabel>
-              <FieldRowInput id="mqtt-disc" type="text" value={cfg.discoveryPrefix} onChange={(e) => set('discoveryPrefix', e.target.value)} placeholder="homeassistant" autoComplete="off" />
+              <FieldRowInput id="mqtt-disc" type="text" value={cfg.discoveryPrefix} onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('discoveryPrefix', e.target.value)} placeholder="homeassistant" autoComplete="off" />
             </FieldRow>
           </FieldCard>
           {hasPassword && !cfg.password && <FieldHint>{t('mqttPasswordSet')}</FieldHint>}
@@ -410,13 +434,13 @@ function MqttSection({ open, onAuthError }) {
 // browser has no (valid) session. The forgot-password path is deliberately not
 // a form: a factory reset of the speaker clears the password (physical access
 // is the proof of ownership), which the hint below explains.
-function LoginView({ onUnlocked }) {
+function LoginView({ onUnlocked }: { onUnlocked: () => void }) {
   const { t } = useI18n();
-  const [pw, setPw] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(false);
+  const [pw, setPw] = useState<string>('');
+  const [busy, setBusy] = useState<boolean>(false);
+  const [error, setError] = useState<boolean>(false);
 
-  const submit = async (e) => {
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (busy || !pw) return;
     setBusy(true);
@@ -442,7 +466,7 @@ function LoginView({ onUnlocked }) {
             id="login-pass"
             type="password"
             value={pw}
-            onChange={(e) => setPw(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPw(e.target.value)}
             autoComplete="current-password"
             autoFocus
           />
@@ -462,13 +486,13 @@ function LoginView({ onUnlocked }) {
 // password locks the settings for everyone else on the network; the server
 // hands this browser a session so the user isn't locked out of the page they
 // are looking at.
-function PasswordSection({ hasPassword, onChanged, onAuthError }) {
+function PasswordSection({ hasPassword, onChanged, onAuthError }: { hasPassword: boolean; onChanged: () => void; onAuthError?: () => void }) {
   const { t } = useI18n();
-  const [current, setCurrent] = useState('');
-  const [pw1, setPw1] = useState('');
-  const [pw2, setPw2] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null); // { error, text }
+  const [current, setCurrent] = useState<string>('');
+  const [pw1, setPw1] = useState<string>('');
+  const [pw2, setPw2] = useState<string>('');
+  const [busy, setBusy] = useState<boolean>(false);
+  const [msg, setMsg] = useState<{ error: boolean; text: string } | null>(null); // { error, text }
 
   const submit = async () => {
     if (busy) return;
@@ -484,8 +508,9 @@ function PasswordSection({ hasPassword, onChanged, onAuthError }) {
     } catch (e) {
       // 401 with a live form means the current password was wrong — unless the
       // session itself expired ("login required"), which sends us back to login.
-      if (e?.status === 401 && e.message === 'login required') { onAuthError?.(); return; }
-      setMsg({ error: true, text: e?.status === 401 ? t('wrongPassword') : t('passwordSaveError') });
+      const err = e as ApiError;
+      if (err?.status === 401 && err.message === 'login required') { onAuthError?.(); return; }
+      setMsg({ error: true, text: err?.status === 401 ? t('wrongPassword') : t('passwordSaveError') });
     } finally {
       setBusy(false);
     }
@@ -499,16 +524,16 @@ function PasswordSection({ hasPassword, onChanged, onAuthError }) {
         {hasPassword && (
           <FieldRow>
             <FieldRowLabel htmlFor="pw-current">{t('currentPassword')}</FieldRowLabel>
-            <FieldRowInput id="pw-current" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
+            <FieldRowInput id="pw-current" type="password" value={current} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrent(e.target.value)} autoComplete="current-password" />
           </FieldRow>
         )}
         <FieldRow>
           <FieldRowLabel htmlFor="pw-new">{t('newPassword')}</FieldRowLabel>
-          <FieldRowInput id="pw-new" type="password" value={pw1} onChange={(e) => setPw1(e.target.value)} autoComplete="new-password" />
+          <FieldRowInput id="pw-new" type="password" value={pw1} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPw1(e.target.value)} autoComplete="new-password" />
         </FieldRow>
         <FieldRow>
           <FieldRowLabel htmlFor="pw-confirm">{t('confirmPassword')}</FieldRowLabel>
-          <FieldRowInput id="pw-confirm" type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} autoComplete="new-password" />
+          <FieldRowInput id="pw-confirm" type="password" value={pw2} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPw2(e.target.value)} autoComplete="new-password" />
         </FieldRow>
       </FieldCard>
       {msg && <FieldHint $error={msg.error}>{msg.text}</FieldHint>}
@@ -547,34 +572,48 @@ function SettingsSkeleton() {
   );
 }
 
+// A plugin the user has drilled into: the installed plugin info plus a display
+// title. The settings UI is server-driven, so extra fields stay loosely typed.
+type PluginPage = InstalledPluginInfo & { title: string };
+
+interface SettingsSheetProps {
+  open: boolean;
+  onClose: () => void;
+  lang: string;
+  onSetLang: (c: string) => void;
+  themeMode: 'system' | 'light' | 'dark';
+  onSetTheme: (m: string) => void;
+  onNameChange?: (n: string) => void;
+}
+
 // Settings sheet: speaker name + sound (bass, and treble where the speaker has
 // tone controls), UI language (persisted locally), and device-specific network
 // settings (Wi-Fi/streaming optimization + a read-only connection summary). Each
 // device setting only appears when the speaker actually reports it. Live-applies
 // every field.
-export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSetTheme, onNameChange }) {
+export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSetTheme, onNameChange }: SettingsSheetProps) {
   const { t } = useI18n();
-  const [name, setName] = useState('');
-  const [bass, setBass] = useState(0);
-  const [caps, setCaps] = useState({ min: -9, max: 0, default: 0 });
+  const [name, setName] = useState<string>('');
+  const [bass, setBass] = useState<number>(0);
+  const [caps, setCaps] = useState<{ min: number; max: number; default: number }>({ min: -9, max: 0, default: 0 });
   // Device-specific settings, only shown when the speaker reports them.
-  const [treble, setTreble] = useState(null);            // null = unsupported/hidden
-  const [trebleCaps, setTrebleCaps] = useState({ min: -100, max: 100, step: 10 });
-  const [wifiOpt, setWifiOpt] = useState(null);          // null = unsupported/hidden
-  const [closeTelnet, setCloseTelnet] = useState(false);
-  const [network, setNetwork] = useState(null);          // { type, ssid, signal, ip }
-  const [ver, setVer] = useState(null);                  // { version, updatable }
-  const [betas, setBetas] = useState([]);                // open-PR beta builds
-  const [showBetas, setShowBetas] = useState(() => localStorage.getItem(betaUpdatesKey) === '1');
-  const [selTag, setSelTag] = useState('');              // '' = latest stable
-  const [upd, setUpd] = useState({ phase: 'idle', text: '' }); // idle | busy | done | error
-  const [loading, setLoading] = useState(true); // true until the first settings fetch resolves
-  const [page, setPage] = useState(null); // null = category menu; else the open subpage key
-  const [pluginPage, setPluginPage] = useState(null); // selected plugin object within the plugins subpage
-  const [auth, setAuth] = useState(null); // { hasPassword, authenticated } | null = unknown
-  const nameTimer = useRef(null);
-  const pollRef = useRef(null);
-  const pollGen = useRef(0); // bumped to invalidate a poll tick that is mid-await
+  const [treble, setTreble] = useState<number | null>(null);            // null = unsupported/hidden
+  const [trebleCaps, setTrebleCaps] = useState<{ min: number; max: number; step: number }>({ min: -100, max: 100, step: 10 });
+  const [wifiOpt, setWifiOpt] = useState<boolean | null>(null);          // null = unsupported/hidden
+  const [closeTelnet, setCloseTelnet] = useState<boolean>(false);
+  const [network, setNetwork] = useState<NetworkInfo | null>(null);          // { type, ssid, signal, ip }
+  const [ver, setVer] = useState<VersionInfo | null>(null);                  // { version, updatable }
+  const [betas, setBetas] = useState<ReleaseRef[]>([]);                // open-PR beta builds
+  const [showBetas, setShowBetas] = useState<boolean>(() => localStorage.getItem(betaUpdatesKey) === '1');
+  const [selTag, setSelTag] = useState<string>('');              // '' = latest stable
+  const [upd, setUpd] = useState<{ phase: string; text: string }>({ phase: 'idle', text: '' }); // idle | busy | done | error
+  const [loading, setLoading] = useState<boolean>(true); // true until the first settings fetch resolves
+  const [page, setPage] = useState<string | null>(null); // null = category menu; else the open subpage key
+  const [pluginPage, setPluginPage] = useState<PluginPage | null>(null); // selected plugin object within the plugins subpage
+  const [auth, setAuth] = useState<Auth | null>(null); // { hasPassword, authenticated } | null = unknown
+  const nameTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollGen = useRef<number>(0); // bumped to invalidate a poll tick that is mid-await
 
   // A password is set and this browser has no session: show the login gate.
   const locked = !!auth && auth.hasPassword && !auth.authenticated;
@@ -605,7 +644,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
     // Auth first: when the settings are locked, don't load (the API would only
     // return the restricted view anyway) — show the login gate instead.
     getAuth().then((a) => {
-      const cur = a || { hasPassword: false, authenticated: true };
+      const cur: Auth = a || { hasPassword: false, authenticated: true };
       setAuth(cur);
       if (cur.hasPassword && !cur.authenticated) { setLoading(false); return; }
       loadAll();
@@ -622,8 +661,8 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
     setAuth({ hasPassword: true, authenticated: false });
     setPage(null);
   }, []);
-  const saveGuarded = useCallback((patch) => {
-    saveSettings(patch).catch((e) => { if (e?.status === 401) onAuthExpired(); });
+  const saveGuarded = useCallback((patch: Record<string, unknown>) => {
+    saveSettings(patch).catch((e) => { if ((e as ApiError)?.status === 401) onAuthExpired(); });
   }, [onAuthExpired]);
 
   // Stop any version poll when the sheet closes or unmounts. Bumping pollGen
@@ -632,19 +671,19 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
   useEffect(() => {
     if (open) return;
     pollGen.current += 1;
-    clearTimeout(pollRef.current);
-    clearTimeout(nameTimer.current); // don't PUT a half-typed name after close
+    clearTimeout(pollRef.current ?? undefined);
+    clearTimeout(nameTimer.current ?? undefined); // don't PUT a half-typed name after close
     setUpd({ phase: 'idle', text: '' });
   }, [open]);
   useEffect(() => () => {
     pollGen.current += 1;
-    clearTimeout(pollRef.current);
-    clearTimeout(nameTimer.current);
+    clearTimeout(pollRef.current ?? undefined);
+    clearTimeout(nameTimer.current ?? undefined);
   }, []);
 
   // Poll /api/version until the speaker comes back on the target tag (it restarts
   // mid-update, so the endpoint drops out for a bit). Times out after ~3 minutes.
-  const pollVersion = (target) => {
+  const pollVersion = (target: string | null) => {
     const startV = ver?.version;
     const gen = ++pollGen.current;
     let n = 0;
@@ -706,24 +745,24 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
 
   useEffect(() => {
     if (!open) return;
-    const f = (e) => { if (e.key === 'Escape') onClose(); };
+    const f = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', f);
     return () => window.removeEventListener('keydown', f);
   }, [open, onClose]);
 
-  const onNameInput = (v) => {
+  const onNameInput = (v: string) => {
     setName(v);
-    clearTimeout(nameTimer.current);
+    clearTimeout(nameTimer.current ?? undefined);
     nameTimer.current = setTimeout(() => {
       const nm = v.trim();
       if (nm) { saveGuarded({ name: nm }); onNameChange && onNameChange(nm); }
     }, 600);
   };
 
-  const onBass = (v) => { setBass(v); saveGuarded({ bass: v }); };
+  const onBass = (v: number) => { setBass(v); saveGuarded({ bass: v }); };
 
   // Treble snaps to the step the speaker accepts.
-  const onTreble = (v) => {
+  const onTreble = (v: number) => {
     const step = trebleCaps.step || 1;
     const snapped = Math.round(v / step) * step;
     setTreble(snapped);
@@ -743,7 +782,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
       await saveSettings({ closeTelnet: next });
     } catch (e) {
       setCloseTelnet(!next);
-      if (e?.status === 401) onAuthExpired();
+      if ((e as ApiError)?.status === 401) onAuthExpired();
     }
   };
 
@@ -772,10 +811,10 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
     { key: 'plugins', icon: Icon.settings },
     { key: 'security', icon: Icon.shield },
     ver && { key: 'software', icon: Icon.download },
-  ].filter(Boolean);
+  ].filter(Boolean) as { key: string; icon: typeof Icon.speaker }[];
 
   // Body for each subpage. Only the open page's element is rendered into the tree.
-  const pages = {
+  const pages: Record<string, ReactNode> = {
     general: (
       <>
         <FormSection>{t('name')}</FormSection>
@@ -786,7 +825,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
               id="set-name"
               type="text"
               value={name}
-              onChange={(e) => onNameInput(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => onNameInput(e.target.value)}
               placeholder={t('namePlaceholder')}
               maxLength={28}
               autoComplete="off"
@@ -798,7 +837,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
         <SelectWrap>
           <Select
             value={lang}
-            onChange={(e) => onSetLang(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onSetLang(e.target.value)}
             aria-label={t('language')}
           >
             {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
@@ -810,7 +849,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
         <SelectWrap>
           <Select
             value={themeMode}
-            onChange={(e) => onSetTheme(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onSetTheme(e.target.value)}
             aria-label={t('appearance')}
           >
             <option value="system">{t('themeSystem')}</option>
@@ -936,7 +975,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
                 <SelectWrap style={{ marginBottom: 8 }}>
                   <Select
                     value={selTag}
-                    onChange={(e) => setSelTag(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSelTag(e.target.value)}
                     disabled={upd.phase === 'busy'}
                     aria-label={t('chooseBetaVersion')}
                   >

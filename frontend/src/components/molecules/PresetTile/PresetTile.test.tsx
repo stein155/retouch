@@ -23,7 +23,7 @@ describe('PresetTile', () => {
 
   it('renders a filled tile and calls onPlay on its main button', async () => {
     const onPlay = vi.fn();
-    const preset = { name: 'Radio Foo', tuneInId: 's1', logo: '' };
+    const preset = { name: 'Radio Foo', tuneInId: 's1', logo: '' } as Preset;
     renderWithTheme(
       <PresetTile preset={preset} player={idle} onPlay={onPlay} onAssign={() => {}} />,
     );
@@ -34,7 +34,7 @@ describe('PresetTile', () => {
   });
 
   it('shows the live equalizer when active and playing', () => {
-    const preset = { name: 'Radio Foo', tuneInId: 's1', logo: '' };
+    const preset = { name: 'Radio Foo', tuneInId: 's1', logo: '' } as Preset;
     const { container } = renderWithTheme(
       <PresetTile preset={preset} player={playingFoo} active onPlay={() => {}} onAssign={() => {}} />,
     );
@@ -43,7 +43,7 @@ describe('PresetTile', () => {
   });
 
   it('shows a starting spinner (not the equalizer) when active and starting', () => {
-    const preset = { name: 'Radio Foo', tuneInId: 's1', logo: '' };
+    const preset = { name: 'Radio Foo', tuneInId: 's1', logo: '' } as Preset;
     const { container } = renderWithTheme(
       <PresetTile preset={preset} player={startingFoo} active onPlay={() => {}} onAssign={() => {}} />,
     );
@@ -51,7 +51,7 @@ describe('PresetTile', () => {
   });
 
   it('does not highlight when not the active tile, even if a station plays', () => {
-    const preset = { name: 'Radio Bar', tuneInId: 's2', logo: '' };
+    const preset = { name: 'Radio Bar', tuneInId: 's2', logo: '' } as Preset;
     const { container } = renderWithTheme(
       <PresetTile preset={preset} player={playingFoo} active={false} onPlay={() => {}} onAssign={() => {}} />,
     );
@@ -60,7 +60,7 @@ describe('PresetTile', () => {
 
   it('opens the replace menu from the more button', async () => {
     const onAssign = vi.fn();
-    const preset = { name: 'Radio Foo', tuneInId: 's1', logo: '' };
+    const preset = { name: 'Radio Foo', tuneInId: 's1', logo: '' } as Preset;
     renderWithTheme(
       <PresetTile preset={preset} player={idle} onPlay={() => {}} onAssign={onAssign} />,
     );

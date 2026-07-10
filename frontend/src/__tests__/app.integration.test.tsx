@@ -1,10 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // Mock the whole API client: no real network, deterministic data.
 vi.mock('../lib/api');
-import * as api from '../lib/api';
+import * as apiModule from '../lib/api';
+
+// Every export is a vi mock at runtime; expose them as such for the type-checker.
+const api = apiModule as unknown as Record<keyof typeof apiModule, Mock>;
 
 import App from '../App';
 
@@ -14,8 +17,8 @@ const PRESETS = [
   null, null, null, null,
 ];
 
-function stubRect(el, { left = 0, width = 200 } = {}) {
-  el.getBoundingClientRect = () => ({ left, width, top: 0, height: 24, right: left + width, bottom: 24 });
+function stubRect(el: Element, { left = 0, width = 200 } = {}) {
+  el.getBoundingClientRect = () => ({ left, width, top: 0, height: 24, right: left + width, bottom: 24 } as DOMRect);
 }
 
 beforeEach(() => {
@@ -71,7 +74,7 @@ describe('App integration', () => {
 
     // The volume value (30) is shown once active; the slider precedes it.
     const volVal = await screen.findByText('30');
-    const sliderRoot = volVal.previousElementSibling; // SliderRoot
+    const sliderRoot = volVal.previousElementSibling as Element; // SliderRoot
     stubRect(sliderRoot, { left: 0, width: 200 });
     fireEvent.mouseDown(sliderRoot, { clientX: 100 }); // 50%
     await waitFor(() => expect(api.setVolume).toHaveBeenCalledWith(50));
