@@ -124,6 +124,8 @@ func (s *Speaker) Handler() http.Handler {
 	mux.HandleFunc("/audioproducttonecontrols", s.toneHandler)
 	mux.HandleFunc("/systemtimeout", s.systemTimeoutHandler)
 	mux.HandleFunc("/networkInfo", s.getNetworkInfo)
+	mux.HandleFunc("/performWirelessSiteSurvey", s.getSiteSurvey)
+	mux.HandleFunc("/addWirelessProfile", postOnly(s.postWirelessProfile))
 	mux.HandleFunc("/getZone", s.getZone)
 	// These endpoints mutate state; the real speaker only accepts them over POST and
 	// returns N/A for GET, so reject other methods to mirror that.
@@ -320,6 +322,38 @@ func (s *Speaker) getNetworkInfo(w http.ResponseWriter, _ *http.Request) {
 		`<interface type="WIFI_INTERFACE" name="wlan0" ssid="%s" signal="%s" ipAddress="%s" state="NETWORK_WIFI_CONNECTED"/>`+
 		`</interfaces></networkInfo>`,
 		esc(s.wifiSSID), esc(s.wifiSignal), esc(s.IP)))
+}
+
+// getSiteSurvey answers /performWirelessSiteSurvey with a few nearby networks,
+// including the one currently connected (reported at full strength).
+func (s *Speaker) getSiteSurvey(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	current := s.wifiSSID
+	s.mu.Unlock()
+	writeXML(w, `<performWirelessSiteSurvey><items>`+
+		fmt.Sprintf(`<item ssid="%s" signalStrength="82" secure="true"><securityTypes><type>wpa_or_wpa2</type></securityTypes></item>`, esc(current))+
+		`<item ssid="Neighbour 5G" signalStrength="55" secure="true"><securityTypes><type>wpa_or_wpa2</type></securityTypes></item>`+
+		`<item ssid="CoffeeBar Free" signalStrength="28" secure="false"><securityTypes/></item>`+
+		`</items></performWirelessSiteSurvey>`)
+}
+
+// postWirelessProfile records a joined network so /networkInfo reflects the switch,
+// mirroring how the firmware brings the new profile up.
+func (s *Speaker) postWirelessProfile(w http.ResponseWriter, r *http.Request) {
+	var p struct {
+		Profile struct {
+			SSID string `xml:"ssid,attr"`
+		} `xml:"profile"`
+	}
+	if !decode(w, r, &p) {
+		return
+	}
+	if p.Profile.SSID != "" {
+		s.mu.Lock()
+		s.wifiSSID = p.Profile.SSID
+		s.mu.Unlock()
+	}
+	writeXML(w, "<status>/addWirelessProfile</status>")
 }
 
 func (s *Speaker) getZone(w http.ResponseWriter, _ *http.Request) {

@@ -1,5 +1,6 @@
 import styled from 'styled-components';
 import { Button } from '../../../atoms/Button';
+import { FormSection } from '../../../molecules/Field';
 
 // .spk-scan — multiroom scan button: the dark variant of .update-btn. Its label
 // is --bg (not #fff) so it inverts with the theme: dark button + light label in
@@ -90,4 +91,71 @@ export const MenuChev = styled.span`
   display: grid;
   place-items: center;
   flex-shrink: 0;
+`;
+
+// .wifi-row — one network in the Wi-Fi list. Selectable rows are buttons; the
+// connected row and skeletons render as plain divs (as="div").
+export const WifiRow = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  & + & { border-top: 1px solid var(--border); }
+`;
+
+// Leading accessory slot (the connected check). Fixed width so the SSID lines up.
+export const WifiLead = styled.span`
+  width: 22px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+`;
+
+export const WifiText = styled.span`
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+`;
+
+export const WifiName = styled.span`
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  ${(p) => p.$active && `color: var(--accent);`}
+`;
+
+export const WifiSub = styled.span`
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-3);
+`;
+
+// Trailing accessories (lock + signal glyph), dimmed like iOS.
+export const WifiTrail = styled.span`
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink-3);
+  flex-shrink: 0;
+`;
+
+// A section header that can carry a trailing spinner while a scan is running.
+export const WifiHead = styled(FormSection)`
+  display: flex;
+  align-items: center;
+  gap: 8px;
 `;

@@ -174,6 +174,20 @@ export async function saveSettings(patch) {
   return send('/api/settings', 'PUT', patch);
 }
 
+// Wi-Fi — scan nearby networks and switch the speaker onto one. The scan is a site
+// survey on the speaker (slow; show a spinner) and may come back empty on some
+// hardware, in which case the UI lets the user type the SSID in. Each network is
+// { ssid, signal, secure }.
+export async function scanWifi() {
+  try { return (await getJSON('/api/wifi/scan'))?.networks || []; } catch { return []; }
+}
+
+// setWifi joins the speaker to a network. security is 'wpa_or_wpa2' | 'wep' | 'none'.
+// Changing networks can briefly drop the speaker (and this app) — warn first.
+export async function setWifi({ ssid, security, password }) {
+  return send('/api/wifi', 'POST', { ssid, security, password });
+}
+
 // Settings login. Settings are open until a password is set; after that the
 // settings side of the API answers 401 without a session cookie.
 

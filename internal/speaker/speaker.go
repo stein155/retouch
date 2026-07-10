@@ -391,6 +391,114 @@ func prettySignal(s string) string {
 	}
 }
 
+// WifiNetwork is one nearby Wi-Fi network seen during a site survey (see ScanWifi).
+type WifiNetwork struct {
+	SSID   string `json:"ssid"`
+	Signal string `json:"signal,omitempty"` // "excellent" | "good" | "fair" | "poor"
+	Secure bool   `json:"secure"`           // needs a password to join
+}
+
+// ScanWifi surveys nearby Wi-Fi networks via the native /performWirelessSiteSurvey
+// endpoint (:8090). Not every model exposes it (the firmware gates it behind its
+// supportedUris), so a device that can't survey returns an error here — the web
+// layer turns that into an empty list and the UI falls back to manual SSID entry.
+//
+// A site survey makes the radio sweep every channel, which takes many seconds —
+// far longer than the shared client's short timeout — so it runs on a dedicated
+// long-timeout request bounded by ctx.
+func (c *Client) ScanWifi(ctx context.Context) ([]WifiNetwork, error) {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.urlFor("/performWirelessSiteSurvey"), nil)
+	resp, err := (&http.Client{Timeout: 25 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET /performWirelessSiteSurvey status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return nil, err
+	}
+	return parseSiteSurvey(body), nil
+}
+
+// parseSiteSurvey reads the /performWirelessSiteSurvey response:
+//
+//	<performWirelessSiteSurvey><items>
+//	  <item ssid="Home" signalStrength="72" secure="true">
+//	    <securityTypes><type>wpa_or_wpa2</type></securityTypes>
+//	  </item>
+//	</items></performWirelessSiteSurvey>
+//
+// Networks without an SSID (hidden) are skipped and duplicate SSIDs collapsed.
+func parseSiteSurvey(body []byte) []WifiNetwork {
+	var x struct {
+		Items []struct {
+			SSID           string `xml:"ssid,attr"`
+			SignalStrength string `xml:"signalStrength,attr"`
+			Secure         string `xml:"secure,attr"`
+		} `xml:"items>item"`
+	}
+	if err := xml.Unmarshal(body, &x); err != nil {
+		return nil
+	}
+	var out []WifiNetwork
+	seen := map[string]bool{}
+	for _, it := range x.Items {
+		if it.SSID == "" || seen[it.SSID] {
+			continue
+		}
+		seen[it.SSID] = true
+		out = append(out, WifiNetwork{
+			SSID:   it.SSID,
+			Signal: signalStrengthToken(it.SignalStrength),
+			Secure: !strings.EqualFold(it.Secure, "false") && it.Secure != "0",
+		})
+	}
+	return out
+}
+
+// signalStrengthToken buckets the survey's numeric signalStrength (0..100) into the
+// same tokens NetworkInfo uses, so the UI can localise it. Anything unparseable or
+// out of range yields "" and the UI then shows no signal label.
+func signalStrengthToken(s string) string {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 0 || n > 100 {
+		return ""
+	}
+	switch {
+	case n >= 75:
+		return "excellent"
+	case n >= 50:
+		return "good"
+	case n >= 25:
+		return "fair"
+	default:
+		return "poor"
+	}
+}
+
+// SetWifi joins a Wi-Fi network via the native /addWirelessProfile endpoint (:8090).
+// security is "none", "wep" or "wpa_or_wpa2" (the default). Switching networks can
+// briefly drop the speaker's current connection, so the caller warns the user first.
+func (c *Client) SetWifi(ctx context.Context, ssid, security, password string) error {
+	ssid = strings.TrimSpace(ssid)
+	if ssid == "" {
+		return fmt.Errorf("ssid required")
+	}
+	switch security {
+	case "", "wpa_or_wpa2":
+		security = "wpa_or_wpa2"
+	case "none", "wep":
+	default:
+		return fmt.Errorf("unknown security %q", security)
+	}
+	body := fmt.Sprintf(`<AddWirelessProfile timeout="30"><profile ssid="%s" password="%s" securityType="%s"/></AddWirelessProfile>`,
+		xmlEsc(ssid), xmlEsc(password), security)
+	return c.post(ctx, "/addWirelessProfile", body)
+}
+
 // StorePreset writes a native preset on the speaker (slot 1..6) via /storePreset,
 // so it persists as a real button — exactly what the web UI's "save preset" needs.
 func (c *Client) StorePreset(ctx context.Context, slot int, source, itemType, location, name, art string) error {
