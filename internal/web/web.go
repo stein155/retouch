@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/stein155/retouch/internal/discover"
+	"github.com/stein155/retouch/internal/display"
 	"github.com/stein155/retouch/internal/nowplaying"
 	"github.com/stein155/retouch/internal/plugins"
 	"github.com/stein155/retouch/internal/release"
@@ -73,6 +74,7 @@ type Server struct {
 	proxy     *http.Client     // for the same-origin TuneIn / logo proxies
 	hub       *hub             // pushes live state to browsers over SSE (/api/events)
 	plugins   *plugins.Manager // installs/supervises/proxies plugins; nil off-speaker
+	display   *display.Manager // ST20 OLED arbiter; nil-safe when absent
 	sideload  bool             // allow unverified plugin uploads (-allow-sideload)
 }
 
@@ -216,6 +218,12 @@ func (s *Server) Handler() http.Handler {
 	// health and config endpoints all fall through to the proxy. The proxy is
 	// registered per method (not as an all-method catch-all) so its pattern stays
 	// comparable to "GET /" — an all-method catch-all conflicts with it and panics.
+	// The display endpoints are loopback-only (see display.go): plugins run on
+	// the speaker itself and nothing on the LAN may write to the panel.
+	mux.HandleFunc("GET /api/display", s.displayInfo)
+	mux.HandleFunc("POST /api/display/notify", s.displayNotify)
+	mux.HandleFunc("PUT /api/display/standby", s.displaySetStandby)
+	mux.HandleFunc("DELETE /api/display/standby", s.displayClearStandby)
 	// Plugins are part of the password-gated settings sheet: installing, removing,
 	// sideloading (arbitrary-code) and the config proxy (which reaches a plugin's
 	// own config API, where account credentials live) all change or expose the
