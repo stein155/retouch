@@ -37,6 +37,13 @@ func Catalog() []CatalogEntry {
 			Asset:       "retouch-homekit-armv7l",
 		},
 		{
+			Name:        "afvalwijzer",
+			Title:       "Afvalwijzer",
+			Description: "Show the next Dutch waste pickup on the SoundTouch 20 display and optionally announce it through the speaker at set times.",
+			Repo:        "stein155/retouch-afvalwijzer",
+			Asset:       "retouch-afvalwijzer-armv7l",
+		},
+		{
 			Name:        "ring",
 			Title:       "Ring chime",
 			Description: "Play a chime through this speaker when a Ring doorbell is pressed or motion is detected.",
