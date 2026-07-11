@@ -45,6 +45,22 @@ const downloadTimeout = 5 * time.Minute
 // (beta-pr-<number>), so the app can show "PR #<n>" and accept it as a target.
 var betaPRRe = regexp.MustCompile(`^beta-pr-(\d+)$`)
 
+// requireSig reports whether installing tag must verify SHA256SUMS.sig. When
+// signing is enabled it is required for everything except an explicitly-requested
+// beta: betas are built by the Beta Build workflow (which never holds the signing
+// key) so they ship no signature, and they are maintainer-triggered opt-in. The
+// exemption holds only when the tag was explicitly chosen — the auto/latest path
+// must never accept an unsigned beta, or a compromised repo could publish a stable
+// release tagged beta-pr-<n>, have releases/latest serve it, and reach root on
+// every speaker with TLS+checksum only, defeating the signing this key enforces.
+func requireSig(tag string, explicit bool) bool {
+	if releasePublicKey == "" {
+		return false
+	}
+	_, isBeta := BetaPR(tag)
+	return !(isBeta && explicit)
+}
+
 // BetaPR extracts the PR number from a beta-pr-<n> tag.
 func BetaPR(tag string) (int, bool) {
 	m := betaPRRe.FindStringSubmatch(tag)
@@ -127,6 +143,7 @@ func (m *Manager) Start(ctx context.Context, tag string) (target string, current
 		return "", false, ErrBusy
 	}
 	target = strings.TrimSpace(tag)
+	explicit := target != "" // a user-picked tag, vs the auto/latest path
 	if target == "" {
 		latest, err := m.Latest(ctx)
 		if err != nil {
@@ -155,7 +172,7 @@ func (m *Manager) Start(ctx context.Context, tag string) (target string, current
 		m.mu.Unlock()
 		return target, true, nil
 	}
-	m.install(target)
+	m.install(target, explicit)
 	return target, false, nil
 }
 
@@ -227,11 +244,11 @@ func (m *Manager) isOffered(ctx context.Context, tag string) (bool, error) {
 // install downloads and swaps in release `to`, then restarts — in the background.
 // The caller must already hold mu (via TryLock); install hands the lock off to the
 // goroutine and releases it when the install finishes or fails.
-func (m *Manager) install(to string) {
+func (m *Manager) install(to string, explicit bool) {
 	from := m.version
 	go func() {
 		defer m.mu.Unlock()
-		if err := m.installRelease(context.Background(), to); err != nil {
+		if err := m.installRelease(context.Background(), to, explicit); err != nil {
 			m.log.Warn("self-update failed", "from", from, "to", to, "err", err)
 			return
 		}
@@ -240,7 +257,7 @@ func (m *Manager) install(to string) {
 	}()
 }
 
-func (m *Manager) installRelease(ctx context.Context, tag string) error {
+func (m *Manager) installRelease(ctx context.Context, tag string, explicit bool) error {
 	bin := filepath.Join(m.homeDir, "retouch")
 	newBin := bin + ".new"
 	sums := filepath.Join(m.homeDir, "SHA256SUMS")
@@ -257,7 +274,8 @@ func (m *Manager) installRelease(ctx context.Context, tag string) error {
 	// built from PR code by the Beta Build workflow, which must never be given
 	// the release signing key, so a beta ships no SHA256SUMS.sig. Betas stay
 	// gated by being maintainer-triggered, opt-in prereleases over TLS + checksum.
-	if _, isBeta := BetaPR(tag); releasePublicKey != "" && !isBeta {
+	//
+	if requireSig(tag, explicit) {
 		sig := filepath.Join(m.homeDir, "SHA256SUMS.sig")
 		if err := m.downloadFile(ctx, base+"/SHA256SUMS.sig", sig, 0o644); err != nil {
 			_ = os.Remove(newBin)
@@ -302,7 +320,10 @@ func (m *Manager) getJSON(ctx context.Context, target string, out any) error {
 func (m *Manager) downloadFile(ctx context.Context, target, path string, mode fs.FileMode) error {
 	ctx, cancel := context.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
-	client := &http.Client{Timeout: downloadTimeout}
+	// Use the same SSRF-safe transport as the API lookups (m.client's 12s timeout
+	// is too short for a binary, so this is a fresh client, not the shared one):
+	// without it a 302 or DNS rebind on the artifact host could reach loopback/RFC1918.
+	client := &http.Client{Timeout: downloadTimeout, Transport: release.SafeTransport()}
 	return release.Download(ctx, client, "ReTouch/"+m.version, target, path, mode)
 }
 

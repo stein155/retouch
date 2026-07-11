@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -24,6 +25,12 @@ import (
 	"syscall"
 	"time"
 )
+
+// maxArtifact caps a single downloaded artifact. Generous for a stripped ARMv7
+// binary or a plugin, but bounds the write on the speaker's small flash so a
+// hostile/compromised release host can't stream unbounded data to fill it (the
+// checksum is only verified after the whole file is written).
+const maxArtifact = 64 << 20
 
 // GetJSON fetches url with client and decodes the (bounded) JSON body into out.
 // ua sets the User-Agent so GitHub doesn't reject the request.
@@ -64,7 +71,10 @@ func Download(ctx context.Context, client *http.Client, ua, url, dst string, mod
 	if err != nil {
 		return err
 	}
-	_, copyErr := io.Copy(f, resp.Body)
+	n, copyErr := io.Copy(f, io.LimitReader(resp.Body, maxArtifact+1))
+	if copyErr == nil && n > maxArtifact {
+		copyErr = errors.New(url + ": artifact exceeds size limit")
+	}
 	closeErr := f.Close()
 	if copyErr != nil {
 		_ = os.Remove(dst)

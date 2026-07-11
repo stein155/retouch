@@ -216,13 +216,18 @@ func (s *Server) Handler() http.Handler {
 	// health and config endpoints all fall through to the proxy. The proxy is
 	// registered per method (not as an all-method catch-all) so its pattern stays
 	// comparable to "GET /" — an all-method catch-all conflicts with it and panics.
+	// Plugins are part of the password-gated settings sheet: installing, removing,
+	// sideloading (arbitrary-code) and the config proxy (which reaches a plugin's
+	// own config API, where account credentials live) all change or expose the
+	// speaker's configuration, so they sit behind requireAuth like the settings
+	// routes above. GET list/latest stay open (informational, like GET /api/settings).
 	mux.HandleFunc("GET /api/plugins", s.listPlugins)
 	mux.HandleFunc("GET /api/plugins/{name}/latest", s.pluginLatest)
-	mux.HandleFunc("POST /api/plugins/{name}/install", s.installPlugin)
-	mux.HandleFunc("POST /api/plugins/{name}/upload", s.uploadPlugin)
-	mux.HandleFunc("DELETE /api/plugins/{name}", s.removePlugin)
+	mux.HandleFunc("POST /api/plugins/{name}/install", s.requireAuth(s.installPlugin))
+	mux.HandleFunc("POST /api/plugins/{name}/upload", s.requireAuth(s.uploadPlugin))
+	mux.HandleFunc("DELETE /api/plugins/{name}", s.requireAuth(s.removePlugin))
 	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
-		mux.HandleFunc(method+" /api/plugins/{name}/{path...}", s.proxyPlugin)
+		mux.HandleFunc(method+" /api/plugins/{name}/{path...}", s.requireAuth(s.proxyPlugin))
 	}
 	// Everything else is the embedded single-page UI. More specific /api/...
 	// patterns above win; this serves index.html, assets and icons.

@@ -71,6 +71,14 @@ func TestAuthLockAndLogin(t *testing.T) {
 		{"GET", "/api/debug", ""},
 		{"GET", "/api/mqtt/status", ""},
 		{"POST", "/api/auth/password", `{"newPassword":"anders"}`},
+		// Plugins are part of the gated settings sheet: install/remove/sideload
+		// (arbitrary-code) and the config proxy must demand a login. requireAuth
+		// runs before any catalog lookup, so the plugin name is a placeholder.
+		{"POST", "/api/plugins/example/install", `{}`},
+		{"POST", "/api/plugins/example/upload", ``},
+		{"DELETE", "/api/plugins/example", ``},
+		{"GET", "/api/plugins/example/manifest", ``},
+		{"POST", "/api/plugins/example/action/x", `{}`},
 	} {
 		if rec := do(t, h, c.method, c.path, c.body); rec.Code != 401 {
 			t.Errorf("%s %s without login: %d, want 401", c.method, c.path, rec.Code)

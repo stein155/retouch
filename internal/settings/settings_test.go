@@ -51,9 +51,14 @@ func TestOpenCorruptFileFallsBackToDefault(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{not valid json"), 0o644); err != nil {
 		t.Fatalf("write corrupt: %v", err)
 	}
-	// Open ignores unmarshal errors, so the default must survive.
+	// A corrupt file falls back to defaults but must not be silently discarded:
+	// it is preserved as .corrupt so a wiped admin password/MQTT creds can be
+	// recovered instead of vanishing.
 	s := Open(path)
 	if got := s.Get().Language; got != "en" {
 		t.Fatalf("corrupt-file Language = %q, want default \"en\"", got)
+	}
+	if _, err := os.Stat(path + ".corrupt"); err != nil {
+		t.Fatalf("corrupt file not preserved as .corrupt: %v", err)
 	}
 }
