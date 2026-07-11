@@ -74,9 +74,12 @@ function SliderField({ field, value, onChange }: {
 }) {
   const min = field.min ?? 0;
   const max = field.max ?? 100;
-  const step = field.step ?? 1;
+  const step = field.step || 1;
   const num = Number(value);
   const cur = Number.isFinite(num) && value !== '' ? Math.min(max, Math.max(min, num)) : min;
+  // The slider works in whole step units (BassSlider moves by 1), so arrow
+  // keys advance by one step instead of being rounded back in place.
+  const toStep = (v: number) => Math.round(v / step);
   return (
     <SliderRow>
       <SliderHead>
@@ -84,11 +87,11 @@ function SliderField({ field, value, onChange }: {
         <SliderVal>{cur}{field.unit || ''}</SliderVal>
       </SliderHead>
       <BassSlider
-        value={cur}
-        min={min}
-        max={max}
-        origin={min}
-        onChange={(v) => onChange(String(Math.round(v / step) * step))}
+        value={toStep(cur)}
+        min={toStep(min)}
+        max={toStep(max)}
+        origin={toStep(min)}
+        onChange={(v) => onChange(String(v * step))}
       />
     </SliderRow>
   );
