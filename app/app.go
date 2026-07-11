@@ -144,10 +144,16 @@ func Run() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	// -speaker-host may carry an explicit port (speaker.New splits it the
+	// same way); only default to 8090 when none is given.
+	speakerAPI := *host
+	if _, _, err := net.SplitHostPort(speakerAPI); err != nil {
+		speakerAPI = net.JoinHostPort(speakerAPI, "8090")
+	}
 	// The ST20 front-panel OLED: internal/display is the single writer to
 	// /dev/fb0; plugins hand it content via the /api/display endpoints. On
 	// models without the panel the manager is a no-op.
-	disp := display.New(ctx, "/dev/fb0", net.JoinHostPort(*host, "8090"), func(c context.Context) bool {
+	disp := display.New(ctx, "/dev/fb0", speakerAPI, func(c context.Context) bool {
 		np, err := bc.NowPlaying(c)
 		return err == nil && np.Source == "STANDBY"
 	}, logger.With("comp", "display"))
@@ -204,7 +210,7 @@ func Run() {
 	// this web server. Lives under the same home dir as the presets/state.
 	speakerAddr := *host
 	if _, _, err := net.SplitHostPort(speakerAddr); err != nil {
-		speakerAddr = net.JoinHostPort(*host, "8090")
+		speakerAddr = speakerAPI
 	}
 	webHost := *listen
 	if strings.HasPrefix(webHost, ":") {

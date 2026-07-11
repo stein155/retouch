@@ -206,3 +206,37 @@ func TestClockUntouchedWhenUserDisabled(t *testing.T) {
 		t.Fatal("posted clock config although the user had the clock off")
 	}
 }
+
+func TestClockRestoredEvenWithoutShownFrame(t *testing.T) {
+	current := `<clockDisplay><clockConfig userEnable="true" /></clockDisplay>`
+	var posts []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.Method == "POST" {
+			b, _ := io.ReadAll(r.Body)
+			posts = append(posts, string(b))
+			current = string(b)
+			return
+		}
+		_, _ = w.Write([]byte(current))
+	}))
+	defer srv.Close()
+
+	// A manager whose framebuffer path is unwritable: suppress succeeds but
+	// Draw never lands, so shown stays nil.
+	m, _ := newTestManager(t, true)
+	m.speaker = strings.TrimPrefix(srv.URL, "http://")
+	m.fb = oled.NewFramebuffer(filepath.Join(t.TempDir(), "missing", "fb0"))
+
+	m.SetStandby("a", Content{Icon: "groen", Text: "x"})
+	m.step(context.Background()) // suppresses, draw fails
+	m.ClearStandby("a")
+	m.step(context.Background()) // must restore the clock anyway
+	mu.Lock()
+	defer mu.Unlock()
+	if len(posts) != 2 || !strings.Contains(posts[1], `userEnable="true"`) {
+		t.Fatalf("clock left suppressed: %q", posts)
+	}
+}

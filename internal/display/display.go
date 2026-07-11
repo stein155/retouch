@@ -165,8 +165,11 @@ func (m *Manager) step(ctx context.Context) {
 			if err := m.fb.Restore(); err == nil {
 				m.setShown(nil)
 			}
-			m.restoreClock(ctx)
 		}
+		// Unconditional (no-op when untouched): the clock may have been
+		// suppressed without a frame ever landing, e.g. when the first Draw
+		// failed — it must still come back.
+		m.restoreClock(ctx)
 		return
 	}
 	if shown == nil {
