@@ -115,7 +115,13 @@ func (e *Enricher) Track(id string) (string, bool) {
 // Best-effort: with nothing cached yet the UI just shows the station until the
 // next poll fills it in.
 func (e *Enricher) Enrich(np *speaker.NowPlaying) {
-	if np == nil || !strings.HasPrefix(np.StationID, "s") {
+	if np == nil {
+		return
+	}
+	if np.Art == speaker.InternetRadioIcon {
+		np.Art = ""
+	}
+	if !strings.HasPrefix(np.StationID, "s") {
 		return
 	}
 	if np.PlayStatus != "" && np.PlayStatus != "PLAY_STATE" && np.PlayStatus != "BUFFERING_STATE" {

@@ -768,6 +768,17 @@ func (s *Server) presets(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, s.store.All())
 		return
 	}
+	// The speaker-side preset art is the local display icon (a file:// path
+	// browsers can't load); serve the station's real logo from the local
+	// store instead, falling back to none.
+	for i := range ps {
+		if ps[i].Logo == speaker.InternetRadioIcon {
+			ps[i].Logo = ""
+			if lp, ok := s.store.Get(ps[i].Slot); ok && lp.StationID == ps[i].StationID {
+				ps[i].Logo = lp.Logo
+			}
+		}
+	}
 	writeJSON(w, 200, ps)
 }
 
@@ -787,12 +798,12 @@ func (s *Server) setPreset(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 	loc := "/v1/playback/station/" + p.StationID
-	if err := s.speaker.StorePreset(ctx, slot, "TUNEIN", "stationurl", loc, p.Name, p.Logo); err != nil {
+	if err := s.speaker.StorePreset(ctx, slot, "TUNEIN", "stationurl", loc, p.Name, speaker.InternetRadioIcon); err != nil {
 		s.fail(w, "save failed", err)
 		return
 	}
 	if s.mirror != nil {
-		s.mirror.MirrorPreset(slot, p.Name, loc, p.Logo)
+		s.mirror.MirrorPreset(slot, p.Name, loc, speaker.InternetRadioIcon)
 	}
 	// Keep the local store in sync: it is the fallback GET /api/presets serves
 	// when the speaker is unreachable, so it must reflect edits made here.
@@ -863,7 +874,7 @@ func (s *Server) playStationID(w http.ResponseWriter, r *http.Request, stationID
 	defer cancel()
 	s.speaker.Wake(ctx)
 	loc := "/v1/playback/station/" + stationID
-	if err := s.speaker.Select(ctx, "TUNEIN", "stationurl", loc, name, ""); err != nil {
+	if err := s.speaker.Select(ctx, "TUNEIN", "stationurl", loc, name, "", speaker.InternetRadioIcon); err != nil {
 		s.fail(w, "play failed", err)
 		return
 	}

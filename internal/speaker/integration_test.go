@@ -101,7 +101,7 @@ func TestNowPlayingStandbyThenSelect(t *testing.T) {
 	}
 
 	const loc = "/v1/playback/station/s47309"
-	if err := c.Select(ctx(), "TUNEIN", "stationurl", loc, "NPO Radio 2", ""); err != nil {
+	if err := c.Select(ctx(), "TUNEIN", "stationurl", loc, "NPO Radio 2", "", InternetRadioIcon); err != nil {
 		t.Fatal(err)
 	}
 	np, err = c.NowPlaying(ctx())
@@ -114,11 +114,14 @@ func TestNowPlayingStandbyThenSelect(t *testing.T) {
 	if np.StationID != "s47309" {
 		t.Errorf("StationID = %q, want s47309", np.StationID)
 	}
+	if np.Art != InternetRadioIcon {
+		t.Errorf("Art = %q, want internet radio icon", np.Art)
+	}
 }
 
 func TestKeyPauseResumes(t *testing.T) {
 	_, c := newSim(t)
-	_ = c.Select(ctx(), "TUNEIN", "stationurl", "/v1/playback/station/s1", "X", "")
+	_ = c.Select(ctx(), "TUNEIN", "stationurl", "/v1/playback/station/s1", "X", "", "")
 	if err := c.Key(ctx(), "PAUSE"); err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +226,7 @@ func TestWakeSkipsWhenAlreadyAwake(t *testing.T) {
 	_, c := newSim(t)
 	// Put the speaker on a station (awake). `sys power` is a toggle, so a naive
 	// Wake here would switch it OFF; Wake must detect it's already awake and no-op.
-	if err := c.Select(ctx(), "TUNEIN", "stationurl", "/v1/playback/station/s1", "X", ""); err != nil {
+	if err := c.Select(ctx(), "TUNEIN", "stationurl", "/v1/playback/station/s1", "X", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	c.Wake(ctx())

@@ -15,6 +15,10 @@ import (
 	"time"
 )
 
+// InternetRadioIcon is the stock SoundTouch local display asset for internet
+// radio. ST20 can render this file path on its OLED; browsers cannot.
+const InternetRadioIcon = "file:///opt/Bose/Internet-Radio.png"
+
 // Client controls one speaker.
 type Client struct {
 	host    string
@@ -574,8 +578,8 @@ func (c *Client) PlayPreset(ctx context.Context, slot int) error {
 // our local BMX service and plays it itself, so now_playing reports the real
 // source (TUNEIN), not UPNP. location is a service-relative path such as
 // "/v1/playback/station/s47309".
-func (c *Client) Select(ctx context.Context, source, itemType, location, name, account string) error {
-	return c.post(ctx, "/select", contentItemXML(source, itemType, location, account, name, ""))
+func (c *Client) Select(ctx context.Context, source, itemType, location, name, account, art string) error {
+	return c.post(ctx, "/select", contentItemXML(source, itemType, location, account, name, art))
 }
 
 // Member is one speaker in a multiroom zone: its deviceID (which is also the
