@@ -5,9 +5,14 @@ import (
 	"context"
 	"image"
 	"image/png"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,13 +26,13 @@ func newTestManager(t *testing.T, standby bool) (*Manager, string) {
 	if err := os.WriteFile(path, orig, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m := New(context.Background(), path, func(context.Context) bool { return standby },
+	m := New(context.Background(), path, "", func(context.Context) bool { return standby },
 		slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	return m, path
 }
 
 func TestUnavailableIsNoop(t *testing.T) {
-	m := New(context.Background(), filepath.Join(t.TempDir(), "missing"), nil,
+	m := New(context.Background(), filepath.Join(t.TempDir(), "missing"), "", nil,
 		slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	if m.Available() {
 		t.Fatal("missing fb reported available")
@@ -132,5 +137,106 @@ func TestDumpScreens(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.Close()
+	}
+}
+
+func TestClockSuppressedWhileShownAndRestored(t *testing.T) {
+	var mu sync.Mutex
+	current := `<clockDisplay><clockConfig timezoneInfo="Europe/Amsterdam" userEnable="true" timeFormat="TIME_FORMAT_24HOUR_ID" userOffsetMinute="0" brightnessLevel="70" userUtcTime="0" /></clockDisplay>`
+	var posts []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/clockDisplay" {
+			http.NotFound(w, r)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if r.Method == "POST" {
+			b, _ := io.ReadAll(r.Body)
+			posts = append(posts, string(b))
+			current = string(b)
+			return
+		}
+		_, _ = w.Write([]byte(current))
+	}))
+	defer srv.Close()
+
+	m, _ := newTestManager(t, true)
+	m.speaker = strings.TrimPrefix(srv.URL, "http://")
+
+	m.SetStandby("afvalwijzer", Content{Icon: "groen", Text: "x"})
+	m.step(context.Background())
+	mu.Lock()
+	if len(posts) != 1 || !strings.Contains(posts[0], `userEnable="false"`) {
+		t.Fatalf("clock not suppressed: %q", posts)
+	}
+	mu.Unlock()
+
+	m.step(context.Background()) // no re-suppress while already saved
+	mu.Lock()
+	if len(posts) != 1 {
+		t.Fatalf("re-suppressed: %d posts", len(posts))
+	}
+	mu.Unlock()
+
+	m.ClearStandby("afvalwijzer")
+	m.step(context.Background())
+	mu.Lock()
+	defer mu.Unlock()
+	if len(posts) != 2 || !strings.Contains(posts[1], `userEnable="true"`) {
+		t.Fatalf("clock not restored: %q", posts)
+	}
+}
+
+func TestClockUntouchedWhenUserDisabled(t *testing.T) {
+	posts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			posts++
+			return
+		}
+		_, _ = w.Write([]byte(`<clockDisplay><clockConfig userEnable="false" /></clockDisplay>`))
+	}))
+	defer srv.Close()
+	m, _ := newTestManager(t, true)
+	m.speaker = strings.TrimPrefix(srv.URL, "http://")
+	m.SetStandby("a", Content{Icon: "groen", Text: "x"})
+	m.step(context.Background())
+	if posts != 0 {
+		t.Fatal("posted clock config although the user had the clock off")
+	}
+}
+
+func TestClockRestoredEvenWithoutShownFrame(t *testing.T) {
+	current := `<clockDisplay><clockConfig userEnable="true" /></clockDisplay>`
+	var posts []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.Method == "POST" {
+			b, _ := io.ReadAll(r.Body)
+			posts = append(posts, string(b))
+			current = string(b)
+			return
+		}
+		_, _ = w.Write([]byte(current))
+	}))
+	defer srv.Close()
+
+	// A manager whose framebuffer path is unwritable: suppress succeeds but
+	// Draw never lands, so shown stays nil.
+	m, _ := newTestManager(t, true)
+	m.speaker = strings.TrimPrefix(srv.URL, "http://")
+	m.fb = oled.NewFramebuffer(filepath.Join(t.TempDir(), "missing", "fb0"))
+
+	m.SetStandby("a", Content{Icon: "groen", Text: "x"})
+	m.step(context.Background()) // suppresses, draw fails
+	m.ClearStandby("a")
+	m.step(context.Background()) // must restore the clock anyway
+	mu.Lock()
+	defer mu.Unlock()
+	if len(posts) != 2 || !strings.Contains(posts[1], `userEnable="true"`) {
+		t.Fatalf("clock left suppressed: %q", posts)
 	}
 }
