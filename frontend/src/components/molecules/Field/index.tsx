@@ -6,6 +6,7 @@ export {
   FieldRow,
   FieldRowLabel,
   FieldRowInput,
+  FieldRowSelect,
   FieldRowValue,
   Select,
   SelectWrap,

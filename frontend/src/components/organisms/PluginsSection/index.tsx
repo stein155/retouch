@@ -5,7 +5,7 @@ import { Button } from '../../atoms/Button';
 import { Toggle } from '../../atoms/Toggle';
 import { QRCode } from '../../atoms/QRCode';
 import {
-  FieldHint, FieldCard, FieldRow, FieldRowLabel, FieldRowInput, FieldRowValue, SetEyebrow,
+  FieldHint, FieldCard, FieldRow, FieldRowLabel, FieldRowInput, FieldRowSelect, FieldRowValue, SetEyebrow,
 } from '../../molecules/Field';
 import { useI18n } from '../../../lib/i18n';
 import {
@@ -28,6 +28,7 @@ type ManifestFieldT = ManifestField & {
   code?: string;
   placeholder?: string;
   value?: string | boolean;
+  options?: { value: string; label?: string }[];
 };
 type ManifestToggleT = { key: string; label?: string; value?: unknown };
 type ManifestRowT = { id: string; label?: string; toggles?: ManifestToggleT[] };
@@ -185,6 +186,16 @@ function PluginPanel({ name }: { name: string }) {
                       aria-label={f.label}
                       style={{ marginLeft: 'auto' }}
                     />
+                  ) : f.type === 'select' ? (
+                    <FieldRowSelect
+                      id={`pl-${name}-${f.key}`}
+                      value={(values[f.key] as string) ?? ''}
+                      onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                    >
+                      {(f.options || []).map((o) => (
+                        <option key={o.value} value={o.value}>{o.label || o.value}</option>
+                      ))}
+                    </FieldRowSelect>
                   ) : (
                     <FieldRowInput
                       id={`pl-${name}-${f.key}`}
