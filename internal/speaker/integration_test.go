@@ -219,6 +219,20 @@ func TestWakeFromStandby(t *testing.T) {
 	}
 }
 
+func TestWakeSkipsWhenAlreadyAwake(t *testing.T) {
+	_, c := newSim(t)
+	// Put the speaker on a station (awake). `sys power` is a toggle, so a naive
+	// Wake here would switch it OFF; Wake must detect it's already awake and no-op.
+	if err := c.Select(ctx(), "TUNEIN", "stationurl", "/v1/playback/station/s1", "X", ""); err != nil {
+		t.Fatal(err)
+	}
+	c.Wake(ctx())
+	np, _ := c.NowPlaying(ctx())
+	if np.Source == "STANDBY" {
+		t.Errorf("Wake toggled an already-awake speaker into standby: %+v", np)
+	}
+}
+
 func TestTrebleRoundTrip(t *testing.T) {
 	_, c := newSim(t)
 	tr, err := c.Treble(ctx())

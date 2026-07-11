@@ -353,15 +353,23 @@ function CatalogPlugin({ entry, onChanged, sideloadAllowed }: {
   const [err, setErr] = useState('');
   const fileRef = useRef<HTMLInputElement | null>(null);
 
+  // Reset busy in finally, not only on error: on success the component usually
+  // unmounts (the plugin moves to "installed"), but if the refresh doesn't yet
+  // reflect it (plugin still registering), relying on unmount left the button
+  // wedged on "Installing…". finally clears it either way.
   const install = async () => {
     setBusy(true); setErr('');
-    try { await installPlugin(entry.name); onChanged(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
+    try { await installPlugin(entry.name); onChanged(); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
   };
 
   const sideload = async (file: File | undefined) => {
     if (!file) return;
     setBusy(true); setErr('');
-    try { await uploadPlugin(entry.name, file); onChanged(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
+    try { await uploadPlugin(entry.name, file); onChanged(); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
   };
 
   // Catalog entries carry English title/description from the server; prefer a

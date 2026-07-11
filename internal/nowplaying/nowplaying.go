@@ -162,6 +162,19 @@ func (e *Enricher) refresh(id string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 
+	// This goroutine parses untrusted stream/ICY/artwork data. If any of that
+	// panics, clear the entry's `fetching` flag so the station isn't wedged
+	// forever — the Enrich/Track guard skips a station while fetching is true, so
+	// a leaked flag would stop it ever refreshing again (and exempt it from
+	// eviction). Best-effort empty entry, retried after the TTL.
+	defer func() {
+		if r := recover(); r != nil {
+			e.mu.Lock()
+			e.cache[id] = entry{at: time.Now()}
+			e.mu.Unlock()
+		}
+	}()
+
 	var ent entry
 	// Primary: the standard ICY metadata in the stream itself.
 	if url := e.streamURL(ctx, id); url != "" {
