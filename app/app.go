@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/stein155/retouch/internal/autopair"
+	"github.com/stein155/retouch/internal/display"
 	"github.com/stein155/retouch/internal/habridge"
 	"github.com/stein155/retouch/internal/marge"
 	"github.com/stein155/retouch/internal/mdns"
@@ -142,6 +143,15 @@ func Run() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+
+	// The ST20 front-panel OLED: internal/display is the single writer to
+	// /dev/fb0; plugins hand it content via the /api/display endpoints. On
+	// models without the panel the manager is a no-op.
+	disp := display.New(ctx, "/dev/fb0", func(c context.Context) bool {
+		np, err := bc.NowPlaying(c)
+		return err == nil && np.Source == "STANDBY"
+	}, logger.With("comp", "display"))
+	webSrv.SetDisplay(disp)
 
 	// Keep the speaker paired to our marge account so native sources stay enabled.
 	pairer := autopair.New(bc, info.Account, autopair.DefaultAuthToken, *pairEvery, logger.With("comp", "autopair"))
