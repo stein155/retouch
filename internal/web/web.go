@@ -760,9 +760,15 @@ func (s *Server) presets(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, s.store.All())
 		return
 	}
+	// The speaker-side preset art is the local display icon (a file:// path
+	// browsers can't load); serve the station's real logo from the local
+	// store instead, falling back to none.
 	for i := range ps {
 		if ps[i].Logo == speaker.InternetRadioIcon {
 			ps[i].Logo = ""
+			if lp, ok := s.store.Get(ps[i].Slot); ok && lp.StationID == ps[i].StationID {
+				ps[i].Logo = lp.Logo
+			}
 		}
 	}
 	writeJSON(w, 200, ps)

@@ -166,7 +166,7 @@ func TestPresetsLifecycle(t *testing.T) {
 	rec = do(t, h, "GET", "/api/presets", "")
 	var sps []speaker.Preset
 	decodeBody(t, rec, &sps)
-	if len(sps) != 1 || sps[0].Slot != 3 || sps[0].Name != "Radio 538" || sps[0].StationID != "s99" || sps[0].Logo != "" {
+	if len(sps) != 1 || sps[0].Slot != 3 || sps[0].Name != "Radio 538" || sps[0].StationID != "s99" || sps[0].Logo != "http://logo" {
 		t.Fatalf("stored preset = %+v", sps)
 	}
 
