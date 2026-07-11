@@ -70,7 +70,7 @@ ReTouch's embedded UI.
 }
 ```
 
-Field `type` is `text | password | number | otp | toggle`. Action `style` is
+Field `type` is `text | password | number | otp | toggle | select`. A `select` field carries `"options": [ { "value": "…", "label": "…" } ]`; on older hosts it degrades to a text input. Action `style` is
 `primary | danger | ""`.
 
 ### Actions return the next manifest — so multi-step flows are free

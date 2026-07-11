@@ -65,6 +65,23 @@ export const FieldRowInput = styled.input`
   &::placeholder { color: var(--ink-3); font-weight: 400; }
 `;
 
+export const FieldRowSelect = styled.select`
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+  direction: rtl; /* right-align the closed value like the text inputs */
+
+  & option { direction: ltr; color: initial; }
+`;
+
 export const FieldRowValue = styled.span`
   flex: 1;
   min-width: 0;
