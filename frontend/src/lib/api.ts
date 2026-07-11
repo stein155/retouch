@@ -179,11 +179,21 @@ function itemToStation(item: Record<string, unknown>): Station | null {
 // proxy-relative path (defaults to the root browse); it returns the drill-down
 // categories and any stations at this level. Empty result on failure so the UI
 // falls back to plain search.
-export async function browseTuneIn(path = '/Browse.ashx?render=json'): Promise<BrowseResult> {
+export async function browseTuneIn(path = '/Browse.ashx?render=json', locale?: string): Promise<BrowseResult> {
   const categories: BrowseCategory[] = [];
   const stations: Station[] = [];
   try {
-    const r = await fetch(`/api/tunein${path}`);
+    // Force the caller's locale onto every request (not just the root): a child
+    // URL that somehow lost it still comes back translated, so labels never
+    // revert to English mid-drill.
+    let full = path;
+    if (locale) {
+      const u = new URL(path, 'http://x');
+      u.searchParams.set('locale', locale);
+      u.searchParams.set('render', 'json');
+      full = u.pathname + u.search;
+    }
+    const r = await fetch(`/api/tunein${full}`);
     if (!r.ok) throw new Error(`browse -> ${r.status}`);
     const data = (await r.json()) as { body?: unknown };
     const walk = (items: unknown) => {
@@ -211,6 +221,20 @@ function browsePath(url: string): string {
   try {
     const u = new URL(url);
     u.searchParams.set('render', 'json');
+    // TuneIn's "By Language" node links its Music/Talk/Sports children to dead
+    // category ids (id=c424724/5/6) that return "No stations available", while the
+    // equivalent c=<category> browse with the same &filter=l<lang> is populated.
+    // Rewrite so By Language actually reaches stations.
+    // ponytail: hardcoded TuneIn category ids — if TuneIn renumbers them the
+    // branch dead-ends again (shows the empty state); revisit if that happens.
+    const DEAD_CATEGORY: Record<string, string> = {
+      c424724: 'music', c424725: 'talk', c424726: 'sports',
+    };
+    const id = u.searchParams.get('id');
+    if (id && DEAD_CATEGORY[id] && u.searchParams.has('filter')) {
+      u.searchParams.delete('id');
+      u.searchParams.set('c', DEAD_CATEGORY[id]);
+    }
     return u.pathname + u.search;
   } catch {
     return '';

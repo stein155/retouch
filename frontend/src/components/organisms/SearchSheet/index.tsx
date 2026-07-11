@@ -6,7 +6,7 @@ import {
   SheetScrim, SheetEl, SheetHandle, SheetBody, SheetHeader, Eyebrow,
 } from '../../molecules/Sheet';
 import { searchTuneIn, browseTuneIn } from '../../../lib/api';
-import { useI18n } from '../../../lib/i18n';
+import { useI18n, tuneInLocale } from '../../../lib/i18n';
 import {
   SheetSearch, SheetClear, SheetRows, SheetEmpty, SheetEmptyQ,
   BrowseBar, BrowseBack, CatRow,
@@ -26,7 +26,7 @@ interface Props {
 const EMPTY: BrowseResult = { categories: [], stations: [] };
 
 export function SearchSheet({ open, mode, speakerName, onClose, onPick }: Props) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [query, setQuery] = useState('');
   const [tuneInResults, setTuneInResults] = useState<Station[]>([]);
   const [searching, setSearching] = useState(false);
@@ -44,7 +44,7 @@ export function SearchSheet({ open, mode, speakerName, onClose, onPick }: Props)
     const gen = ++browseGen.current;
     setBrowsing(true);
     setStack(nextStack);
-    browseTuneIn(path).then((res) => {
+    browseTuneIn(path, tuneInLocale(lang)).then((res) => {
       if (gen !== browseGen.current) return; // superseded by a newer navigation
       setLevel(res);
       setBrowsing(false);
