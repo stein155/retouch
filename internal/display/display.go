@@ -163,9 +163,11 @@ func (m *Manager) step(ctx context.Context) {
 		}
 		return
 	}
-	if bytesEqual(shown, want) {
-		return
-	}
+	// Write every tick, even when the frame is unchanged: the firmware paints
+	// its own standby clock over us whenever it updates, and a skipped write
+	// would leave the clock on top until our content changes. Rewriting the
+	// same bytes has no visible effect, and a firmware overwrite is repaired
+	// within a second.
 	if err := m.fb.Draw(want); err != nil {
 		m.log.Warn("display draw failed", "err", err)
 		return
@@ -177,18 +179,6 @@ func (m *Manager) setShown(b []byte) {
 	m.mu.Lock()
 	m.shown = b
 	m.mu.Unlock()
-}
-
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // render draws content in the house layout: icon centered, text wrapped and
