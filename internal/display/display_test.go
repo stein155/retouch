@@ -3,6 +3,8 @@ package display
 import (
 	"bytes"
 	"context"
+	"image"
+	"image/png"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -109,5 +111,26 @@ func TestLastOwnerWins(t *testing.T) {
 func TestRenderUnknownIconFallsBack(t *testing.T) {
 	if len(render(Content{Icon: "nope", Text: "x"})) != oled.Width*oled.Height {
 		t.Fatal("bad frame size")
+	}
+}
+
+// TestDumpScreens writes preview PNGs of every built-in icon to the ICONDUMP
+// dir for visual checks.
+func TestDumpScreens(t *testing.T) {
+	dir := os.Getenv("ICONDUMP")
+	if dir == "" {
+		t.Skip("set ICONDUMP to dump preview PNGs")
+	}
+	for name := range icons {
+		frame := render(Content{Icon: name, Text: "voorbeeld " + name})
+		img := &image.Gray{Pix: frame, Stride: oled.Width, Rect: image.Rect(0, 0, oled.Width, oled.Height)}
+		f, err := os.Create(filepath.Join(dir, "screen-"+name+".png"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := png.Encode(f, img); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
 	}
 }
