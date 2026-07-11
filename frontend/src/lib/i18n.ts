@@ -16,6 +16,15 @@ export const LANGS = [
 
 export const DEFAULT_LANG = 'nl';
 
+// tuneInLocale maps a UI language to the locale TuneIn's Browse.ashx expects, so
+// category names ("By Location", "By Language", …) come back translated. TuneIn
+// propagates the locale into the child URLs it returns, so only the top request
+// needs it. Unknown languages fall back to English.
+const TUNEIN_LOCALES: Record<string, string> = {
+  en: 'en-US', de: 'de-DE', nl: 'nl-NL', fr: 'fr-FR', es: 'es-ES', af: 'af-ZA',
+};
+export const tuneInLocale = (lang: string): string => TUNEIN_LOCALES[lang] || 'en-US';
+
 export const I18N = {
   en: {
     appTitle: 'Radio', settings: 'Settings', thisRadio: 'This radio', general: 'General', back: 'Back',

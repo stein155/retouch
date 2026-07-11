@@ -35,6 +35,8 @@ beforeEach(() => {
   api.getReleases.mockResolvedValue({ current: '1.2.3', updatable: false, stable: null, betas: [] });
   api.findSpeakers.mockResolvedValue([]);
   api.saveSettings.mockResolvedValue(null);
+  // SearchSheet loads the browse tree when opened (empty query).
+  api.browseTuneIn.mockResolvedValue({ categories: [], stations: [] });
   api.playPreset.mockResolvedValue(null);
   api.setVolume.mockResolvedValue(null);
   api.stopPlayback.mockResolvedValue(null);

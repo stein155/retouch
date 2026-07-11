@@ -24,6 +24,18 @@ export interface Preset {
   logo: string;
 }
 
+// A drill-down category in the TuneIn browse tree (genre, region, …).
+export interface BrowseCategory {
+  title: string;
+  path: string; // proxy-relative path to fetch its contents (/Browse.ashx?...)
+}
+
+// One level of the browse tree: sub-categories and/or stations.
+export interface BrowseResult {
+  categories: BrowseCategory[];
+  stations: Station[];
+}
+
 // A TuneIn search result / catalog station.
 export interface Station {
   tuneInId: string;
