@@ -4,8 +4,10 @@ import { Spinner } from '../../atoms/Spinner';
 import { Button } from '../../atoms/Button';
 import { Toggle } from '../../atoms/Toggle';
 import { QRCode } from '../../atoms/QRCode';
+import { BassSlider } from '../../molecules/BassSlider';
 import {
-  FieldHint, FieldCard, FieldRow, FieldRowLabel, FieldRowInput, FieldRowSelect, FieldRowValue, SetEyebrow,
+  FieldHint, FieldRow, FieldRowLabel, FieldRowInput, FieldRowSelect, FieldRowValue, SetEyebrow,
+  FieldCard,
 } from '../../molecules/Field';
 import { useI18n } from '../../../lib/i18n';
 import {
@@ -15,6 +17,10 @@ import {
 import {
   QrCardEl, QrQuiet, QrCodeBtn, QrCodeText, QrCopy,
   PlugHead, PlugName, PlugMeta, PlugAction, UpdateBadge,
+  PanelStatus, StatusDot, PanelSection, PanelCard, ActionBtn,
+  SliderRow, SliderHead, SliderVal,
+  TimesRow, TimeChips, TimeChip, TimeAdd,
+  ModalScrim, ModalCard, ModalTitle, ModalTimeInput, ModalBtns,
 } from './styled';
 import type {
   PluginsResponse, InstalledPluginInfo, CatalogPluginInfo,
@@ -29,6 +35,11 @@ type ManifestFieldT = ManifestField & {
   placeholder?: string;
   value?: string | boolean;
   options?: { value: string; label?: string }[];
+  // slider fields
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
 };
 type ManifestToggleT = { key: string; label?: string; value?: unknown };
 type ManifestRowT = { id: string; label?: string; toggles?: ManifestToggleT[] };
@@ -44,8 +55,105 @@ const statusColor = (level: unknown): string => {
   const map: Record<string, string> = {
     ok: '#2ecc71', warn: '#f1c40f', error: '#e74c3c',
   };
-  return (typeof level === 'string' && map[level]) || 'var(--muted, #9aa0a6)';
+  return (typeof level === 'string' && map[level]) || 'var(--ink-3)';
 };
+
+// "08:00, 18:00" ⇄ ['08:00', '18:00'] — the times field keeps the comma-joined
+// string on the wire so plugins (and older manifests) parse nothing new.
+const splitTimes = (v: unknown): string[] =>
+  String(v ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+const joinTimes = (list: string[]): string =>
+  [...list].sort().join(', ');
+
+// SliderField: a labelled value slider (e.g. announcement volume). The manifest
+// supplies min/max/step/unit; the value travels as a string like every input.
+function SliderField({ field, value, onChange }: {
+  field: ManifestFieldT;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const min = field.min ?? 0;
+  const max = field.max ?? 100;
+  const step = field.step ?? 1;
+  const num = Number(value);
+  const cur = Number.isFinite(num) && value !== '' ? Math.min(max, Math.max(min, num)) : min;
+  return (
+    <SliderRow>
+      <SliderHead>
+        <FieldRowLabel as="span">{field.label}</FieldRowLabel>
+        <SliderVal>{cur}{field.unit || ''}</SliderVal>
+      </SliderHead>
+      <BassSlider
+        value={cur}
+        min={min}
+        max={max}
+        origin={min}
+        onChange={(v) => onChange(String(Math.round(v / step) * step))}
+      />
+    </SliderRow>
+  );
+}
+
+// TimesField: scheduled clock times as removable chips; "+" opens a small modal
+// with the platform time picker, so nobody types "08:00, 18:00" by hand anymore.
+function TimesField({ field, value, onChange }: {
+  field: ManifestFieldT;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const { t } = useI18n();
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState('');
+  const times = splitTimes(value);
+
+  const add = () => {
+    if (!draft) return;
+    onChange(joinTimes([...times.filter((x) => x !== draft), draft]));
+    setAdding(false);
+    setDraft('');
+  };
+
+  return (
+    <TimesRow>
+      <FieldRowLabel as="span">{field.label}</FieldRowLabel>
+      <TimeChips>
+        {times.map((tm) => (
+          <TimeChip
+            key={tm}
+            type="button"
+            onClick={() => onChange(joinTimes(times.filter((x) => x !== tm)))}
+            aria-label={`${t('pluginRemoveTime')} ${tm}`}
+          >
+            {tm}
+            <Icon.close width="13" height="13" />
+          </TimeChip>
+        ))}
+        <TimeAdd type="button" onClick={() => { setDraft(''); setAdding(true); }}>
+          <Icon.plus width="14" height="14" />
+          {t('pluginAddTime')}
+        </TimeAdd>
+      </TimeChips>
+      {adding && (
+        <ModalScrim onClick={() => setAdding(false)}>
+          <ModalCard onClick={(e) => e.stopPropagation()}>
+            <ModalTitle>{t('pluginAddTime')}</ModalTitle>
+            <ModalTimeInput
+              type="time"
+              value={draft}
+              autoFocus
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') add(); }}
+            />
+            <ModalBtns>
+              <ActionBtn type="button" onClick={() => setAdding(false)}>{t('cancel')}</ActionBtn>
+              <ActionBtn type="button" $kind="primary" onClick={add} disabled={!draft}>{t('add')}</ActionBtn>
+            </ModalBtns>
+          </ModalCard>
+        </ModalScrim>
+      )}
+    </TimesRow>
+  );
+}
 
 // catStr prefers a localised catalog string (pluginCat_<name>_<suffix>) when the
 // app ships one, else falls back to the server-provided English value. makeT
@@ -154,61 +262,85 @@ function PluginPanel({ name }: { name: string }) {
   }
 
   const st = manifest.status as unknown as ManifestStatus | undefined;
+
+  // One manifest field → one card row. Slider and times get their own layouts;
+  // everything else is the classic label-left / control-right row.
+  const renderField = (f: ManifestFieldT) => {
+    if (f.type === 'slider') {
+      return (
+        <SliderField
+          key={f.key}
+          field={f}
+          value={(values[f.key] as string) ?? ''}
+          onChange={(v) => setValues((prev) => ({ ...prev, [f.key]: v }))}
+        />
+      );
+    }
+    if (f.type === 'times') {
+      return (
+        <TimesField
+          key={f.key}
+          field={f}
+          value={(values[f.key] as string) ?? ''}
+          onChange={(v) => setValues((prev) => ({ ...prev, [f.key]: v }))}
+        />
+      );
+    }
+    return (
+      <FieldRow key={f.key}>
+        <FieldRowLabel htmlFor={`pl-${name}-${f.key}`}>{f.label}</FieldRowLabel>
+        {f.type === 'toggle' ? (
+          <Toggle
+            on={!!values[f.key]}
+            onClick={() => setValues((v) => ({ ...v, [f.key]: !v[f.key] }))}
+            aria-label={f.label}
+            style={{ marginLeft: 'auto' }}
+          />
+        ) : f.type === 'select' ? (
+          <FieldRowSelect
+            id={`pl-${name}-${f.key}`}
+            value={(values[f.key] as string) ?? ''}
+            onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+          >
+            {(f.options || []).map((o) => (
+              <option key={o.value} value={o.value}>{o.label || o.value}</option>
+            ))}
+          </FieldRowSelect>
+        ) : (
+          <FieldRowInput
+            id={`pl-${name}-${f.key}`}
+            type={f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}
+            inputMode={f.type === 'otp' ? 'numeric' : undefined}
+            value={(values[f.key] as string) ?? ''}
+            placeholder={f.placeholder || ''}
+            autoComplete={f.type === 'password' ? 'current-password' : 'off'}
+            onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+          />
+        )}
+      </FieldRow>
+    );
+  };
+
   return (
     <>
-      {st && (
-        <FieldHint style={{ marginTop: 0 }}>
-          <span style={{
-            display: 'inline-block', width: 8, height: 8, borderRadius: 99,
-            marginRight: 6, verticalAlign: 'middle', background: statusColor(st.level),
-          }} />
+      {st && st.text && (
+        <PanelStatus role="status">
+          <StatusDot $color={statusColor(st.level)} />
           {st.text}
-        </FieldHint>
+        </PanelStatus>
       )}
       {((manifest.sections || []) as ManifestSectionT[]).map((sec, si) => (
-        <div key={si} style={{ marginTop: si === 0 ? 4 : 14 }}>
-          {sec.title && <FieldRowLabel as="div" style={{ fontWeight: 600, marginBottom: 6 }}>{sec.title}</FieldRowLabel>}
-          {sec.text && <FieldHint style={{ marginTop: 0, marginBottom: 8 }}>{sec.text}</FieldHint>}
+        <PanelSection key={si}>
+          {sec.title && <SetEyebrow style={{ margin: '0 2px 8px' }}>{sec.title}</SetEyebrow>}
+          {sec.text && <FieldHint style={{ margin: '0 2px 8px' }}>{sec.text}</FieldHint>}
 
           {((sec.fields || []) as ManifestFieldT[]).filter((f) => f.type === 'qr').map((f) => (
             <QrField key={f.key} field={f} />
           ))}
 
           {(((sec.fields || []) as ManifestFieldT[]).some((f) => f.type !== 'qr') || (sec.rows?.length ?? 0) > 0) && (
-            <FieldCard>
-              {((sec.fields || []) as ManifestFieldT[]).filter((f) => f.type !== 'qr').map((f) => (
-                <FieldRow key={f.key}>
-                  <FieldRowLabel htmlFor={`pl-${name}-${f.key}`}>{f.label}</FieldRowLabel>
-                  {f.type === 'toggle' ? (
-                    <Toggle
-                      on={!!values[f.key]}
-                      onClick={() => setValues((v) => ({ ...v, [f.key]: !v[f.key] }))}
-                      aria-label={f.label}
-                      style={{ marginLeft: 'auto' }}
-                    />
-                  ) : f.type === 'select' ? (
-                    <FieldRowSelect
-                      id={`pl-${name}-${f.key}`}
-                      value={(values[f.key] as string) ?? ''}
-                      onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-                    >
-                      {(f.options || []).map((o) => (
-                        <option key={o.value} value={o.value}>{o.label || o.value}</option>
-                      ))}
-                    </FieldRowSelect>
-                  ) : (
-                    <FieldRowInput
-                      id={`pl-${name}-${f.key}`}
-                      type={f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}
-                      inputMode={f.type === 'otp' ? 'numeric' : undefined}
-                      value={(values[f.key] as string) ?? ''}
-                      placeholder={f.placeholder || ''}
-                      autoComplete={f.type === 'password' ? 'current-password' : 'off'}
-                      onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-                    />
-                  )}
-                </FieldRow>
-              ))}
+            <PanelCard>
+              {((sec.fields || []) as ManifestFieldT[]).filter((f) => f.type !== 'qr').map(renderField)}
               {((sec.rows || []) as ManifestRowT[]).map((row) => (
                 <FieldRow key={row.id}>
                   <FieldRowLabel as="span">{row.label}</FieldRowLabel>
@@ -226,22 +358,22 @@ function PluginPanel({ name }: { name: string }) {
                   </span>
                 </FieldRow>
               ))}
-            </FieldCard>
+            </PanelCard>
           )}
 
           {((sec.actions || []) as ManifestActionT[]).map((a) => (
-            <Button
+            <ActionBtn
               key={a.id}
-              $variant="update"
+              type="button"
+              $kind={a.style}
               onClick={() => runAction(a)}
               disabled={!!busy}
-              style={{ marginTop: 8, ...(a.style === 'danger' ? { background: 'var(--ink)' } : {}) }}
             >
-              {busy === a.id ? <Spinner $scan /> : <Icon.check width="18" height="18" />}
+              {busy === a.id && <Spinner $scan />}
               <span>{a.label}</span>
-            </Button>
+            </ActionBtn>
           ))}
-        </div>
+        </PanelSection>
       ))}
       {err && <FieldHint $error>{err}</FieldHint>}
     </>
