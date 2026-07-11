@@ -6,6 +6,7 @@ package settings
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"sync"
 
@@ -53,7 +54,15 @@ type Store struct {
 func Open(path string) *Store {
 	st := &Store{path: path, s: Settings{Language: "en"}}
 	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &st.s)
+		if err := json.Unmarshal(data, &st.s); err != nil {
+			// A corrupt/truncated file must not silently reset to defaults —
+			// that would wipe the admin password and MQTT creds without a trace.
+			// Preserve the bad file (the next Write would overwrite it) and log,
+			// so the operator can recover instead of finding the login gone.
+			_ = os.Rename(path, path+".corrupt")
+			slog.Warn("settings file unreadable; kept as .corrupt, starting from defaults", "path", path, "err", err)
+			st.s = Settings{Language: "en"}
+		}
 	}
 	return st
 }

@@ -33,6 +33,27 @@ func TestBetaPR(t *testing.T) {
 	}
 }
 
+func TestRequireSig(t *testing.T) {
+	if releasePublicKey == "" {
+		t.Skip("signing disabled; requireSig is always false")
+	}
+	cases := []struct {
+		tag      string
+		explicit bool
+		want     bool
+	}{
+		{"v1.2.3", false, true},        // stable, auto path: signed
+		{"v1.2.3", true, true},         // stable, explicit: signed
+		{"beta-pr-12", true, false},    // beta, explicitly chosen: exempt
+		{"beta-pr-12", false, true},    // beta on auto/latest path: MUST still require sig
+	}
+	for _, c := range cases {
+		if got := requireSig(c.tag, c.explicit); got != c.want {
+			t.Errorf("requireSig(%q, %v) = %v, want %v", c.tag, c.explicit, got, c.want)
+		}
+	}
+}
+
 func testManager(t *testing.T, dir string) *Manager {
 	t.Helper()
 	return New("test", dir, slog.New(slog.NewTextHandler(io.Discard, nil)))

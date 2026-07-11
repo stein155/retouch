@@ -255,6 +255,13 @@ func (c *Client) readConnack() error {
 
 func (c *Client) readLoop() {
 	for {
+		// Bound the read so a silently-dead broker (power cut, NAT drop) is caught
+		// in ~2× keepalive instead of blocking on TCP retransmission (~15 min on
+		// Linux) while we wrongly report "connected". We PINGREQ every 3/4 keepalive,
+		// so a live broker always sends at least a PINGRESP inside this window.
+		if c.keepAlive > 0 {
+			_ = c.conn.SetReadDeadline(time.Now().Add(2 * c.keepAlive))
+		}
 		typ, flags, body, err := readPacket(c.reader)
 		if err != nil {
 			c.close(err)

@@ -15,10 +15,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 )
 
 // Guard applies and persists the :17000 LAN block. Create with New.
 type Guard struct {
+	mu     sync.Mutex              // serializes apply-then-persist; see Set
 	marker string                  // path to the .close-telnet persistence marker
 	apply  func(closed bool) error // firewall applier; overridable for tests
 	log    *slog.Logger
@@ -45,6 +47,8 @@ func (g *Guard) IsClosed() bool { return fileExists(g.marker) }
 // once at startup: the iptables rule does not survive a reboot, only the marker.
 // A no-op (nil) when the block is not enabled.
 func (g *Guard) ApplyAtStartup() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if !g.IsClosed() {
 		return nil
 	}
@@ -55,8 +59,13 @@ func (g *Guard) ApplyAtStartup() error {
 	return nil
 }
 
-// Set closes (closed=true) or opens the LAN block and persists the choice.
+// Set closes (closed=true) or opens the LAN block and persists the choice. The
+// lock keeps two overlapping calls from interleaving apply and marker writes,
+// which could otherwise leave the marker saying "closed" while the DROP rule is
+// gone (root telnet LAN-reachable) — the security-relevant direction.
 func (g *Guard) Set(closed bool) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if closed {
 		return g.close()
 	}
