@@ -75,6 +75,24 @@ export const PlugMeta = styled.div`
   margin-top: 2px;
 `;
 
+// A small "!" badge shown on an installed-plugin row when an over-the-air update
+// is available — so the version itself stays hidden but a pending update is
+// glanceable without opening the plugin.
+export const UpdateBadge = styled.span`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 99px;
+  background: #f1c40f;
+  color: #1a1a1a;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+`;
+
 // The "Instellingen ›" affordance on an installed-plugin row.
 export const PlugAction = styled.span`
   display: flex;
