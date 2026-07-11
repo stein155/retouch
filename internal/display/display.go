@@ -31,6 +31,7 @@ type Content struct {
 type Manager struct {
 	fb      *oled.Framebuffer
 	avail   bool
+	speaker string                     // speaker API host:port, for /clockDisplay
 	standby func(context.Context) bool // live speaker-in-standby check
 	log     *slog.Logger
 
@@ -40,15 +41,18 @@ type Manager struct {
 	slots       map[string]Content // standby screens by owner
 	slotOrder   []string           // owners, oldest first; last one shown
 	shown       []byte             // frame currently on the panel (nil = firmware's)
+	clockSaved  string             // firmware clock config to restore ("" = untouched)
 }
 
 // New builds the manager for fbPath (normally /dev/fb0) and starts its loop.
 // standby reports whether the speaker is in standby; it is only called while
-// standby content is registered.
-func New(ctx context.Context, fbPath string, standby func(context.Context) bool, log *slog.Logger) *Manager {
+// standby content is registered. speaker is the firmware API (host:port),
+// used to pause its standby clock while content is shown ("" disables that).
+func New(ctx context.Context, fbPath, speaker string, standby func(context.Context) bool, log *slog.Logger) *Manager {
 	m := &Manager{
 		fb:      oled.NewFramebuffer(fbPath),
 		avail:   oled.Available(fbPath),
+		speaker: speaker,
 		standby: standby,
 		log:     log,
 		slots:   map[string]Content{},
@@ -129,6 +133,7 @@ func (m *Manager) loop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			_ = m.fb.Restore()
+			m.restoreClock(context.Background())
 			return
 		case <-tick.C:
 			m.step(ctx)
@@ -160,8 +165,14 @@ func (m *Manager) step(ctx context.Context) {
 			if err := m.fb.Restore(); err == nil {
 				m.setShown(nil)
 			}
+			m.restoreClock(ctx)
 		}
 		return
+	}
+	if shown == nil {
+		// Taking over the panel: pause the firmware's standby clock so it
+		// stops painting over us — flicker-free instead of repaired-per-tick.
+		m.suppressClock(ctx)
 	}
 	// Write every tick, even when the frame is unchanged: the firmware paints
 	// its own standby clock over us whenever it updates, and a skipped write

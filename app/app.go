@@ -147,7 +147,7 @@ func Run() {
 	// The ST20 front-panel OLED: internal/display is the single writer to
 	// /dev/fb0; plugins hand it content via the /api/display endpoints. On
 	// models without the panel the manager is a no-op.
-	disp := display.New(ctx, "/dev/fb0", func(c context.Context) bool {
+	disp := display.New(ctx, "/dev/fb0", net.JoinHostPort(*host, "8090"), func(c context.Context) bool {
 		np, err := bc.NowPlaying(c)
 		return err == nil && np.Source == "STANDBY"
 	}, logger.With("comp", "display"))
