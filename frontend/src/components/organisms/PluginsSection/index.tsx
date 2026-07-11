@@ -14,7 +14,7 @@ import {
 } from '../../../lib/api';
 import {
   QrCardEl, QrQuiet, QrCodeBtn, QrCodeText, QrCopy,
-  PlugHead, PlugName, PlugMeta, PlugAction,
+  PlugHead, PlugName, PlugMeta, PlugAction, UpdateBadge,
 } from './styled';
 import type {
   PluginsResponse, InstalledPluginInfo, CatalogPluginInfo,
@@ -248,6 +248,18 @@ function InstalledPlugin({ p, entry, onOpen }: {
 }) {
   const { t } = useI18n();
   const title = catStr(t, p.name, 'title', entry?.title || p.name);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+
+  // Check for a newer release so the row can flag it with a "!" — the version
+  // itself stays hidden. Sideloaded plugins have no release to compare against.
+  useEffect(() => {
+    if (p.sideloaded) return undefined;
+    let on = true;
+    getPluginLatest(p.name).then((r) => {
+      if (on) setUpdateAvailable(!!r?.tag && r.tag !== (p.version || ''));
+    });
+    return () => { on = false; };
+  }, [p.name, p.sideloaded, p.version]);
 
   return (
     <div style={{ marginTop: 12 }}>
@@ -257,6 +269,7 @@ function InstalledPlugin({ p, entry, onOpen }: {
             <PlugName>{title}</PlugName>
             <PlugMeta>{t('pluginInstalled')}</PlugMeta>
           </span>
+          {updateAvailable && <UpdateBadge title={t('updateAvailable')} aria-label={t('updateAvailable')}>!</UpdateBadge>}
           <PlugAction>
             <span>{t('pluginSettings')}</span>
             <Icon.chevron width="17" height="17" />
@@ -316,14 +329,8 @@ export function PluginSettings({ p, onRemoved }: { p: InstalledPluginInfo; onRem
       {p.lastErr && !p.running && <FieldHint style={{ marginTop: 0 }} $error>{p.lastErr}</FieldHint>}
       <PluginPanel key={panelKey} name={p.name} />
 
-      {version && (
-        <FieldCard style={{ marginTop: 12 }}>
-          <FieldRow>
-            <FieldRowLabel as="span">{t('version')}</FieldRowLabel>
-            <FieldRowValue>{version}</FieldRowValue>
-          </FieldRow>
-        </FieldCard>
-      )}
+      {/* Version is intentionally hidden — an available update surfaces as the
+          update button below (and as a "!" on the plugin list). */}
       {p.sideloaded && <FieldHint>{t('pluginUpdatable')}</FieldHint>}
       {updatable && (
         <Button $variant="update" onClick={update} disabled={updating}>
