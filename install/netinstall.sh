@@ -100,6 +100,7 @@ write_start_script() {
 LOG=/tmp/retouch.log
 APP_PORT=${WEB_LISTEN##*:}
 MARGE_PORT=${MARGE_LISTEN##*:}
+AUTH_TLS_PORT=9443
 
 log() { echo "[retouch-start] \$*" >>"\$LOG" 2>&1; }
 
@@ -130,14 +131,15 @@ expose_8080() {
 }
 
 # /speaker notifications validate app_key by calling Bose's hardcoded audio
-# notification auth host on port 80. ReTouch already serves the auth stub on
-# marge (:9080); route that firmware call there on every boot.
+# notification auth host over HTTPS. ReTouch serves a local TLS auth stub on
+# :9443 (cert signed by a speaker-local CA it adds to the trust bundle); point the
+# auth hostnames at loopback and route that firmware :443 call to the stub on boot.
 expose_speaker_auth() {
 	# /etc/hosts usually lives on the read-only rootfs, so remount rw around the
 	# append (same dance the installer does for the cfg XML), or the entry
 	# silently never lands and the auth host resolves past the local stub.
 	need=""
-	for h in audionotification.api.bosecm.com dev-audionotification.api.bosecm.com; do
+	for h in audionotification.api.bosecm.com audionotificationdev.api.bosecm.com; do
 		grep -q "127.0.0.1[[:space:]].*\$h" /etc/hosts 2>/dev/null || need="\$need \$h"
 	done
 	if [ -n "\$need" ]; then
@@ -148,11 +150,13 @@ expose_speaker_auth() {
 		mount / -o ro,remount 2>/dev/null
 	fi
 	command -v iptables >/dev/null 2>&1 || { log "no iptables; /speaker auth route not installed"; return 0; }
-	iptables -t nat -C OUTPUT -p tcp -d 127.0.0.1 --dport 80 -j REDIRECT --to-ports "\$MARGE_PORT" 2>/dev/null && return 0
-	if iptables -t nat -I OUTPUT 1 -p tcp -d 127.0.0.1 --dport 80 -j REDIRECT --to-ports "\$MARGE_PORT" 2>>"\$LOG"; then
-		log "redirected local :80 audio-notification auth -> :\$MARGE_PORT"
+	# Drop any stale :80->marge redirect an older version installed, then route :443.
+	while iptables -t nat -D OUTPUT -p tcp -d 127.0.0.1 --dport 80 -j REDIRECT --to-ports "\$MARGE_PORT" 2>/dev/null; do :; done
+	iptables -t nat -C OUTPUT -p tcp -d 127.0.0.1 --dport 443 -j REDIRECT --to-ports "\$AUTH_TLS_PORT" 2>/dev/null && return 0
+	if iptables -t nat -I OUTPUT 1 -p tcp -d 127.0.0.1 --dport 443 -j REDIRECT --to-ports "\$AUTH_TLS_PORT" 2>>"\$LOG"; then
+		log "redirected local :443 audio-notification auth -> :\$AUTH_TLS_PORT"
 	else
-		log "could not redirect local :80 audio-notification auth -> :\$MARGE_PORT"
+		log "could not redirect local :443 audio-notification auth -> :\$AUTH_TLS_PORT"
 	fi
 }
 

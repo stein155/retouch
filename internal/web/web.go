@@ -76,6 +76,17 @@ type Server struct {
 	plugins   *plugins.Manager // installs/supervises/proxies plugins; nil off-speaker
 	display   *display.Manager // ST20 OLED arbiter; nil-safe when absent
 	sideload  bool             // allow unverified plugin uploads (-allow-sideload)
+
+	notifyBase string                // base URL the firmware fetches uploaded notification clips from
+	audioMu    sync.Mutex            // guards audioClips
+	audioClips map[string]*audioClip // short-lived uploaded notification audio, keyed by URL name
+}
+
+// SetNotifyBaseURL sets the base URL the speaker firmware uses to fetch notification
+// clips uploaded to /api/speaker/notify. On-speaker this is ReTouch's own loopback
+// address; the firmware and ReTouch share the host, so it fetches the clip locally.
+func (s *Server) SetNotifyBaseURL(base string) {
+	s.notifyBase = strings.TrimRight(base, "/")
 }
 
 // PresetMirror receives successful direct speaker preset writes so the local cloud
@@ -222,6 +233,13 @@ func (s *Server) Handler() http.Handler {
 	// the speaker itself and nothing on the LAN may write to the panel.
 	mux.HandleFunc("GET /api/display", s.displayInfo)
 	mux.HandleFunc("POST /api/display/notify", s.displayNotify)
+	// Audio notifications play a clip over the current source via the firmware's
+	// /speaker endpoint. Loopback-only, so plugins (via --host-url) can ring the
+	// speaker without every plugin re-implementing the app_key + play_info XML.
+	// notify accepts either a URL (JSON) or an uploaded clip (binary body); audio
+	// serves an uploaded clip back to the co-located firmware over loopback.
+	mux.HandleFunc("POST /api/speaker/notify", s.speakerNotify)
+	mux.HandleFunc("GET /api/speaker/audio/{name}", s.serveAudio)
 	mux.HandleFunc("PUT /api/display/standby", s.displaySetStandby)
 	mux.HandleFunc("DELETE /api/display/standby", s.displayClearStandby)
 	// Plugins are part of the password-gated settings sheet: installing, removing,
@@ -282,6 +300,9 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			limit := int64(maxRequestBody)
 			if strings.HasPrefix(r.URL.Path, "/api/plugins/") && strings.HasSuffix(r.URL.Path, "/upload") {
 				limit = pluginUploadMax
+			} else if r.URL.Path == "/api/speaker/notify" {
+				// May carry an uploaded audio clip; JSON URL requests stay well under.
+				limit = notifyAudioMax
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, limit)
 		}

@@ -29,23 +29,29 @@ if command -v iptables >/dev/null 2>&1; then
 	while iptables -t raw -D PREROUTING ! -i lo -p tcp --dport 17000 -j DROP 2>/dev/null; do :; done
 	# also clear the older :80 redirect from earlier versions, if present
 	while iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports 8000 2>/dev/null; do :; done
-	# and the local :80 audio-notification auth redirect the boot launcher installs
+	# and the local audio-notification auth redirects the boot launcher installs
+	# (older :80->marge, and current :443->:9443 TLS stub)
 	while iptables -t nat -D OUTPUT -p tcp -d 127.0.0.1 --dport 80 -j REDIRECT --to-ports "$MARGE_PORT" 2>/dev/null; do :; done
+	while iptables -t nat -D OUTPUT -p tcp -d 127.0.0.1 --dport 443 -j REDIRECT --to-ports 9443 2>/dev/null; do :; done
 	log "removed :8080 redirect + :8000/:17000-hide + auth redirect (if present)"
 fi
 
 # Restore the config XML and, if we appended any audio-notification auth hosts to
 # /etc/hosts, strip them again (both live on the ro rootfs, so remount once).
-if [ -f "$CFG.original" ] || grep -q "127.0.0.1[[:space:]].*audionotification.api.bosecm.com" /etc/hosts 2>/dev/null; then
+if [ -f "$CFG.original" ] || grep -q "127.0.0.1[[:space:]].*audionotification" /etc/hosts 2>/dev/null || [ -f "$HOME_DIR/ca-bundle.crt.original" ]; then
 	mount / -o rw,remount 2>>"$LOG" || mount -o remount,rw / 2>>"$LOG"
 	if [ -f "$CFG.original" ]; then
 		cp "$CFG.original" "$CFG" && log "restored $CFG from .original"
 	else
 		log "no $CFG.original backup found — config left as-is"
 	fi
-	if [ -f /etc/hosts ] && grep -q "audionotification.api.bosecm.com" /etc/hosts 2>/dev/null; then
-		grep -v "127.0.0.1[[:space:]].*audionotification.api.bosecm.com" /etc/hosts > /etc/hosts.rt.$$ 2>/dev/null \
+	if [ -f /etc/hosts ] && grep -q "audionotification" /etc/hosts 2>/dev/null; then
+		grep -v "127.0.0.1[[:space:]].*audionotification.*api.bosecm.com" /etc/hosts > /etc/hosts.rt.$$ 2>/dev/null \
 			&& mv /etc/hosts.rt.$$ /etc/hosts && log "removed audio-notification auth hosts entries"
+	fi
+	# Restore the trust bundle we appended our speaker-auth CA to.
+	if [ -f "$HOME_DIR/ca-bundle.crt.original" ]; then
+		cp "$HOME_DIR/ca-bundle.crt.original" /etc/pki/tls/certs/ca-bundle.crt && log "restored CA bundle"
 	fi
 	mount / -o ro,remount 2>/dev/null
 else

@@ -131,6 +131,11 @@ func Run() {
 	// the web UI and the Home Assistant bridge share it (and its caches).
 	enr := nowplaying.New(bc, tc)
 	webSrv := web.New(tc, bc, st, set, upd, enr, filepath.Dir(*presets), logger)
+	// The firmware fetches uploaded notification clips from ReTouch itself; on-speaker
+	// they share the host, so point it at our own web port on loopback.
+	if _, port, err := net.SplitHostPort(*listen); err == nil && port != "" {
+		webSrv.SetNotifyBaseURL("http://127.0.0.1:" + port)
+	}
 	margeSrv, err := marge.New(base, info, *presets+".marge", nativePresets, tc, logger.With("comp", "marge"))
 	if err != nil {
 		logger.Error("init marge stub", "err", err)
@@ -251,8 +256,36 @@ func Run() {
 		}()
 	}
 
+	serveTLS := func(name, addr string, h http.Handler, certFile, keyFile string) {
+		wg.Add(1)
+		srv := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 5 * time.Second}
+		go func() {
+			<-ctx.Done()
+			sh, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = srv.Shutdown(sh)
+		}()
+		go func() {
+			defer wg.Done()
+			logger.Info("listener up", "name", name, "addr", addr)
+			if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+				logger.Error("listener failed", "name", name, "addr", addr, "err", err)
+			}
+		}()
+	}
+
 	serve("webui", *listen, webSrv.Handler())
 	serve("marge", *margeAddr, margeSrv.Handler())
+
+	// Stand in for Bose's dead audio-notification auth host so the firmware's
+	// /speaker endpoint accepts app_keys again. The boot launcher redirects the
+	// speaker's local HTTPS auth call here; without the cert+CA this listener is
+	// pointless, so a setup failure just disables the feature rather than the app.
+	if certFile, keyFile, err := ensureSpeakerAuthTLS(filepath.Dir(*presets), logger.With("comp", "speaker-auth")); err != nil {
+		logger.Warn("speaker notification auth disabled", "err", err)
+	} else {
+		serveTLS("speaker-auth", speakerAuthAddr, speakerAuthHandler(), certFile, keyFile)
+	}
 
 	// Start any registered background services (generic; none in the default build).
 	for _, svc := range services {
