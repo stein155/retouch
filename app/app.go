@@ -131,6 +131,11 @@ func Run() {
 	// the web UI and the Home Assistant bridge share it (and its caches).
 	enr := nowplaying.New(bc, tc)
 	webSrv := web.New(tc, bc, st, set, upd, enr, filepath.Dir(*presets), logger)
+	// The firmware fetches uploaded notification clips from ReTouch itself; on-speaker
+	// they share the host, so point it at our own web port on loopback.
+	if _, port, err := net.SplitHostPort(*listen); err == nil && port != "" {
+		webSrv.SetNotifyBaseURL("http://127.0.0.1:" + port)
+	}
 	margeSrv, err := marge.New(base, info, *presets+".marge", nativePresets, tc, logger.With("comp", "marge"))
 	if err != nil {
 		logger.Error("init marge stub", "err", err)
