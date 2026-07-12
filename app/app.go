@@ -250,9 +250,31 @@ func Run() {
 			}
 		}()
 	}
+	serveTLS := func(name, addr string, h http.Handler, certFile, keyFile string) {
+		wg.Add(1)
+		srv := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 5 * time.Second}
+		go func() {
+			<-ctx.Done()
+			sh, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = srv.Shutdown(sh)
+		}()
+		go func() {
+			defer wg.Done()
+			logger.Info("listener up", "name", name, "addr", addr)
+			if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+				logger.Error("listener failed", "name", name, "addr", addr, "err", err)
+			}
+		}()
+	}
 
 	serve("webui", *listen, webSrv.Handler())
 	serve("marge", *margeAddr, margeSrv.Handler())
+	if certFile, keyFile, err := ensureSpeakerAuthTLS(filepath.Dir(*presets), logger.With("comp", "speaker-auth")); err != nil {
+		logger.Warn("speaker notification auth TLS disabled", "err", err)
+	} else {
+		serveTLS("speaker-auth", "127.0.0.1:9443", speakerAuthHandler(), certFile, keyFile)
+	}
 
 	// Start any registered background services (generic; none in the default build).
 	for _, svc := range services {

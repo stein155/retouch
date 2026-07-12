@@ -241,6 +241,9 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	s.record(r.Method, p)
 	s.log.Debug("speaker request", "method", r.Method, "path", p, "if-none-match", r.Header.Get("If-None-Match"))
 	switch {
+	case p == "/v1/auth":
+		// /speaker app_key validation. Firmware only needs HTTP 200 here.
+		w.WriteHeader(http.StatusOK)
 	case strings.HasPrefix(p, "/bmx/tunein"):
 		s.bmxTunein(w, r)
 	case strings.HasPrefix(p, "/bmx/registry/") && strings.Contains(p, "servicesAvailability"):

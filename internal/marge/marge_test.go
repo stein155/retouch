@@ -62,6 +62,17 @@ func do(t *testing.T, s *Server, method, path string, body string, hdr map[strin
 	return w
 }
 
+func TestSpeakerAuthReturnsEmptyOK(t *testing.T) {
+	s := newTestServer(t, nil, nil)
+	w := do(t, s, http.MethodGet, "/v1/auth", "", map[string]string{"Apikeyheader": "test-key"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty", w.Body.String())
+	}
+}
+
 // TestRegistryRewritesBase pins that the embedded BMX registry's base-URL token
 // is rewritten to the server's base, so the speaker's TUNEIN worker calls back to us.
 func TestRegistryRewritesBase(t *testing.T) {
