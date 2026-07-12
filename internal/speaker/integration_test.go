@@ -73,6 +73,53 @@ func TestVolumeRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPlayNotification(t *testing.T) {
+	sp, c := newSim(t)
+
+	// Volume 0 keeps the current level (no <volume> node), and the default app_key
+	// is filled in when the caller omits one. Metadata maps to service/message/reason.
+	if err := c.PlayNotification(ctx(), Notification{
+		URL:    "http://example.com/ding.mp3",
+		Artist: "Afvalwijzer",
+		Album:  "Herinnering",
+		Track:  "Morgen: GFT",
+	}); err != nil {
+		t.Fatalf("PlayNotification: %v", err)
+	}
+	n := sp.LastNotification()
+	if n == nil {
+		t.Fatal("sim recorded no notification")
+	}
+	if n.URL != "http://example.com/ding.mp3" || n.AppKey != DefaultAppKey {
+		t.Errorf("url/appKey wrong: %+v", n)
+	}
+	if n.Volume != 0 {
+		t.Errorf("volume = %d, want 0 (omitted)", n.Volume)
+	}
+	if n.Artist != "Afvalwijzer" || n.Album != "Herinnering" || n.Track != "Morgen: GFT" {
+		t.Errorf("metadata wrong: %+v", n)
+	}
+
+	// Volume is clamped into the firmware's accepted 10–70 window.
+	if err := c.PlayNotification(ctx(), Notification{URL: "http://x/a.mp3", Volume: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if v := sp.LastNotification().Volume; v != 10 {
+		t.Errorf("clamp low: volume = %d, want 10", v)
+	}
+	if err := c.PlayNotification(ctx(), Notification{URL: "http://x/a.mp3", Volume: 200}); err != nil {
+		t.Fatal(err)
+	}
+	if v := sp.LastNotification().Volume; v != 70 {
+		t.Errorf("clamp high: volume = %d, want 70", v)
+	}
+
+	// A missing URL is rejected client-side before any request is made.
+	if err := c.PlayNotification(ctx(), Notification{}); err == nil {
+		t.Error("expected error for empty URL")
+	}
+}
+
 func TestBassRoundTrip(t *testing.T) {
 	_, c := newSim(t)
 	b, err := c.Bass(ctx())

@@ -210,6 +210,63 @@ func (c *Client) SetName(ctx context.Context, name string) error {
 	return c.post(ctx, "/name", "<name>"+xmlEsc(name)+"</name>")
 }
 
+// DefaultAppKey is the Bose Developer application key the /speaker audio-notification
+// endpoint expects. The firmware validates it against Bose's (now-dead) auth host, so
+// on-speaker ReTouch stands in for that host and accepts any key — but the firmware
+// still sends one, so we send the well-known developer key the SoundTouch API uses.
+const DefaultAppKey = "Ml7YGAI9JWjFhU7D348e86JPXtisddBa"
+
+// Notification is an audio notification to play via the firmware's /speaker endpoint:
+// a short clip that interrupts whatever is playing (or wakes the speaker from standby)
+// and then resumes the previous source. Only URL is required.
+type Notification struct {
+	URL    string // http(s) URL of the clip; MP3/AAC/WMA/etc. Required.
+	Volume int    // temporary playback volume; 0 keeps the current volume (clamped to 10–70 otherwise)
+	Artist string // shown as NowPlaying artist (<service>)
+	Album  string // shown as NowPlaying album (<message>)
+	Track  string // shown as NowPlaying track (<reason>)
+	AppKey string // Bose Developer app key; DefaultAppKey when empty
+}
+
+// PlayNotification plays an audio notification via POST /speaker. The speaker pauses
+// the current source (or wakes from standby), plays the clip, then resumes. Audio
+// notifications are only supported on the SoundTouch 10 and the Series III 20/30;
+// other models answer 403 and that error is returned unchanged.
+func (c *Client) PlayNotification(ctx context.Context, n Notification) error {
+	if strings.TrimSpace(n.URL) == "" {
+		return fmt.Errorf("notification URL is required")
+	}
+	appKey := n.AppKey
+	if appKey == "" {
+		appKey = DefaultAppKey
+	}
+	var b strings.Builder
+	b.WriteString("<play_info><url>" + xmlEsc(n.URL) + "</url>")
+	// The firmware rejects the request outright for volumes below 10 or above 70;
+	// clamp into range, and omit the node entirely for 0 to keep the current volume.
+	if n.Volume > 0 {
+		v := n.Volume
+		if v < 10 {
+			v = 10
+		} else if v > 70 {
+			v = 70
+		}
+		fmt.Fprintf(&b, "<volume>%d</volume>", v)
+	}
+	b.WriteString("<app_key>" + xmlEsc(appKey) + "</app_key>")
+	if n.Artist != "" {
+		b.WriteString("<service>" + xmlEsc(n.Artist) + "</service>")
+	}
+	if n.Album != "" {
+		b.WriteString("<message>" + xmlEsc(n.Album) + "</message>")
+	}
+	if n.Track != "" {
+		b.WriteString("<reason>" + xmlEsc(n.Track) + "</reason>")
+	}
+	b.WriteString("</play_info>")
+	return c.post(ctx, "/speaker", b.String())
+}
+
 // Bass is the speaker's bass level + its capability range.
 type Bass struct {
 	Actual  int `json:"actual"`

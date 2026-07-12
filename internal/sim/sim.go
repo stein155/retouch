@@ -77,6 +77,18 @@ type Speaker struct {
 	zoneMaster  string // master deviceID; "" when ungrouped
 	zoneSenders string // master IP (senderIPAddress)
 	zoneMembers []member
+
+	lastNotification *Notification // most recent /speaker request, for test assertions
+}
+
+// Notification is a parsed /speaker audio-notification request the sim received.
+type Notification struct {
+	URL    string
+	Volume int
+	AppKey string
+	Artist string // <service>
+	Album  string // <message>
+	Track  string // <reason>
 }
 
 // New returns a simulated speaker seeded with sensible defaults. Identity fields can
@@ -135,6 +147,7 @@ func (s *Speaker) Handler() http.Handler {
 	mux.HandleFunc("/storePreset", postOnly(s.postStorePreset))
 	mux.HandleFunc("/removePreset", postOnly(s.postRemovePreset))
 	mux.HandleFunc("/setMargeAccount", postOnly(s.postMargeAccount))
+	mux.HandleFunc("/speaker", postOnly(s.postSpeaker))
 	mux.HandleFunc("/setZone", postOnly(s.postSetZone))
 	mux.HandleFunc("/addZoneSlave", postOnly(s.postAddZoneSlave))
 	mux.HandleFunc("/removeZoneSlave", postOnly(s.postRemoveZoneSlave))
@@ -428,6 +441,46 @@ func (s *Speaker) postName(w http.ResponseWriter, r *http.Request) {
 	s.Name = n.Value
 	s.mu.Unlock()
 	writeXML(w, "<status>/name</status>")
+}
+
+// postSpeaker handles the /speaker audio-notification endpoint. Real firmware
+// validates <app_key> against Bose's auth host and 400s without a URL; the sim
+// mirrors those two checks, records the request, and answers 200 like an ST10.
+func (s *Speaker) postSpeaker(w http.ResponseWriter, r *http.Request) {
+	var p struct {
+		URL     string `xml:"url"`
+		Volume  int    `xml:"volume"`
+		AppKey  string `xml:"app_key"`
+		Service string `xml:"service"`
+		Message string `xml:"message"`
+		Reason  string `xml:"reason"`
+	}
+	if !decode(w, r, &p) {
+		return
+	}
+	if strings.TrimSpace(p.URL) == "" {
+		http.Error(w, "missing url", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(p.AppKey) == "" {
+		http.Error(w, "missing app_key", http.StatusBadRequest)
+		return
+	}
+	s.mu.Lock()
+	s.lastNotification = &Notification{
+		URL: p.URL, Volume: p.Volume, AppKey: p.AppKey,
+		Artist: p.Service, Album: p.Message, Track: p.Reason,
+	}
+	s.mu.Unlock()
+	writeXML(w, "<status>/speaker</status>")
+}
+
+// LastNotification returns the most recent /speaker request the sim received, or nil
+// if none. Used by tests to assert what ReTouch sent.
+func (s *Speaker) LastNotification() *Notification {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastNotification
 }
 
 func (s *Speaker) postKey(w http.ResponseWriter, r *http.Request) {

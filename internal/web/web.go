@@ -222,6 +222,10 @@ func (s *Server) Handler() http.Handler {
 	// the speaker itself and nothing on the LAN may write to the panel.
 	mux.HandleFunc("GET /api/display", s.displayInfo)
 	mux.HandleFunc("POST /api/display/notify", s.displayNotify)
+	// Audio notifications play a clip over the current source via the firmware's
+	// /speaker endpoint. Loopback-only, so plugins (via --host-url) can ring the
+	// speaker without every plugin re-implementing the app_key + play_info XML.
+	mux.HandleFunc("POST /api/speaker/notify", s.speakerNotify)
 	mux.HandleFunc("PUT /api/display/standby", s.displaySetStandby)
 	mux.HandleFunc("DELETE /api/display/standby", s.displayClearStandby)
 	// Plugins are part of the password-gated settings sheet: installing, removing,
