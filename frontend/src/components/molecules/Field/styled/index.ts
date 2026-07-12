@@ -40,7 +40,7 @@ export const FieldRow = styled.div`
   gap: 12px;
   padding: 13px 0;
 
-  & + & { border-top: 1px solid rgba(31, 24, 20, 0.07); }
+  & + & { border-top: 1px solid var(--border); }
 `;
 
 export const FieldRowLabel = styled.label`
