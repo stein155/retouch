@@ -203,22 +203,36 @@ export function useSpeaker() {
     if (ps === 'PLAY_STATE') status = 'playing';
     else if (ps === 'STOP_STATE') return { status: 'idle', station: null };
     else status = 'buffering'; // BUFFERING_STATE or a transient non-standby state
-    // Backfill the logo/TuneIn id we picked for this station when the speaker
-    // doesn't supply them, so the player keeps the real logo instead of dropping
-    // to initials between the switch and TuneIn enrichment catching up.
+    // The speaker's reported "station name" is often the live TRACK, not the
+    // station: ReTouch injects the rolling track onto the box's own display, so the
+    // firmware echoes it back in now-playing. Recover the real station name (and
+    // logo) from what the app actually picked, or from a preset with the same
+    // TuneIn id — matching on the id, which the injection leaves intact, rather
+    // than on the name. This keeps the station on line one and the track on line
+    // two, instead of the track showing on both. The box's own name is only a last
+    // resort (e.g. playback started outside the app, before any track was injected).
+    const npId = nowPlaying.tuneInId;
     const picked = lastPickedRef.current;
-    const known = picked && sameStation(nowPlaying.stationName, picked.name) ? picked : null;
+    const known = picked && (
+      (!!npId && picked.tuneInId === npId) || sameStation(nowPlaying.stationName, picked.name)
+    ) ? picked : null;
+    const presetMatch = npId ? presets.find((p): p is Preset => !!p && p.tuneInId === npId) : undefined;
+    // Only trust the box's own name when it isn't just the injected track (that's
+    // the duplicate we're avoiding). If it equals the track we have no real station
+    // name, so leave it blank and let the player fall back without repeating it.
+    const boxName = nowPlaying.stationName && nowPlaying.stationName !== nowPlaying.track
+      ? nowPlaying.stationName : '';
     return {
       status,
       station: {
-        name: nowPlaying.stationName || '',
-        art: nowPlaying.art || (known ? known.logo : ''),
-        tuneInId: nowPlaying.tuneInId || (known ? known.tuneInId : null),
+        name: known?.name || presetMatch?.name || boxName || '',
+        art: nowPlaying.art || known?.logo || presetMatch?.logo || '',
+        tuneInId: npId || known?.tuneInId || null,
         track: nowPlaying.track || '',
         artist: nowPlaying.artist || '',
       },
     };
-  }, [pending, nowPlaying]);
+  }, [pending, nowPlaying, presets]);
 
   const statusRef = useRef('idle');
   statusRef.current = player.status;

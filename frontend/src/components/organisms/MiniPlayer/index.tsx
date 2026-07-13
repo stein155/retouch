@@ -62,17 +62,21 @@ export function MiniPlayer({ player, volume, speakerName, loading, onStop, onVol
 
   const active = status !== 'idle' && !!station;
   const playing = status === 'playing';
-  const displayName = clean(station?.name) || clean(station?.track) || '?';
+  // Line one is the station. Fall back to the track only when the station name is
+  // genuinely unknown, so there's always something to show.
+  const stationName = clean(station?.name);
+  const artist = clean(station?.artist);
+  const track = clean(station?.track);
+  const displayName = stationName || track || artist || '?';
   const speaker = clean(speakerName) || 'SoundTouch';
   const muted = volume === 0;
   const toggleMute = () => onVolume(muted ? (preMute.current > 0 ? preMute.current : 25) : 0);
 
   // Current track line from TuneIn now-playing: "Artist · Title" when both are
-  // known, else whichever we have. Hidden when it would just repeat the station.
-  const artist = clean(station?.artist);
-  const track = clean(station?.track);
+  // known, else whichever we have. Shown only once line one is the real station —
+  // if we had to fall back to the track there, repeating it below would duplicate.
   const nowLine = artist && track ? `${artist} · ${track}` : track || artist;
-  const showNow = playing && nowLine && nowLine !== displayName;
+  const showNow = playing && !!nowLine && !!stationName && nowLine !== stationName;
 
   // Pill + sub-line label tracks the start-up phase so the user sees progress
   // instead of the station blinking away.
