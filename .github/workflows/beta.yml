@@ -83,7 +83,7 @@ jobs:
         run: sha256sum retouch-armv7l > SHA256SUMS
 
       - name: Upload beta assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: beta-assets
           path: |
@@ -113,7 +113,7 @@ jobs:
             -f content=rocket --silent || true
 
       - name: Download beta assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: beta-assets
 
@@ -152,7 +152,7 @@ jobs:
       # Pinned to a commit SHA (not a mutable tag): this action holds the write
       # token, so a retagged `v3` must not be able to silently change what runs.
       - name: Publish beta prerelease
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
