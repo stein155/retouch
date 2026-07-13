@@ -520,24 +520,55 @@ func parseSiteSurvey(body []byte) []WifiNetwork {
 	return out
 }
 
-// signalStrengthToken buckets the survey's numeric signalStrength (0..100) into the
-// same tokens NetworkInfo uses, so the UI can localise it. Anything unparseable or
-// out of range yields "" and the UI then shows no signal label.
+// signalStrengthToken buckets the survey's signalStrength into the same tokens
+// NetworkInfo uses, so the UI can localise it. It first normalises the raw value
+// to a 0..100 quality percentage (see signalQuality), then buckets once. An
+// unparseable or out-of-range value yields "" and the UI shows no signal label.
 func signalStrengthToken(s string) string {
-	n, err := strconv.Atoi(strings.TrimSpace(s))
-	if err != nil || n < 0 || n > 100 {
+	q, ok := signalQuality(s)
+	if !ok {
 		return ""
 	}
 	switch {
-	case n >= 75:
+	case q >= 75:
 		return "excellent"
-	case n >= 50:
+	case q >= 50:
 		return "good"
-	case n >= 25:
+	case q >= 25:
 		return "fair"
 	default:
 		return "poor"
 	}
+}
+
+// signalQuality normalises a raw survey signalStrength to a 0..100 quality
+// percentage. Real firmware reports RSSI in dBm (a negative number); the
+// simulator and some builds report a quality percentage directly. Negative
+// values are mapped with the common linear approximation 2*(dBm+100), clamped
+// to 0..100. ok is false when the value is unparseable or a percentage >100.
+func signalQuality(s string) (q int, ok bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return 0, false
+	}
+	if n < 0 {
+		q := 2 * (n + 100)
+		return clamp(q, 0, 100), true
+	}
+	if n > 100 {
+		return 0, false
+	}
+	return n, true
+}
+
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // SetWifi joins a Wi-Fi network via the native /addWirelessProfile endpoint (:8090).
@@ -604,13 +635,7 @@ func (c *Client) Volume(ctx context.Context) (int, error) {
 
 // SetVolume sets the speaker volume, clamped to 0..100.
 func (c *Client) SetVolume(ctx context.Context, level int) error {
-	if level < 0 {
-		level = 0
-	}
-	if level > 100 {
-		level = 100
-	}
-	body := fmt.Sprintf("<volume>%d</volume>", level)
+	body := fmt.Sprintf("<volume>%d</volume>", clamp(level, 0, 100))
 	return c.post(ctx, "/volume", body)
 }
 
