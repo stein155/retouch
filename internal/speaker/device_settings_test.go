@@ -95,6 +95,28 @@ func TestNetworkInfoPrefersWifi(t *testing.T) {
 	}
 }
 
+func TestSignalStrengthTokenAcceptsPercentAndDBM(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want string
+	}{
+		{"82", "excellent"},
+		{"55", "good"},
+		{"28", "fair"},
+		{"12", "poor"},
+		{"-55", "excellent"},
+		{"-65", "good"},
+		{"-75", "fair"},
+		{"-85", "poor"},
+		{"101", ""},
+		{"nope", ""},
+	} {
+		if got := signalStrengthToken(tc.in); got != tc.want {
+			t.Errorf("signalStrengthToken(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // recordingServer captures the last POST path+body and answers 200, so write
 // methods can be checked for the exact body the speaker expects.
 func recordingServer(t *testing.T, lastPath, lastBody *string) *Client {

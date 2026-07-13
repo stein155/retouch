@@ -520,12 +520,28 @@ func parseSiteSurvey(body []byte) []WifiNetwork {
 	return out
 }
 
-// signalStrengthToken buckets the survey's numeric signalStrength (0..100) into the
-// same tokens NetworkInfo uses, so the UI can localise it. Anything unparseable or
-// out of range yields "" and the UI then shows no signal label.
+// signalStrengthToken buckets the survey's numeric signalStrength into the same
+// tokens NetworkInfo uses, so the UI can localise it. Firmware reports either
+// quality (0..100) or RSSI in dBm (negative); anything else yields "" and the UI
+// then shows no signal label.
 func signalStrengthToken(s string) string {
 	n, err := strconv.Atoi(strings.TrimSpace(s))
-	if err != nil || n < 0 || n > 100 {
+	if err != nil {
+		return ""
+	}
+	if n < 0 {
+		switch {
+		case n >= -60:
+			return "excellent"
+		case n >= -70:
+			return "good"
+		case n >= -80:
+			return "fair"
+		default:
+			return "poor"
+		}
+	}
+	if n > 100 {
 		return ""
 	}
 	switch {
