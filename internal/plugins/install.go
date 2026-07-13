@@ -39,7 +39,7 @@ func Catalog() []CatalogEntry {
 		{
 			Name:        "afvalwijzer",
 			Title:       "Afvalwijzer",
-			Description: "Show the next Dutch waste pickup on the SoundTouch 20 display and optionally announce it through the speaker at set times.",
+			Description: "Announce the next Dutch waste pickup through the speaker at set times, and show it on the display where the speaker has one.",
 			Repo:        "stein155/retouch-afvalwijzer",
 			Asset:       "retouch-afvalwijzer-armv7l",
 		},
@@ -50,6 +50,17 @@ func Catalog() []CatalogEntry {
 			Repo:        "stein155/retouch-ring",
 			Asset:       "retouch-ring-armv7l",
 		},
+	}
+}
+
+// freeStaleArtifacts removes files a prior install can strand in the plugin dir
+// but that are never the live binary: a half-written bin.new (a full-size binary
+// left by a crashed/power-lost download) and the rotated log generation. On the
+// speaker's small disk these leftovers are the difference between an update that
+// fits and one that fails with "disk full". Best-effort: absent files are fine.
+func freeStaleArtifacts(dir string) {
+	for _, name := range []string{binName + ".new", "log.old"} {
+		_ = os.Remove(filepath.Join(dir, name))
 	}
 }
 
@@ -108,6 +119,12 @@ func (m *Manager) Install(ctx context.Context, entry CatalogEntry, tag string) e
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create plugin dir: %w", err)
 	}
+	// Reclaim space before pulling the new binary. A plugin binary is large next to
+	// the speaker's tiny disk, so an update that crashes or loses power mid-download
+	// can strand a full-size bin.new; left behind, it eats the headroom the next
+	// update needs and the retry fails with "disk full". Clearing these leftovers
+	// (and the rotated log) up front is safe — none is the running binary.
+	freeStaleArtifacts(dir)
 	base := m.dlBase + "/" + entry.Repo + "/releases/download/" + tag
 	newBin := filepath.Join(dir, binName+".new")
 	sums := filepath.Join(dir, "SHA256SUMS")
@@ -173,6 +190,7 @@ func (m *Manager) InstallLocal(name string, r io.Reader) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create plugin dir: %w", err)
 	}
+	freeStaleArtifacts(dir) // reclaim any stranded download before writing the upload
 	newBin := filepath.Join(dir, binName+".new")
 	f, err := os.OpenFile(newBin, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {

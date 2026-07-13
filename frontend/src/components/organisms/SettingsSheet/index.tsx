@@ -274,10 +274,6 @@ function WifiSection({ network }: { network: NetworkInfo | null }) {
         </>
       )}
       {status.text && <FieldHint $error={status.phase === 'error'}>{status.text}</FieldHint>}
-      <ScanButton onClick={scan} disabled={scanning} style={{ marginTop: 12 }}>
-        {scanning ? <Spinner $scan /> : <Icon.refresh width="18" height="18" />}
-        <span>{t('wifiRescan')}</span>
-      </ScanButton>
       <FieldHint style={{ marginTop: 12 }}>{t('wifiSetupHint')}</FieldHint>
     </>
   );
@@ -805,8 +801,8 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
   const categories = [
     { key: 'general', icon: Icon.speaker },
     { key: 'sound', icon: Icon.volume },
-    (wifiOpt !== null || network) && { key: 'network', icon: Icon.wifi },
     { key: 'multiroom', icon: Icon.layers },
+    network && { key: 'network', icon: Icon.wifi },
     { key: 'mqtt', icon: Icon.globe },
     { key: 'plugins', icon: Icon.settings },
     { key: 'security', icon: Icon.shield },
@@ -840,7 +836,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onSetLang(e.target.value)}
             aria-label={t('language')}
           >
-            {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+            {LANGS.map((l) => <option key={l.code} value={l.code}>{l.flag} {l.label}</option>)}
           </Select>
           <SelectChev aria-hidden="true"><Icon.chevron width="18" height="18" /></SelectChev>
         </SelectWrap>
@@ -858,6 +854,27 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
           </Select>
           <SelectChev aria-hidden="true"><Icon.chevron width="18" height="18" /></SelectChev>
         </SelectWrap>
+
+        {/* Streaming optimization is a speaker setting (power-saving), so it lives
+            under General next to the other whole-device preferences. Only shown
+            when the speaker reports it. */}
+        {wifiOpt !== null && (
+          <>
+            <FormSection style={{ marginTop: 22 }}>{t('wifiOptimization')}</FormSection>
+            <FieldCard>
+              <FieldRow>
+                <FieldRowLabel as="span">{t('wifiOptimization')}</FieldRowLabel>
+                <Toggle
+                  on={wifiOpt}
+                  onClick={onWifiOpt}
+                  aria-label={t('wifiOptimization')}
+                  style={{ marginLeft: 'auto' }}
+                />
+              </FieldRow>
+            </FieldCard>
+            <FieldHint>{t('wifiOptimizationHint')}</FieldHint>
+          </>
+        )}
       </>
     ),
     sound: (
@@ -893,27 +910,7 @@ export function SettingsSheet({ open, onClose, lang, onSetLang, themeMode, onSet
         )}
       </>
     ),
-    network: (
-      <>
-        {wifiOpt !== null && (
-          <>
-            <FieldCard>
-              <FieldRow>
-                <FieldRowLabel as="span">{t('wifiOptimization')}</FieldRowLabel>
-                <Toggle
-                  on={wifiOpt}
-                  onClick={onWifiOpt}
-                  aria-label={t('wifiOptimization')}
-                  style={{ marginLeft: 'auto' }}
-                />
-              </FieldRow>
-            </FieldCard>
-            <FieldHint>{t('wifiOptimizationHint')}</FieldHint>
-          </>
-        )}
-        <WifiSection network={network} />
-      </>
-    ),
+    network: <WifiSection network={network} />,
     multiroom: <MultiroomSection open={open && page === 'multiroom'} />,
     mqtt: <MqttSection open={open && page === 'mqtt'} onAuthError={onAuthExpired} />,
     security: (
