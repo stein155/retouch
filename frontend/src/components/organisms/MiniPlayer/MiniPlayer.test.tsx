@@ -25,6 +25,20 @@ describe('MiniPlayer', () => {
     expect(screen.getByText(/Artist · Song/)).toBeInTheDocument();
   });
 
+  it('does not repeat the track when the station name is unknown', () => {
+    // With no real station name, line one falls back to the track; the track line
+    // below is suppressed so the same text isn't shown twice.
+    const noName: Player = {
+      status: 'playing',
+      station: { name: '', art: '', tuneInId: null, track: 'Song', artist: 'Artist' },
+    };
+    renderWithTheme(
+      <MiniPlayer player={noName} volume={20} speakerName="Keuken" loading={false} onStop={() => {}} onVolume={() => {}} />,
+    );
+    expect(screen.getByText('Song')).toBeInTheDocument();
+    expect(screen.queryByText(/Artist · Song/)).not.toBeInTheDocument();
+  });
+
   it('mutes to 0 and restores the previous volume on unmute', async () => {
     const user = userEvent.setup();
     const { onVolume, rerender } = setup(60);
