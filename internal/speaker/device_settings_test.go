@@ -95,6 +95,51 @@ func TestNetworkInfoPrefersWifi(t *testing.T) {
 	}
 }
 
+func TestSignalStrengthToken(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want string
+	}{
+		// Quality percentages (simulator / some builds).
+		{"82", "excellent"},
+		{"55", "good"},
+		{"28", "fair"},
+		{"12", "poor"},
+		// RSSI in dBm (real firmware), normalised via 2*(dBm+100).
+		{"-55", "excellent"}, // 90
+		{"-65", "good"},      // 70
+		{"-78", "fair"},      // 44
+		{"-90", "poor"},      // 20
+		// Out of range / unparseable -> no label.
+		{"101", ""},
+		{"nope", ""},
+	} {
+		if got := signalStrengthToken(tc.in); got != tc.want {
+			t.Errorf("signalStrengthToken(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestSignalQualityClampsDBM(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want int
+		ok   bool
+	}{
+		{"-30", 100, true}, // 2*(70) = 140, clamped
+		{"-100", 0, true},  // 2*(0) = 0
+		{"-120", 0, true},  // below the linear range, clamped
+		{"73", 73, true},   // percentage passes through
+		{"101", 0, false},  // percentage out of range
+		{"", 0, false},     // unparseable
+	} {
+		got, ok := signalQuality(tc.in)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("signalQuality(%q) = (%d, %v), want (%d, %v)", tc.in, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
 // recordingServer captures the last POST path+body and answers 200, so write
 // methods can be checked for the exact body the speaker expects.
 func recordingServer(t *testing.T, lastPath, lastBody *string) *Client {
