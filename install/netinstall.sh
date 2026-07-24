@@ -34,6 +34,7 @@ MARGE_LISTEN=127.0.0.1:9080
 CFG=/opt/Bose/etc/SoundTouchSdkPrivateCfg.xml
 NV_CFG=/mnt/nv/OverrideSdkPrivateCfg.xml
 START=$HOME_DIR/start.sh
+FIX_CLOUD=$HOME_DIR/fix-cloud.sh
 
 log() { echo "[retouch] $*" >>"$LOG" 2>&1; }
 # sha256_of prints the hex SHA-256 of a file using whichever tool the firmware has.
@@ -173,6 +174,7 @@ STARTSCRIPT
 # A pre-existing rc.local that isn't ours is backed up once, so uninstall.sh can
 # put it back instead of deleting it.
 write_rc_local() {
+	write_fix_cloud_script
 	write_start_script
 	if [ -f /mnt/nv/rc.local ] && ! grep -q "$START" /mnt/nv/rc.local 2>/dev/null \
 		&& [ ! -f /mnt/nv/rc.local.original ]; then
@@ -184,6 +186,27 @@ $START >/tmp/retouch-start.log 2>&1 &
 RC
 	chmod 0755 /mnt/nv/rc.local.new 2>/dev/null
 	mv /mnt/nv/rc.local.new /mnt/nv/rc.local
+}
+
+write_fix_cloud_script() {
+	cat > "$FIX_CLOUD.new" <<'FIXCLOUD'
+#!/bin/sh
+M=http://127.0.0.1:9080
+for cfg in /mnt/nv/OverrideSdkPrivateCfg.xml /opt/Bose/etc/SoundTouchSdkPrivateCfg.xml; do
+	[ -f "$cfg" ] || continue
+	mount / -o rw,remount 2>/dev/null || mount -o remount,rw / 2>/dev/null || true
+	[ -f "$cfg.original" ] || cp "$cfg" "$cfg.original" 2>/dev/null || true
+	sed \
+		-e "s#<margeServerUrl>[^<]*</margeServerUrl>#<margeServerUrl>$M</margeServerUrl>#" \
+		-e "s#<statsServerUrl>[^<]*</statsServerUrl>#<statsServerUrl>$M</statsServerUrl>#" \
+		-e "s#<swUpdateUrl>[^<]*</swUpdateUrl>#<swUpdateUrl>$M/updates/soundtouch</swUpdateUrl>#" \
+		-e "s#<bmxRegistryUrl>[^<]*</bmxRegistryUrl>#<bmxRegistryUrl>$M/bmx/registry/v1/services</bmxRegistryUrl>#" \
+		"$cfg" > "$cfg.new" && mv "$cfg.new" "$cfg"
+done
+mount / -o ro,remount 2>/dev/null || true
+FIXCLOUD
+	chmod 0755 "$FIX_CLOUD.new" 2>/dev/null
+	mv "$FIX_CLOUD.new" "$FIX_CLOUD"
 }
 
 # redirect_cfg rewrites the four service URLs in one config XML. The /mnt/nv override

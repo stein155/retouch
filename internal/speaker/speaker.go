@@ -664,6 +664,23 @@ func (c *Client) Select(ctx context.Context, source, itemType, location, name, a
 	return c.post(ctx, "/select", contentItemXML(source, itemType, location, account, name, art))
 }
 
+// PlayStreamURL is the boring fallback for factory-reset firmware that has not
+// registered TUNEIN as a native source yet: hand the resolved stream to the local
+// UPnP renderer directly.
+func (c *Client) PlayStreamURL(ctx context.Context, streamURL string) error {
+	if streamURL == "" {
+		return fmt.Errorf("empty stream URL")
+	}
+	control := fmt.Sprintf("http://%s:8091/AVTransport/Control", c.host)
+	if err := c.soap(ctx, control, "urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI",
+		`<u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><CurrentURI>`+
+			xmlEsc(streamURL)+`</CurrentURI><CurrentURIMetaData></CurrentURIMetaData></u:SetAVTransportURI>`); err != nil {
+		return err
+	}
+	return c.soap(ctx, control, "urn:schemas-upnp-org:service:AVTransport:1#Play",
+		`<u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><Speed>1</Speed></u:Play>`)
+}
+
 // Member is one speaker in a multiroom zone: its deviceID (which is also the
 // speaker's MAC, used as the zone's master id and a member's text content) and
 // its current LAN address.
@@ -821,6 +838,27 @@ func (c *Client) post(ctx context.Context, path, body string) error {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("POST %s status %d", path, resp.StatusCode)
+	}
+	return nil
+}
+
+func (c *Client) soap(ctx context.Context, url, action, inner string) error {
+	body := `<?xml version="1.0" encoding="utf-8"?>` +
+		`<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">` +
+		`<s:Body>` + inner + `</s:Body></s:Envelope>`
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", `text/xml; charset="utf-8"`)
+	req.Header.Set("SOAPACTION", action)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("SOAP %s status %d", action, resp.StatusCode)
 	}
 	return nil
 }

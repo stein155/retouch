@@ -27,6 +27,7 @@ NETINSTALL="${RETOUCH_NETINSTALL_URL:-https://raw.githubusercontent.com/$REPO/$B
 PLACE="http://rt.invalid"
 MARGE_BASE="http://127.0.0.1:9080"  # on-speaker stub; where we repoint the cloud URLs
 PAIR_PORT=${RETOUCH_PAIR_PORT:-18083}
+FIX_CLOUD=/mnt/nv/retouch/fix-cloud.sh
 
 API_PORT=8090                   # speakers answer here; used only to find them
 APP_PORT=8000                   # ReTouch's web app; also reachable on :80 via redirect
@@ -669,6 +670,14 @@ wait_ready
 # still restarts once more below before we report success.
 if [ "$up" -eq 1 ]; then
 	step_ok "$(msg installed_ok)"
+	# fw27 keeps an /mnt/nv OverrideSdkPrivateCfg.xml that wins over the rootfs cfg.
+	# sys configuration silently misses BMX/stats there, so run the on-box fixer once
+	# through the same marge hook before the final reboot reloads BoseApp's config.
+	send "envswitch boseurls set \"$MARGE_BASE;$FIX_CLOUD\" $MARGE_BASE/updates/soundtouch"
+	account_body='<PairDeviceWithAccount><accountId>9999999</accountId><userAuthToken>retouch</userAuthToken></PairDeviceWithAccount>'
+	curl -fsS -X POST --connect-timeout 3 --max-time 20 \
+		-H 'Content-Type: application/xml' -d "$account_body" \
+		"http://$IP:$API_PORT/setMargeAccount" >/dev/null 2>&1 || true
 	send "envswitch boseurls set $MARGE_BASE $MARGE_BASE/updates/soundtouch"
 	send "sys configuration bmxRegistryUrl $MARGE_BASE/bmx/registry/v1/services"
 	send "sys configuration statsServerUrl $MARGE_BASE"
