@@ -871,13 +871,6 @@ func (s *Server) playPreset(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "play failed", err)
 		return
 	}
-	time.Sleep(2 * time.Second)
-	if np, err := s.speaker.NowPlaying(ctx); err == nil && np.Source == "INVALID_SOURCE" {
-		if p, ok := s.store.Get(slot); ok && p.StationID != "" {
-			s.playStationID(w, r, p.StationID, p.Name)
-			return
-		}
-	}
 	s.log.Info("play preset", "slot", slot)
 	s.hub.nudge() // push the new playback state to browsers at once
 	writeJSON(w, 200, map[string]int{"playing": slot})
@@ -903,17 +896,7 @@ func (s *Server) playStationID(w http.ResponseWriter, r *http.Request, stationID
 	s.speaker.Wake(ctx)
 	loc := "/v1/playback/station/" + stationID
 	if err := s.speaker.Select(ctx, "TUNEIN", "stationurl", loc, name, "", speaker.InternetRadioIcon); err != nil {
-		urls, resolveErr := s.tunein.Resolve(ctx, stationID)
-		if resolveErr != nil || len(urls) == 0 {
-			s.fail(w, "play failed", err)
-			return
-		}
-		if streamErr := s.speaker.PlayStreamURL(ctx, urls[0]); streamErr != nil {
-			s.fail(w, "play failed", streamErr)
-			return
-		}
-		s.log.Info("play via stream fallback", "station", stationID, "name", name)
-		writeJSON(w, 200, map[string]string{"status": "playing", "station": stationID})
+		s.fail(w, "play failed", err)
 		return
 	}
 	s.log.Info("play", "station", stationID, "name", name)

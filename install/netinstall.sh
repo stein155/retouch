@@ -103,6 +103,7 @@ LOG=/tmp/retouch.log
 APP_PORT=${WEB_LISTEN##*:}
 MARGE_PORT=${MARGE_LISTEN##*:}
 AUTH_TLS_PORT=9443
+FIX_CLOUD=$FIX_CLOUD
 
 log() { echo "[retouch-start] \$*" >>"\$LOG" 2>&1; }
 
@@ -162,6 +163,7 @@ expose_speaker_auth() {
 	fi
 }
 
+\$FIX_CLOUD >/tmp/retouch-fix-cloud.log 2>&1 || true
 expose_8080
 expose_speaker_auth
 $LAUNCH >>"\$LOG" 2>&1 &
