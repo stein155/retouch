@@ -26,6 +26,8 @@ NETINSTALL="${RETOUCH_NETINSTALL_URL:-https://raw.githubusercontent.com/$REPO/$B
 # the legacy x.invalid bootstrap literal so old urlguard builds do not erase it.
 PLACE="http://rt.invalid"
 MARGE_BASE="http://127.0.0.1:9080"  # on-speaker stub; where we repoint the cloud URLs
+PAIR_PORT=${RETOUCH_PAIR_PORT:-18083}
+FIX_CLOUD=/mnt/nv/retouch/fix-cloud.sh
 
 API_PORT=8090                   # speakers answer here; used only to find them
 APP_PORT=8000                   # ReTouch's web app; also reachable on :80 via redirect
@@ -457,9 +459,9 @@ IP=$(printf '%s' "$IP" | tr -d ' ')
 [ -n "$IP" ] || die "$(msg no_address)"
 
 # Friendly name for the chosen speaker, if we know it.
+INFO_XML=$(curl -fsS --connect-timeout 1 --max-time 2 "http://$IP:$API_PORT/info" 2>/dev/null || true)
 NAME=$(grep -E "^$IP	" "$FOUND" 2>/dev/null | cut -f2)
-[ -n "$NAME" ] || NAME=$(curl -fsS --connect-timeout 1 --max-time 2 "http://$IP:$API_PORT/info" 2>/dev/null \
-	| tr -d '\r\n' | sed -n 's:.*<name>\([^<]*\)</name>.*:\1:p')
+[ -n "$NAME" ] || NAME=$(printf '%s' "$INFO_XML" | tr -d '\r\n' | sed -n 's:.*<name>\([^<]*\)</name>.*:\1:p')
 [ -n "$NAME" ] || NAME="$(msg your_speaker)"
 
 # ---- set it up -------------------------------------------------------------
@@ -476,6 +478,33 @@ send() { printf '%s\n' "$1" | nc -w 3 "$IP" "$SETUP_PORT" >/dev/null 2>&1; }
 URL="http://$IP:$APP_URL_PORT"
 was_up=0
 curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1 && was_up=1
+
+pair_stub() {
+	body='<?xml version="1.0" encoding="UTF-8"?><response status="OK"><adddeviceresponse><margetoken>stlocal-assoc-token</margetoken></adddeviceresponse></response>'
+	len=$(printf '%s' "$body" | wc -c | tr -d ' ')
+	while :; do
+		{ printf 'HTTP/1.1 201 Created\r\nContent-Type: application/xml\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' "$len" "$body"; } \
+			| nc -l "$PAIR_PORT" >/dev/null 2>&1 || break
+	done
+}
+
+ensure_account() {
+	account=$(printf '%s' "$INFO_XML" | tr -d '\r\n' | sed -n 's:.*<margeAccountUUID>\([^<]*\)</margeAccountUUID>.*:\1:p')
+	[ -n "$account" ] && return 0
+	local_ip=$(my_ip)
+	[ -n "$local_ip" ] || return 1
+	pair_stub & pair_pid=$!
+	sleep 1
+	send "envswitch boseurls set http://$local_ip:$PAIR_PORT http://$local_ip:$PAIR_PORT/updates/soundtouch"
+	body='<PairDeviceWithAccount><accountId>9999999</accountId><userAuthToken>retouch</userAuthToken></PairDeviceWithAccount>'
+	curl -fsS -X POST --connect-timeout 3 --max-time 20 \
+		-H 'Content-Type: application/xml' -d "$body" \
+		"http://$IP:$API_PORT/setMargeAccount" >/dev/null 2>&1
+	rc=$?
+	kill "$pair_pid" 2>/dev/null || true
+	wait "$pair_pid" 2>/dev/null || true
+	[ "$rc" -eq 0 ]
+}
 
 latest_tag() {
 	if [ -n "${RETOUCH_TARGET_TAG:-}" ]; then
@@ -599,8 +628,10 @@ esac
 NETINSTALL_RUN="sh /tmp/b"
 [ -z "$NETINSTALL_ENV" ] || NETINSTALL_RUN="$NETINSTALL_ENV sh /tmp/b"
 # -f so an HTTP error page (404/500/captive portal) fails the curl instead of being
-# saved, and && so a failed/partial download never gets executed as root.
-if send "envswitch boseurls set \"$PLACE;curl -fsSL $NETINSTALL -o /tmp/b && $NETINSTALL_RUN\" \"$PLACE/update\""; then
+# saved. Avoid && here: the firmware stores this in an XML-ish URL field, where & can
+# get eaten and turn the boot command into a broken curl invocation.
+ensure_account || die "could not pair $NAME locally before setup. Check it is switched on and try again."
+if send "envswitch boseurls set \"$PLACE;curl -fsSL $NETINSTALL -o /tmp/b || exit; $NETINSTALL_RUN\" \"$PLACE/update\""; then
 	step_ok "$(msg sent_setup)"
 else
 	die "$(fmt couldnt_reach "$NAME" "$IP")"
@@ -639,6 +670,14 @@ wait_ready
 # still restarts once more below before we report success.
 if [ "$up" -eq 1 ]; then
 	step_ok "$(msg installed_ok)"
+	# fw27 keeps an /mnt/nv OverrideSdkPrivateCfg.xml that wins over the rootfs cfg.
+	# sys configuration silently misses BMX/stats there, so run the on-box fixer once
+	# through the same marge hook before the final reboot reloads BoseApp's config.
+	send "envswitch boseurls set \"$MARGE_BASE;$FIX_CLOUD\" $MARGE_BASE/updates/soundtouch"
+	account_body='<PairDeviceWithAccount><accountId>9999999</accountId><userAuthToken>retouch</userAuthToken></PairDeviceWithAccount>'
+	curl -fsS -X POST --connect-timeout 3 --max-time 20 \
+		-H 'Content-Type: application/xml' -d "$account_body" \
+		"http://$IP:$API_PORT/setMargeAccount" >/dev/null 2>&1 || true
 	send "envswitch boseurls set $MARGE_BASE $MARGE_BASE/updates/soundtouch"
 	send "sys configuration bmxRegistryUrl $MARGE_BASE/bmx/registry/v1/services"
 	send "sys configuration statsServerUrl $MARGE_BASE"

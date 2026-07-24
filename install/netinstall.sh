@@ -32,7 +32,9 @@ WEB_LISTEN=:8000
 # never needs to be on the LAN (where it would expose the cloud-emulation API).
 MARGE_LISTEN=127.0.0.1:9080
 CFG=/opt/Bose/etc/SoundTouchSdkPrivateCfg.xml
+NV_CFG=/mnt/nv/OverrideSdkPrivateCfg.xml
 START=$HOME_DIR/start.sh
+FIX_CLOUD=$HOME_DIR/fix-cloud.sh
 
 log() { echo "[retouch] $*" >>"$LOG" 2>&1; }
 # sha256_of prints the hex SHA-256 of a file using whichever tool the firmware has.
@@ -101,6 +103,7 @@ LOG=/tmp/retouch.log
 APP_PORT=${WEB_LISTEN##*:}
 MARGE_PORT=${MARGE_LISTEN##*:}
 AUTH_TLS_PORT=9443
+FIX_CLOUD=$FIX_CLOUD
 
 log() { echo "[retouch-start] \$*" >>"\$LOG" 2>&1; }
 
@@ -160,6 +163,7 @@ expose_speaker_auth() {
 	fi
 }
 
+\$FIX_CLOUD >/tmp/retouch-fix-cloud.log 2>&1 || true
 expose_8080
 expose_speaker_auth
 $LAUNCH >>"\$LOG" 2>&1 &
@@ -172,6 +176,7 @@ STARTSCRIPT
 # A pre-existing rc.local that isn't ours is backed up once, so uninstall.sh can
 # put it back instead of deleting it.
 write_rc_local() {
+	write_fix_cloud_script
 	write_start_script
 	if [ -f /mnt/nv/rc.local ] && ! grep -q "$START" /mnt/nv/rc.local 2>/dev/null \
 		&& [ ! -f /mnt/nv/rc.local.original ]; then
@@ -185,22 +190,57 @@ RC
 	mv /mnt/nv/rc.local.new /mnt/nv/rc.local
 }
 
-# redirect_cloud rewrites the four service URLs in SoundTouchSdkPrivateCfg.xml to
-# MARGE_BASE, keeping a one-time .original backup. Idempotent: re-running only
-# rewrites if the file does not already point at us. Requires a read-write rootfs.
-redirect_cloud() {
-	[ -f "$CFG" ] || { log "no $CFG (firmware layout differs) — skipping URL redirect"; return 1; }
-	mount / -o rw,remount 2>>"$LOG" || mount -o remount,rw / 2>>"$LOG" || { log "could not remount / rw"; return 1; }
-	[ -f "$CFG.original" ] || cp "$CFG" "$CFG.original"
-	if grep -q "$MARGE_BASE" "$CFG" 2>/dev/null; then log "cloud already redirected"; mount / -o ro,remount 2>/dev/null; return 0; fi
+write_fix_cloud_script() {
+	cat > "$FIX_CLOUD.new" <<'FIXCLOUD'
+#!/bin/sh
+M=http://127.0.0.1:9080
+for cfg in /mnt/nv/OverrideSdkPrivateCfg.xml /opt/Bose/etc/SoundTouchSdkPrivateCfg.xml; do
+	[ -f "$cfg" ] || continue
+	mount / -o rw,remount 2>/dev/null || mount -o remount,rw / 2>/dev/null || true
+	[ -f "$cfg.original" ] || cp "$cfg" "$cfg.original" 2>/dev/null || true
+	sed \
+		-e "s#<margeServerUrl>[^<]*</margeServerUrl>#<margeServerUrl>$M</margeServerUrl>#" \
+		-e "s#<statsServerUrl>[^<]*</statsServerUrl>#<statsServerUrl>$M</statsServerUrl>#" \
+		-e "s#<swUpdateUrl>[^<]*</swUpdateUrl>#<swUpdateUrl>$M/updates/soundtouch</swUpdateUrl>#" \
+		-e "s#<bmxRegistryUrl>[^<]*</bmxRegistryUrl>#<bmxRegistryUrl>$M/bmx/registry/v1/services</bmxRegistryUrl>#" \
+		"$cfg" > "$cfg.new" && mv "$cfg.new" "$cfg"
+done
+mount / -o ro,remount 2>/dev/null || true
+FIXCLOUD
+	chmod 0755 "$FIX_CLOUD.new" 2>/dev/null
+	mv "$FIX_CLOUD.new" "$FIX_CLOUD"
+}
+
+# redirect_cfg rewrites the four service URLs in one config XML. The /mnt/nv override
+# wins over the rootfs default on fw27, so patch both when present.
+redirect_cfg() {
+	cfg=$1
+	[ -f "$cfg" ] || return 0
+	[ -f "$cfg.original" ] || cp "$cfg" "$cfg.original"
+	if grep -q "<margeServerUrl>$MARGE_BASE</margeServerUrl>" "$cfg" 2>/dev/null \
+		&& grep -q "<statsServerUrl>$MARGE_BASE</statsServerUrl>" "$cfg" 2>/dev/null \
+		&& grep -q "<swUpdateUrl>$MARGE_BASE/updates/soundtouch</swUpdateUrl>" "$cfg" 2>/dev/null \
+		&& grep -q "<bmxRegistryUrl>$MARGE_BASE/bmx/registry/v1/services</bmxRegistryUrl>" "$cfg" 2>/dev/null; then
+		log "cloud already redirected in $cfg"
+		return 0
+	fi
 	sed \
 		-e "s#<margeServerUrl>[^<]*</margeServerUrl>#<margeServerUrl>$MARGE_BASE</margeServerUrl>#" \
 		-e "s#<statsServerUrl>[^<]*</statsServerUrl>#<statsServerUrl>$MARGE_BASE</statsServerUrl>#" \
 		-e "s#<swUpdateUrl>[^<]*</swUpdateUrl>#<swUpdateUrl>$MARGE_BASE/updates/soundtouch</swUpdateUrl>#" \
 		-e "s#<bmxRegistryUrl>[^<]*</bmxRegistryUrl>#<bmxRegistryUrl>$MARGE_BASE/bmx/registry/v1/services</bmxRegistryUrl>#" \
-		"$CFG.original" > "$CFG.new" && mv "$CFG.new" "$CFG"
-	log "redirected cloud URLs -> $MARGE_BASE (backup at $CFG.original)"
+		"$cfg" > "$cfg.new" && mv "$cfg.new" "$cfg"
+	log "redirected cloud URLs in $cfg -> $MARGE_BASE (backup at $cfg.original)"
+	return 0
+}
+
+# redirect_cloud rewrites the rootfs config plus the fw27 NAND override.
+redirect_cloud() {
+	[ -f "$CFG" ] || [ -f "$NV_CFG" ] || { log "no cloud config found — skipping URL redirect"; return 1; }
+	mount / -o rw,remount 2>>"$LOG" || mount -o remount,rw / 2>>"$LOG" || { log "could not remount / rw"; return 1; }
+	redirect_cfg "$CFG"
 	mount / -o ro,remount 2>/dev/null
+	redirect_cfg "$NV_CFG"
 }
 
 mkdir "$LOCK" 2>/dev/null || { log "locked"; exit 0; }
