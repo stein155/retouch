@@ -32,6 +32,7 @@ WEB_LISTEN=:8000
 # never needs to be on the LAN (where it would expose the cloud-emulation API).
 MARGE_LISTEN=127.0.0.1:9080
 CFG=/opt/Bose/etc/SoundTouchSdkPrivateCfg.xml
+NV_CFG=/mnt/nv/OverrideSdkPrivateCfg.xml
 START=$HOME_DIR/start.sh
 
 log() { echo "[retouch] $*" >>"$LOG" 2>&1; }
@@ -185,22 +186,36 @@ RC
 	mv /mnt/nv/rc.local.new /mnt/nv/rc.local
 }
 
-# redirect_cloud rewrites the four service URLs in SoundTouchSdkPrivateCfg.xml to
-# MARGE_BASE, keeping a one-time .original backup. Idempotent: re-running only
-# rewrites if the file does not already point at us. Requires a read-write rootfs.
-redirect_cloud() {
-	[ -f "$CFG" ] || { log "no $CFG (firmware layout differs) — skipping URL redirect"; return 1; }
-	mount / -o rw,remount 2>>"$LOG" || mount -o remount,rw / 2>>"$LOG" || { log "could not remount / rw"; return 1; }
-	[ -f "$CFG.original" ] || cp "$CFG" "$CFG.original"
-	if grep -q "$MARGE_BASE" "$CFG" 2>/dev/null; then log "cloud already redirected"; mount / -o ro,remount 2>/dev/null; return 0; fi
+# redirect_cfg rewrites the four service URLs in one config XML. The /mnt/nv override
+# wins over the rootfs default on fw27, so patch both when present.
+redirect_cfg() {
+	cfg=$1
+	[ -f "$cfg" ] || return 0
+	[ -f "$cfg.original" ] || cp "$cfg" "$cfg.original"
+	if grep -q "<margeServerUrl>$MARGE_BASE</margeServerUrl>" "$cfg" 2>/dev/null \
+		&& grep -q "<statsServerUrl>$MARGE_BASE</statsServerUrl>" "$cfg" 2>/dev/null \
+		&& grep -q "<swUpdateUrl>$MARGE_BASE/updates/soundtouch</swUpdateUrl>" "$cfg" 2>/dev/null \
+		&& grep -q "<bmxRegistryUrl>$MARGE_BASE/bmx/registry/v1/services</bmxRegistryUrl>" "$cfg" 2>/dev/null; then
+		log "cloud already redirected in $cfg"
+		return 0
+	fi
 	sed \
 		-e "s#<margeServerUrl>[^<]*</margeServerUrl>#<margeServerUrl>$MARGE_BASE</margeServerUrl>#" \
 		-e "s#<statsServerUrl>[^<]*</statsServerUrl>#<statsServerUrl>$MARGE_BASE</statsServerUrl>#" \
 		-e "s#<swUpdateUrl>[^<]*</swUpdateUrl>#<swUpdateUrl>$MARGE_BASE/updates/soundtouch</swUpdateUrl>#" \
 		-e "s#<bmxRegistryUrl>[^<]*</bmxRegistryUrl>#<bmxRegistryUrl>$MARGE_BASE/bmx/registry/v1/services</bmxRegistryUrl>#" \
-		"$CFG.original" > "$CFG.new" && mv "$CFG.new" "$CFG"
-	log "redirected cloud URLs -> $MARGE_BASE (backup at $CFG.original)"
+		"$cfg" > "$cfg.new" && mv "$cfg.new" "$cfg"
+	log "redirected cloud URLs in $cfg -> $MARGE_BASE (backup at $cfg.original)"
+	return 0
+}
+
+# redirect_cloud rewrites the rootfs config plus the fw27 NAND override.
+redirect_cloud() {
+	[ -f "$CFG" ] || [ -f "$NV_CFG" ] || { log "no cloud config found — skipping URL redirect"; return 1; }
+	mount / -o rw,remount 2>>"$LOG" || mount -o remount,rw / 2>>"$LOG" || { log "could not remount / rw"; return 1; }
+	redirect_cfg "$CFG"
 	mount / -o ro,remount 2>/dev/null
+	redirect_cfg "$NV_CFG"
 }
 
 mkdir "$LOCK" 2>/dev/null || { log "locked"; exit 0; }
