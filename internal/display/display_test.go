@@ -119,6 +119,15 @@ func TestRenderUnknownIconFallsBack(t *testing.T) {
 	}
 }
 
+func TestWasteTextShortens(t *testing.T) {
+	if got := wasteText("groen", "Morgen wordt groenafval opgehaald"); got != "Groenafval morgen" {
+		t.Fatalf("morgen text = %q", got)
+	}
+	if got := wasteText("groen", "Groenafval wordt opgehaald op 30-07-2026"); got != "Groenafval op 30-07" {
+		t.Fatalf("date text = %q", got)
+	}
+}
+
 // TestDumpScreens writes preview PNGs of every built-in icon to the ICONDUMP
 // dir for visual checks.
 func TestDumpScreens(t *testing.T) {

@@ -11,12 +11,15 @@ package display
 import (
 	"context"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/stein155/retouch/oled"
 )
+
+var wasteDate = regexp.MustCompile(`\b(\d{1,2})[-/](\d{1,2})(?:[-/]\d{2,4})?\b`)
 
 // A Content is one screen: an icon (built-in name or custom sprite) above a
 // localized line of text.
@@ -205,6 +208,9 @@ func render(c Content) []byte {
 	if len(art) == 0 {
 		art = icons["info"]
 	}
+	if isWasteIcon(c.Icon) {
+		return renderWaste(c.Icon, art, c.Text)
+	}
 	cv := oled.NewCanvas()
 	lines := oled.Wrap(strings.ToUpper(c.Text), 20, 3)
 	textTop := 90 - (len(lines)-1)*oled.TextHeight
@@ -219,4 +225,50 @@ func render(c Content) []byte {
 	}
 	cv.Rect(0, 0, oled.Width-1, oled.Height-1, 70)
 	return cv.Pix()
+}
+
+func renderWaste(icon string, art []string, text string) []byte {
+	cv := oled.NewCanvas()
+	w, _ := oled.SpriteSize(art)
+	cv.Sprite((oled.Width-w)/2, 4, art, 255, 150)
+	for i, line := range oled.Wrap(wasteText(icon, text), 10, 2) {
+		cv.TextScaledCentered(70+i*15, line, 2, 255)
+	}
+	return cv.Pix()
+}
+
+func isWasteIcon(icon string) bool {
+	switch icon {
+	case "groen", "papier", "pmd", "rest":
+		return true
+	default:
+		return false
+	}
+}
+
+func wasteText(icon, text string) string {
+	name := map[string]string{
+		"groen":  "Groenafval",
+		"papier": "Papier",
+		"pmd":    "PMD",
+		"rest":   "Restafval",
+	}[icon]
+	low := strings.ToLower(text)
+	if strings.Contains(low, "morgen") {
+		return name + " morgen"
+	}
+	if strings.Contains(low, "vandaag") {
+		return name + " vandaag"
+	}
+	if m := wasteDate.FindStringSubmatch(text); m != nil {
+		return name + " op " + pad2(m[1]) + "-" + pad2(m[2])
+	}
+	return strings.TrimSpace(text)
+}
+
+func pad2(s string) string {
+	if len(s) == 1 {
+		return "0" + s
+	}
+	return s
 }
