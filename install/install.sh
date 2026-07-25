@@ -380,6 +380,12 @@ my_ip() {
 	printf '%s' "${ip:-}"
 }
 
+my_ip_to() {
+	ip=$(ip -4 route get "$1" 2>/dev/null | sed -n 's/.*src \([0-9.][0-9.]*\).*/\1/p' | head -1)
+	[ -n "${ip:-}" ] || ip=$(my_ip)
+	printf '%s' "${ip:-}"
+}
+
 # Ask one address whether it's a Bose speaker; if so, record "ip<TAB>name<TAB>type".
 probe() {
 	xml=$(curl -fsS --connect-timeout 1 --max-time 2 "http://$1:$API_PORT/info" 2>/dev/null) || return 0
@@ -491,7 +497,7 @@ pair_stub() {
 ensure_account() {
 	account=$(printf '%s' "$INFO_XML" | tr -d '\r\n' | sed -n 's:.*<margeAccountUUID>\([^<]*\)</margeAccountUUID>.*:\1:p')
 	[ -n "$account" ] && return 0
-	local_ip=$(my_ip)
+	local_ip=$(my_ip_to "$IP")
 	[ -n "$local_ip" ] || return 1
 	pair_stub & pair_pid=$!
 	sleep 1
@@ -630,7 +636,7 @@ NETINSTALL_RUN="sh /tmp/b"
 # -f so an HTTP error page (404/500/captive portal) fails the curl instead of being
 # saved. Avoid && here: the firmware stores this in an XML-ish URL field, where & can
 # get eaten and turn the boot command into a broken curl invocation.
-ensure_account || die "could not pair $NAME locally before setup. Check it is switched on and try again."
+ensure_account || die "could not pair $NAME locally before setup. Check $IP can reach this computer at $(my_ip_to "$IP"):$PAIR_PORT, then try again."
 if send "envswitch boseurls set \"$PLACE;curl -fsSL $NETINSTALL -o /tmp/b || exit; $NETINSTALL_RUN\" \"$PLACE/update\""; then
 	step_ok "$(msg sent_setup)"
 else
