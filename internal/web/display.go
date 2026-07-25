@@ -32,6 +32,7 @@ type displayBody struct {
 	Icon    string   `json:"icon"`    // built-in icon name
 	Sprite  []string `json:"sprite"`  // optional custom sprite; overrides icon
 	Text    string   `json:"text"`    // sentence under the icon
+	Large   bool     `json:"large"`   // large layout: icon at top, 2× text, no border
 	Seconds int      `json:"seconds"` // notify: how long to show (default 8)
 }
 
@@ -40,7 +41,7 @@ func (s *Server) displayNotify(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.display.Notify(display.Content{Icon: body.Icon, Sprite: body.Sprite, Text: body.Text}, time.Duration(body.Seconds)*time.Second)
+	s.display.Notify(display.Content{Icon: body.Icon, Sprite: body.Sprite, Text: body.Text, Large: body.Large}, time.Duration(body.Seconds)*time.Second)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -53,7 +54,7 @@ func (s *Server) displaySetStandby(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"owner required"}`, http.StatusBadRequest)
 		return
 	}
-	s.display.SetStandby(body.Owner, display.Content{Icon: body.Icon, Sprite: body.Sprite, Text: body.Text})
+	s.display.SetStandby(body.Owner, display.Content{Icon: body.Icon, Sprite: body.Sprite, Text: body.Text, Large: body.Large})
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

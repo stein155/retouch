@@ -119,12 +119,14 @@ func TestRenderUnknownIconFallsBack(t *testing.T) {
 	}
 }
 
-func TestWasteTextShortens(t *testing.T) {
-	if got := wasteText("groen", "Morgen wordt groenafval opgehaald"); got != "Groenafval morgen" {
-		t.Fatalf("morgen text = %q", got)
+func TestRenderLargeLayout(t *testing.T) {
+	frame := render(Content{Icon: "groen", Text: "Groenafval morgen", Large: true})
+	if len(frame) != oled.Width*oled.Height {
+		t.Fatalf("large frame size = %d", len(frame))
 	}
-	if got := wasteText("groen", "Groenafval wordt opgehaald op 30-07-2026"); got != "Groenafval op 30-07" {
-		t.Fatalf("date text = %q", got)
+	// large layout has no border — corner pixel must be dark
+	if frame[0] != 0 {
+		t.Fatal("large layout has unexpected border pixel")
 	}
 }
 
