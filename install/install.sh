@@ -380,6 +380,12 @@ my_ip() {
 	printf '%s' "${ip:-}"
 }
 
+my_ip_to() {
+	ip=$(ip -4 route get "$1" 2>/dev/null | sed -n 's/.*src \([0-9.][0-9.]*\).*/\1/p' | head -1)
+	[ -n "${ip:-}" ] || ip=$(my_ip)
+	printf '%s' "${ip:-}"
+}
+
 # Ask one address whether it's a Bose speaker; if so, record "ip<TAB>name<TAB>type".
 probe() {
 	xml=$(curl -fsS --connect-timeout 1 --max-time 2 "http://$1:$API_PORT/info" 2>/dev/null) || return 0
@@ -480,18 +486,46 @@ was_up=0
 curl -fsS --connect-timeout 1 --max-time 2 "$URL/api/settings" >/dev/null 2>&1 && was_up=1
 
 pair_stub() {
-	body='<?xml version="1.0" encoding="UTF-8"?><response status="OK"><adddeviceresponse><margetoken>stlocal-assoc-token</margetoken></adddeviceresponse></response>'
-	len=$(printf '%s' "$body" | wc -c | tr -d ' ')
+	add_body='<?xml version="1.0" encoding="UTF-8"?><response status="OK"><adddeviceresponse><margetoken>stlocal-assoc-token</margetoken></adddeviceresponse></response>'
+	src_body=$(curl -fsSL "https://raw.githubusercontent.com/$REPO/$BRANCH/internal/marge/data/sourceproviders.xml" 2>/dev/null || true)
+	[ -n "$src_body" ] || src_body='<?xml version="1.0" encoding="UTF-8"?><sourceProviders><sourceprovider id="25"><name>TUNEIN</name></sourceprovider></sourceProviders>'
+	full_body=$(curl -fsSL "https://raw.githubusercontent.com/$REPO/$BRANCH/internal/marge/data/account_full.xml" 2>/dev/null || true)
+	if [ -n "$full_body" ]; then
+		device=$(printf '%s' "$INFO_XML" | sed -n 's:.*<info deviceID="\([^"]*\)".*:\1:p')
+		name=$(printf '%s' "$INFO_XML" | tr -d '\r\n' | sed -n 's:.*<name>\([^<]*\)</name>.*:\1:p')
+		ipaddr=$(printf '%s' "$INFO_XML" | tr -d '\r\n' | sed -n 's:.*<ipAddress>\([^<]*\)</ipAddress>.*:\1:p')
+		scm_serial=$(printf '%s' "$INFO_XML" | tr -d '\r\n' | sed -n 's:.*<componentCategory>SCM</componentCategory>.*<serialNumber>\([^<]*\)</serialNumber>.*:\1:p')
+		pkg_serial=$(printf '%s' "$INFO_XML" | tr -d '\r\n' | sed -n 's:.*<componentCategory>PackagedProduct</componentCategory>.*<serialNumber>\([^<]*\)</serialNumber>.*:\1:p')
+		esc() { printf '%s' "$1" | sed 's/[|&\\]/\\&/g'; }
+		full_body=$(printf '%s' "$full_body" | sed \
+			-e "s|__STL_ACCOUNT__|9999999|g" \
+			-e "s|__STL_DEVICE__|$(esc "$device")|g" \
+			-e "s|__STL_NAME__|$(esc "$name")|g" \
+			-e "s|__STL_IP__|$(esc "$ipaddr")|g" \
+			-e "s|__STL_SERIAL_SCM__|$(esc "$scm_serial")|g" \
+			-e "s|__STL_SERIAL_PKG__|$(esc "$pkg_serial")|g" \
+			-e "s|__STL_BASE__|http://$(esc "$local_ip"):$PAIR_PORT|g")
+	fi
+	n=0
 	while :; do
-		{ printf 'HTTP/1.1 201 Created\r\nContent-Type: application/xml\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' "$len" "$body"; } \
+		if [ "$n" -eq 0 ]; then
+			body=$add_body; code='201 Created'
+		elif [ "$n" -eq 1 ]; then
+			body=$src_body; code='200 OK'
+		else
+			body=$full_body; code='200 OK'
+		fi
+		len=$(printf '%s' "$body" | wc -c | tr -d ' ')
+		{ printf 'HTTP/1.1 %s\r\nContent-Type: application/vnd.bose.streaming-v1.2+xml\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' "$code" "$len" "$body"; } \
 			| nc -l "$PAIR_PORT" >/dev/null 2>&1 || break
+		n=$((n + 1))
 	done
 }
 
 ensure_account() {
 	account=$(printf '%s' "$INFO_XML" | tr -d '\r\n' | sed -n 's:.*<margeAccountUUID>\([^<]*\)</margeAccountUUID>.*:\1:p')
 	[ -n "$account" ] && return 0
-	local_ip=$(my_ip)
+	local_ip=$(my_ip_to "$IP")
 	[ -n "$local_ip" ] || return 1
 	pair_stub & pair_pid=$!
 	sleep 1
@@ -630,7 +664,7 @@ NETINSTALL_RUN="sh /tmp/b"
 # -f so an HTTP error page (404/500/captive portal) fails the curl instead of being
 # saved. Avoid && here: the firmware stores this in an XML-ish URL field, where & can
 # get eaten and turn the boot command into a broken curl invocation.
-ensure_account || die "could not pair $NAME locally before setup. Check it is switched on and try again."
+ensure_account || die "could not pair $NAME locally before setup. Check $IP can reach this computer at $(my_ip_to "$IP"):$PAIR_PORT, then try again."
 if send "envswitch boseurls set \"$PLACE;curl -fsSL $NETINSTALL -o /tmp/b || exit; $NETINSTALL_RUN\" \"$PLACE/update\""; then
 	step_ok "$(msg sent_setup)"
 else
