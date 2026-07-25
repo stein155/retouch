@@ -66,8 +66,8 @@ func (c *Canvas) Rect(x0, y0, x1, y1 int, v byte) {
 
 // Text draws s at (x, y) in the builtin 5x7 font (6px advance). Lowercase is
 // mapped to uppercase and common accented Latin letters are folded to their
-// base letter (the font is A-Z only); anything left without a glyph renders
-// as '?'.
+// base letter; anything left without a glyph renders as '?'.
+// Use TextScaled for mixed-case rendering (the font has lowercase glyphs).
 func (c *Canvas) Text(x, y int, s string, v byte) {
 	for _, r := range strings.ToUpper(foldAccents.Replace(s)) {
 		glyph, ok := font[r]
@@ -85,13 +85,14 @@ func (c *Canvas) Text(x, y int, s string, v byte) {
 	}
 }
 
-// TextScaled draws s with the builtin font scaled by scale.
+// TextScaled draws s with the builtin font scaled by scale. Mixed case is
+// supported; accented letters are folded to their base form.
 func (c *Canvas) TextScaled(x, y int, s string, scale int, v byte) {
 	if scale <= 1 {
 		c.Text(x, y, s, v)
 		return
 	}
-	for _, r := range strings.ToUpper(foldAccents.Replace(s)) {
+	for _, r := range foldAccents.Replace(s) {
 		glyph, ok := font[r]
 		if !ok {
 			glyph = font['?']
@@ -245,4 +246,5 @@ var font = map[rune][]byte{
 	'\'': {4, 4, 8, 0, 0, 0, 0}, '(': {2, 4, 8, 8, 8, 4, 2}, ')': {8, 4, 2, 2, 2, 4, 8},
 	'0': {14, 17, 19, 21, 25, 17, 14}, '1': {4, 12, 4, 4, 4, 4, 14}, '2': {14, 17, 1, 2, 4, 8, 31}, '3': {30, 1, 1, 14, 1, 1, 30}, '4': {2, 6, 10, 18, 31, 2, 2}, '5': {31, 16, 30, 1, 1, 17, 14}, '6': {6, 8, 16, 30, 17, 17, 14}, '7': {31, 1, 2, 4, 8, 8, 8}, '8': {14, 17, 17, 14, 17, 17, 14}, '9': {14, 17, 17, 15, 1, 2, 12},
 	'A': {14, 17, 17, 31, 17, 17, 17}, 'B': {30, 17, 17, 30, 17, 17, 30}, 'C': {14, 17, 16, 16, 16, 17, 14}, 'D': {30, 17, 17, 17, 17, 17, 30}, 'E': {31, 16, 16, 30, 16, 16, 31}, 'F': {31, 16, 16, 30, 16, 16, 16}, 'G': {14, 17, 16, 23, 17, 17, 14}, 'H': {17, 17, 17, 31, 17, 17, 17}, 'I': {14, 4, 4, 4, 4, 4, 14}, 'J': {7, 2, 2, 2, 18, 18, 12}, 'K': {17, 18, 20, 24, 20, 18, 17}, 'L': {16, 16, 16, 16, 16, 16, 31}, 'M': {17, 27, 21, 21, 17, 17, 17}, 'N': {17, 25, 21, 19, 17, 17, 17}, 'O': {14, 17, 17, 17, 17, 17, 14}, 'P': {30, 17, 17, 30, 16, 16, 16}, 'Q': {14, 17, 17, 17, 21, 18, 13}, 'R': {30, 17, 17, 30, 20, 18, 17}, 'S': {15, 16, 16, 14, 1, 1, 30}, 'T': {31, 4, 4, 4, 4, 4, 4}, 'U': {17, 17, 17, 17, 17, 17, 14}, 'V': {17, 17, 17, 17, 17, 10, 4}, 'W': {17, 17, 17, 21, 21, 21, 10}, 'X': {17, 17, 10, 4, 10, 17, 17}, 'Y': {17, 17, 10, 4, 4, 4, 4}, 'Z': {31, 1, 2, 4, 8, 16, 31},
+	'a': {0, 0, 14, 1, 15, 17, 15}, 'b': {16, 16, 30, 17, 17, 17, 30}, 'c': {0, 0, 14, 16, 16, 16, 14}, 'd': {1, 1, 15, 17, 17, 17, 15}, 'e': {0, 0, 14, 17, 31, 16, 14}, 'f': {6, 8, 28, 8, 8, 8, 8}, 'g': {0, 0, 15, 17, 15, 1, 14}, 'h': {16, 16, 22, 25, 17, 17, 17}, 'i': {0, 4, 0, 12, 4, 4, 14}, 'j': {0, 2, 0, 6, 2, 2, 12}, 'k': {16, 18, 20, 24, 20, 18, 17}, 'l': {12, 4, 4, 4, 4, 4, 14}, 'm': {0, 0, 27, 21, 21, 21, 21}, 'n': {0, 0, 22, 25, 17, 17, 17}, 'o': {0, 0, 14, 17, 17, 17, 14}, 'p': {0, 0, 30, 17, 30, 16, 16}, 'q': {0, 0, 15, 17, 15, 1, 1}, 'r': {0, 0, 22, 25, 16, 16, 16}, 's': {0, 0, 15, 16, 14, 1, 30}, 't': {8, 8, 28, 8, 8, 8, 6}, 'u': {0, 0, 17, 17, 17, 17, 14}, 'v': {0, 0, 17, 17, 17, 10, 4}, 'w': {0, 0, 17, 21, 21, 21, 10}, 'x': {0, 0, 17, 10, 4, 10, 17}, 'y': {0, 0, 17, 17, 15, 1, 14}, 'z': {0, 0, 31, 2, 4, 8, 31},
 }
