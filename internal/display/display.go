@@ -209,9 +209,9 @@ func render(c Content) []byte {
 	if c.Large {
 		cv := oled.NewCanvas()
 		w, _ := oled.SpriteSize(art)
-		cv.Sprite((oled.Width-w)/2, 4, art, 255, 150)
-		for i, line := range oled.Wrap(strings.ToUpper(c.Text), 10, 2) {
-			cv.TextScaledCentered(70+i*15, line, 2, 255)
+		cv.Sprite((oled.Width-w)/2, 2, art, 255, 150)
+		for i, line := range oled.Wrap(c.Text, 10, 2) {
+			cv.TextScaledCentered(68+i*16, line, 2, 255)
 		}
 		return cv.Pix()
 	}
