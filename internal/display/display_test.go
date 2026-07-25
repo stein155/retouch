@@ -119,6 +119,17 @@ func TestRenderUnknownIconFallsBack(t *testing.T) {
 	}
 }
 
+func TestRenderLargeLayout(t *testing.T) {
+	frame := render(Content{Icon: "groen", Text: "Groenafval morgen", Large: true})
+	if len(frame) != oled.Width*oled.Height {
+		t.Fatalf("large frame size = %d", len(frame))
+	}
+	// large layout has no border — corner pixel must be dark
+	if frame[0] != 0 {
+		t.Fatal("large layout has unexpected border pixel")
+	}
+}
+
 // TestDumpScreens writes preview PNGs of every built-in icon to the ICONDUMP
 // dir for visual checks.
 func TestDumpScreens(t *testing.T) {

@@ -85,10 +85,38 @@ func (c *Canvas) Text(x, y int, s string, v byte) {
 	}
 }
 
+// TextScaled draws s with the builtin font scaled by scale.
+func (c *Canvas) TextScaled(x, y int, s string, scale int, v byte) {
+	if scale <= 1 {
+		c.Text(x, y, s, v)
+		return
+	}
+	for _, r := range strings.ToUpper(foldAccents.Replace(s)) {
+		glyph, ok := font[r]
+		if !ok {
+			glyph = font['?']
+		}
+		for row, bits := range glyph {
+			for col := 0; col < 5; col++ {
+				if bits&(1<<(4-col)) != 0 {
+					c.Fill(x+col*scale, y+row*scale, x+col*scale+scale-1, y+row*scale+scale-1, v)
+				}
+			}
+		}
+		x += 6 * scale
+	}
+}
+
 // TextCentered draws s horizontally centered at height y.
 func (c *Canvas) TextCentered(y int, s string, v byte) {
 	s = foldAccents.Replace(s)
 	c.Text((Width-utf8.RuneCountInString(s)*6)/2, y, s, v)
+}
+
+// TextScaledCentered draws scaled text horizontally centered at height y.
+func (c *Canvas) TextScaledCentered(y int, s string, scale int, v byte) {
+	s = foldAccents.Replace(s)
+	c.TextScaled((Width-utf8.RuneCountInString(s)*6*scale)/2, y, s, scale, v)
 }
 
 // Sprite draws ASCII art at (x, y): '#' pixels get fg, '+' pixels accent,

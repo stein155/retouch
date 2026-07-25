@@ -24,6 +24,7 @@ type Content struct {
 	Icon   string   // built-in icon name (see icons.go); ignored when Sprite is set
 	Sprite []string // custom ASCII-art sprite: '#' white, '+' gray, ' ' transparent
 	Text   string   // sentence drawn (wrapped, centered) under the icon
+	Large  bool     // use large layout: icon at top, 2× text, no border
 }
 
 // Manager arbitrates the panel. Create with New; nil-safe: a nil *Manager
@@ -204,6 +205,15 @@ func render(c Content) []byte {
 	}
 	if len(art) == 0 {
 		art = icons["info"]
+	}
+	if c.Large {
+		cv := oled.NewCanvas()
+		w, _ := oled.SpriteSize(art)
+		cv.Sprite((oled.Width-w)/2, 4, art, 255, 150)
+		for i, line := range oled.Wrap(strings.ToUpper(c.Text), 10, 2) {
+			cv.TextScaledCentered(70+i*15, line, 2, 255)
+		}
+		return cv.Pix()
 	}
 	cv := oled.NewCanvas()
 	lines := oled.Wrap(strings.ToUpper(c.Text), 20, 3)
