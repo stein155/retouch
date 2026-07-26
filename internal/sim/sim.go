@@ -195,6 +195,15 @@ func (s *Speaker) togglePower() {
 	s.powerToggleLocked()
 }
 
+// SetSource forces the reported now_playing source. Used to simulate states the
+// simulator has no other way to reach — notably "SETUP", the state a real speaker
+// parks in after a cold boot when it could not reach marge.
+func (s *Speaker) SetSource(source string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.source = source
+}
+
 // powerToggleLocked flips standby <-> the last active source. Caller holds s.mu.
 // Shared by the CLI `sys power` and the /key POWER press so both behave identically.
 func (s *Speaker) powerToggleLocked() {

@@ -160,12 +160,20 @@ func Run() {
 	// models without the panel the manager is a no-op.
 	disp := display.New(ctx, "/dev/fb0", speakerAPI, func(c context.Context) bool {
 		np, err := bc.NowPlaying(c)
-		return err == nil && np.Source == "STANDBY"
+		// SETUP means the firmware is parked in setup mode (autopair is getting it
+		// out); nothing is playing, so the panel is free just like in STANDBY.
+		return err == nil && (np.Source == "STANDBY" || np.Source == autopair.SetupSource)
 	}, logger.With("comp", "display"))
 	webSrv.SetDisplay(disp)
 
 	// Keep the speaker paired to our marge account so native sources stay enabled.
-	pairer := autopair.New(bc, info.Account, autopair.DefaultAuthToken, *pairEvery, logger.With("comp", "autopair"))
+	// The firmware WebSocket lives on <host>:8080; strip any port -speaker-host carried.
+	wsHost := *host
+	if h, _, err := net.SplitHostPort(wsHost); err == nil {
+		wsHost = h
+	}
+	pairer := autopair.New(bc, info.Account, autopair.DefaultAuthToken, *pairEvery, logger.With("comp", "autopair")).
+		WithSetupSession(wsHost, base)
 	// A speaker that lost its pairing was factory-reset (physical access): that is
 	// the recovery path for a forgotten settings password — clear it and reopen
 	// telnet before re-pairing.

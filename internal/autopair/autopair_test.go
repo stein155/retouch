@@ -2,6 +2,7 @@ package autopair
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stein155/retouch/internal/setupsession"
 	"github.com/stein155/retouch/internal/sim"
 	"github.com/stein155/retouch/internal/speaker"
 )
@@ -185,5 +187,87 @@ func TestCheckUnreachableReturnsFalse(t *testing.T) {
 	p := New(speaker.New("127.0.0.1:1"), "acct", "tok", time.Minute, quietLog())
 	if p.check(context.Background()) {
 		t.Error("check against unreachable speaker should return false")
+	}
+}
+
+// A speaker that is paired but parked in SETUP still needs the state machine: the bare
+// account is already correct, so only the SETUP bracket can complete setup.
+func TestCheckRunsSessionWhenInSetup(t *testing.T) {
+	sp := sim.New()
+	sp.Account = "1234567"
+	sp.SetSource(SetupSource)
+	c := newClient(t, sp)
+
+	var plans []setupsession.Plan
+	p := New(c, "1234567", "tok", time.Minute, quietLog())
+	p.cooldown = 0
+	p.runSession = func(_ context.Context, plan setupsession.Plan, _ *slog.Logger) error {
+		plans = append(plans, plan)
+		return nil
+	}
+
+	if p.check(context.Background()) {
+		t.Fatal("check on a speaker in SETUP should return false (not settled yet)")
+	}
+	if len(plans) != 1 {
+		t.Fatalf("session runs = %d, want 1", len(plans))
+	}
+	if plans[0].AccountID != "1234567" || plans[0].DeviceID == "" {
+		t.Errorf("session plan = %+v, want the speaker's device id and our account", plans[0])
+	}
+
+	// Out of SETUP and paired: no further session, and check settles to true.
+	sp.SetSource("TUNEIN")
+	if !p.check(context.Background()) {
+		t.Error("check should report paired once the speaker leaves SETUP")
+	}
+	if len(plans) != 1 {
+		t.Errorf("session runs = %d after leaving SETUP, want it to stay 1", len(plans))
+	}
+}
+
+// The state machine chirps and flashes the speaker (SETUP_IDENTIFY_DEVICE), so a speaker
+// that stays in SETUP must not be poked on every fast-retry tick. Between sessions the
+// pairer falls back to the silent setMargeAccount POST.
+func TestCheckSessionCooldown(t *testing.T) {
+	sp := sim.New()
+	sp.Account = "1234567"
+	sp.SetSource(SetupSource)
+	c := newClient(t, sp)
+
+	runs := 0
+	p := New(c, "1234567", "tok", time.Minute, quietLog())
+	p.cooldown = time.Hour
+	p.runSession = func(_ context.Context, _ setupsession.Plan, _ *slog.Logger) error {
+		runs++
+		return nil
+	}
+
+	for i := 0; i < 3; i++ {
+		p.check(context.Background())
+	}
+	if runs != 1 {
+		t.Errorf("session runs = %d across three checks inside the cooldown, want 1", runs)
+	}
+}
+
+// When the WebSocket is unreachable the pairer still asserts the account over HTTP, so an
+// unpaired speaker off-box (where ReTouch owns :8080) is not left stranded.
+func TestCheckFallsBackToBarePost(t *testing.T) {
+	sp := sim.New()
+	sp.Account = ""
+	c := newClient(t, sp)
+
+	p := New(c, "our-account", "tok", time.Minute, quietLog())
+	p.cooldown = 0
+	p.runSession = func(_ context.Context, _ setupsession.Plan, _ *slog.Logger) error {
+		return errors.New("dial websocket: connection refused")
+	}
+
+	if p.check(context.Background()) {
+		t.Fatal("check should return false while re-pairing")
+	}
+	if sp.Account != "our-account" {
+		t.Errorf("fallback setMargeAccount not applied: account = %q", sp.Account)
 	}
 }
