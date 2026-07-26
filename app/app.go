@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/stein155/retouch/internal/autopair"
+	"github.com/stein155/retouch/internal/avahi"
 	"github.com/stein155/retouch/internal/display"
 	"github.com/stein155/retouch/internal/habridge"
 	"github.com/stein155/retouch/internal/marge"
@@ -59,6 +60,8 @@ func Run() {
 	presets := flag.String("presets", "presets.json", "path to the presets JSON file")
 	accountID := flag.String("account-id", "", "marge account UUID to keep the speaker paired to (default: whatever the speaker reports); enables autopair")
 	pairEvery := flag.Duration("pair-interval", 5*time.Minute, "how often autopair re-checks the speaker's association")
+	avahiOnly := flag.Bool("avahi-only", false, "start the firmware's mDNS daemon and exit; the boot launcher calls this first so avahi is up before BoseApp registers its services with it")
+	mdnsName := flag.Bool("mdns", true, "advertise <speaker-name>.local for the web UI (the firmware's own avahi keeps publishing alongside it)")
 	sideload := flag.Bool("allow-sideload", false, "allow installing plugin binaries uploaded through the web UI without release verification (anyone on the LAN can then run code on the speaker; leave off unless you are developing a plugin)")
 	verbose := flag.Bool("v", false, "verbose: log every speaker request to the pairing stub")
 	flag.Parse()
@@ -68,6 +71,16 @@ func Run() {
 		level = slog.LevelDebug
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+
+	// The launcher's first line: start the daemon and get out of the way. Nothing else in
+	// Run() may happen here — BoseApp is racing us to register its services.
+	if *avahiOnly {
+		if err := avahi.Ensure(logger.With("comp", "avahi")); err != nil {
+			logger.Error("start the firmware's mDNS daemon", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	st, err := store.Open(*presets)
 	if err != nil {
@@ -84,6 +97,22 @@ func Run() {
 			addr = "127.0.0.1" + addr
 		}
 		base = "http://" + addr
+	}
+
+	// Start the firmware's mDNS daemon. BoseApp only *registers* its services
+	// (_soundtouch, _spotify-connect, AirPlay) with a running avahi-daemon and does so
+	// once, at its own startup — so the daemon has to exist before BoseApp does. The boot
+	// launcher therefore calls `retouch -avahi-only` as its very first line, long before
+	// this point; doing it again here is the safety net for installs whose launcher
+	// predates that line (the daemon start is a no-op when one is already running).
+	if err := avahi.Ensure(logger.With("comp", "avahi")); err != nil {
+		logger.Warn("could not start the firmware's mDNS daemon (AirPlay/Spotify discovery may stay down)", "err", err)
+	}
+	// Repair an older launcher in place so the NEXT boot gets the daemon up in time.
+	if exe, err := os.Executable(); err == nil {
+		if err := avahi.EnsureLauncher(filepath.Join(filepath.Dir(*presets), "start.sh"), exe); err != nil {
+			logger.Warn("could not add the avahi start to the boot launcher", "err", err)
+		}
 	}
 
 	bc := speaker.New(*host)
@@ -206,8 +235,9 @@ func Run() {
 	webSrv.SetMQTTBridge(bridge)
 	go bridge.Run(ctx)
 
-	// Advertise a friendly <name>.local so the UI is reachable without the IP.
-	if info.IP != "" {
+	// Advertise a friendly <name>.local so the UI is reachable without the IP. This runs
+	// alongside the firmware's avahi (started above): the two answer for different names.
+	if *mdnsName && info.IP != "" {
 		resp := mdns.New(info.IP, info.Name, logger.With("comp", "mdns"))
 		webSrv.SetMDNS(resp)
 		go func() {
