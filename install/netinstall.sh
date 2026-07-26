@@ -163,6 +163,13 @@ expose_speaker_auth() {
 	fi
 }
 
+# The firmware's mDNS daemon has to be up before BoseApp registers its services with it
+# (_soundtouch, _spotify-connect, AirPlay) — it only ever tries once, at its own startup.
+# /opt/Bose/start-avahi never runs on the SoundTouch 20: it builds its hostname from a wlan0
+# that does not exist there (Wi-Fi lives on the front processor). This is the first line on
+# purpose: everything below, fix-cloud especially, takes long enough for BoseApp to win.
+"$BIN" -avahi-only >>"\$LOG" 2>&1 || true
+
 \$FIX_CLOUD >/tmp/retouch-fix-cloud.log 2>&1 || true
 expose_8080
 expose_speaker_auth

@@ -2,6 +2,7 @@ package autopair
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stein155/retouch/internal/setupsession"
 	"github.com/stein155/retouch/internal/sim"
 	"github.com/stein155/retouch/internal/speaker"
 )
@@ -185,5 +187,99 @@ func TestCheckUnreachableReturnsFalse(t *testing.T) {
 	p := New(speaker.New("127.0.0.1:1"), "acct", "tok", time.Minute, quietLog())
 	if p.check(context.Background()) {
 		t.Error("check against unreachable speaker should return false")
+	}
+}
+
+// A paired speaker whose firmware still reports SETUP_LANG_NOT_SET keeps asking to be set up.
+// One language frame is the whole repair; the pairer must send it and then re-check.
+func TestCheckSetsLanguageWhenFirmwareSaysSetupUnfinished(t *testing.T) {
+	sp := sim.New()
+	sp.Account = "1234567"
+	sp.SetSystemState(speaker.LanguageNotSet)
+	c := newClient(t, sp)
+
+	var plans []setupsession.Plan
+	p := New(c, "1234567", "tok", time.Minute, quietLog())
+	p.setLanguage = func(_ context.Context, plan setupsession.Plan, _ *slog.Logger) error {
+		plans = append(plans, plan)
+		sp.SetSystemState("SETUP_LANG_SET") // what the real firmware does
+		return nil
+	}
+
+	if p.check(context.Background()) {
+		t.Fatal("check should return false right after setting the language (confirm next pass)")
+	}
+	if len(plans) != 1 {
+		t.Fatalf("language frames sent = %d, want 1", len(plans))
+	}
+	if plans[0].DeviceID != sp.DeviceID {
+		t.Errorf("plan device = %q, want %q", plans[0].DeviceID, sp.DeviceID)
+	}
+
+	// Flag now set: settled, and no second frame.
+	if !p.check(context.Background()) {
+		t.Error("check should settle once the firmware reports the language is set")
+	}
+	if len(plans) != 1 {
+		t.Errorf("language frames sent = %d after the flag flipped, want it to stay 1", len(plans))
+	}
+}
+
+// A speaker that already reports the language set must be left completely alone: no frame, and
+// the pairer settles to its slow heartbeat.
+func TestCheckSendsNothingWhenSetupFinished(t *testing.T) {
+	sp := sim.New()
+	sp.Account = "1234567" // sim defaults systemstate to SETUP_LANG_SET
+	c := newClient(t, sp)
+
+	sent := 0
+	p := New(c, "1234567", "tok", time.Minute, quietLog())
+	p.setLanguage = func(context.Context, setupsession.Plan, *slog.Logger) error { sent++; return nil }
+
+	if !p.check(context.Background()) {
+		t.Fatal("a paired, set-up speaker should report settled")
+	}
+	if sent != 0 {
+		t.Errorf("language frames sent = %d on a healthy speaker, want 0", sent)
+	}
+}
+
+// If the firmware refuses to flip the flag, stop after a few tries rather than sending the
+// frame on every heartbeat for the life of the process.
+func TestCheckBoundsLanguageAttempts(t *testing.T) {
+	sp := sim.New()
+	sp.Account = "1234567"
+	sp.SetSystemState(speaker.LanguageNotSet) // never flips
+	c := newClient(t, sp)
+
+	sent := 0
+	p := New(c, "1234567", "tok", time.Minute, quietLog())
+	p.setLanguage = func(context.Context, setupsession.Plan, *slog.Logger) error { sent++; return nil }
+
+	for i := 0; i < maxLanguageTries+3; i++ {
+		p.check(context.Background())
+	}
+	if sent != maxLanguageTries {
+		t.Errorf("language frames sent = %d, want it capped at %d", sent, maxLanguageTries)
+	}
+}
+
+// A failing frame must not stop the pairer: it logs and moves on, and the speaker stays paired.
+func TestCheckSurvivesLanguageFailure(t *testing.T) {
+	sp := sim.New()
+	sp.Account = "1234567"
+	sp.SetSystemState(speaker.LanguageNotSet)
+	c := newClient(t, sp)
+
+	p := New(c, "1234567", "tok", time.Minute, quietLog())
+	p.setLanguage = func(context.Context, setupsession.Plan, *slog.Logger) error {
+		return errors.New("dial firmware websocket: connection refused")
+	}
+
+	if p.check(context.Background()) {
+		t.Error("check should report unsettled when the language could not be set")
+	}
+	if sp.Account != "1234567" {
+		t.Errorf("account must be untouched by the language repair, got %q", sp.Account)
 	}
 }
