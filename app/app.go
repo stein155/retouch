@@ -160,7 +160,8 @@ func Run() {
 	// models without the panel the manager is a no-op.
 	disp := display.New(ctx, "/dev/fb0", speakerAPI, func(c context.Context) bool {
 		np, err := bc.NowPlaying(c)
-		return err == nil && np.Source == "STANDBY"
+		// ponytail: SETUP = not playing, same as STANDBY for display purposes
+		return err == nil && (np.Source == "STANDBY" || np.Source == "SETUP")
 	}, logger.With("comp", "display"))
 	webSrv.SetDisplay(disp)
 

@@ -4,6 +4,12 @@
 // NOT_LOGGED_IN. The pairer watches /info and re-asserts the association by posting
 // to :8090/setMargeAccount whenever the speaker is unpaired, then re-checks on a slow
 // heartbeat. When the speaker is already paired it does nothing.
+//
+// On the very first check after ReTouch starts, setMargeAccount is always called and the
+// speaker's now-playing source is checked: if it is SETUP (firmware failed to reach marge
+// before ReTouch was ready) preset 1 is played to force streaming initialisation and exit
+// SETUP mode. Without this the speaker stays in SETUP after a cold boot, Spotify Connect
+// never initialises, and the OLED shows the firmware's own "setup" message.
 package autopair
 
 import (
@@ -105,6 +111,16 @@ func (p *Pairer) check(ctx context.Context) bool {
 	if !p.booted {
 		p.log.Info("autopair: boot re-assert done", "account", p.account)
 		p.booted = true
+		// If the speaker is in SETUP mode the firmware failed to reach marge before
+		// ReTouch was ready. Playing preset 1 forces a marge call that initialises
+		// streaming services and exits SETUP, enabling Spotify Connect and the OLED.
+		if np, err := p.speaker.NowPlaying(c); err == nil && np.Source == "SETUP" {
+			if err := p.speaker.PlayPreset(c, 1); err != nil {
+				p.log.Warn("autopair: could not play preset to exit SETUP", "err", err)
+			} else {
+				p.log.Info("autopair: played preset 1 to exit SETUP mode")
+			}
+		}
 	} else {
 		p.log.Info("autopair: re-asserted association", "account", p.account)
 	}
