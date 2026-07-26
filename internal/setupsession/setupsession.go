@@ -110,6 +110,40 @@ func Run(ctx context.Context, p Plan, log *slog.Logger) error {
 	return nil
 }
 
+// SetLanguage sends ONE frame — sysLanguage — and nothing else. That single frame is what
+// flips the firmware's persistent systemstate from SETUP_LANG_NOT_SET to SETUP_LANG_SET, which
+// is what stops the speaker asking to be set up on every boot. Verified on a live ST20: the
+// flag flipped, it survived a reboot, and AirPlay and Spotify Connect kept working.
+//
+// Prefer this over Run for routine repair. Run drives the whole bracket the official app uses,
+// including SETUP_IDENTIFY_DEVICE (which chirps and flashes the speaker) and setMargeAccount;
+// that is a lot of firmware state to rewrite for a flag, and it is not something a background
+// agent should do unattended.
+func SetLanguage(ctx context.Context, p Plan, log *slog.Logger) error {
+	if p.DeviceID == "" {
+		return errors.New("setup session: deviceID is required (read it from /info)")
+	}
+	if log == nil {
+		log = slog.New(slog.NewTextHandler(discard{}, nil))
+	}
+	port := p.Port
+	if port == 0 {
+		port = wsPort
+	}
+	conn, err := wsDial(net.JoinHostPort(p.Host, strconv.Itoa(port)), subprotocol, dialTimeout)
+	if err != nil {
+		return fmt.Errorf("setup session: %w", err)
+	}
+	defer func() { _ = conn.close() }()
+
+	s := &session{conn: conn, deviceID: p.DeviceID, log: log}
+	if err := s.send(ctx, "language", "POST", fmt.Sprintf("<sysLanguage>%d</sysLanguage>", languageEnglish)); err != nil {
+		return fmt.Errorf("setup session: sysLanguage: %w", err)
+	}
+	log.Info("setup session: language set", "device", p.DeviceID)
+	return nil
+}
+
 // pairXML builds the <PairDeviceWithAccount> body. The extended shape (boseServer,
 // updateServer, accountEmail) is what the Bose app sends; the firmware persists those
 // URLs, so passing them keeps the speaker pointed at ReTouch after setup completes.

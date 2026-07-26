@@ -65,14 +65,15 @@ type Speaker struct {
 
 	presets map[int]Preset
 
-	source     string // "STANDBY" when idle/off
-	lastSource string // last non-standby source, restored on wake
-	track      string
-	artist     string
-	station    string
-	location   string
-	art        string
-	playStatus string
+	source      string // "STANDBY" when idle/off
+	lastSource  string // last non-standby source, restored on wake
+	systemState string // /setup systemstate; empty means SETUP_LANG_SET
+	track       string
+	artist      string
+	station     string
+	location    string
+	art         string
+	playStatus  string
 
 	zoneMaster  string // master deviceID; "" when ungrouped
 	zoneSenders string // master IP (senderIPAddress)
@@ -129,6 +130,7 @@ func (s *Speaker) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/info", s.getInfo)
 	mux.HandleFunc("/now_playing", s.getNowPlaying)
+	mux.HandleFunc("/setup", s.getSetup)
 	mux.HandleFunc("/presets", s.getPresets)
 	mux.HandleFunc("/volume", s.volumeHandler)
 	mux.HandleFunc("/bass", s.bassHandler)
@@ -234,6 +236,26 @@ func (s *Speaker) getInfo(w http.ResponseWriter, _ *http.Request) {
 		`</info>`,
 		esc(s.DeviceID), esc(s.Name), esc(s.Type), esc(s.Account), esc(s.MargeURL),
 		esc(s.Software), esc(s.SerialSCM), esc(s.SerialPkg), esc(s.IP)))
+}
+
+// getSetup serves the firmware's own setup state. systemstate is the persistent flag: a
+// speaker that never finished setup reports SETUP_LANG_NOT_SET and keeps asking for the app.
+func (s *Speaker) getSetup(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	system := s.systemState
+	if system == "" {
+		system = "SETUP_LANG_SET"
+	}
+	writeXML(w, fmt.Sprintf(`<setupStateResponse state="SETUP_INACTIVE" systemstate="%s" />`, esc(system)))
+}
+
+// SetSystemState forces the persistent setup flag, so tests can reproduce a speaker that has
+// never had its language set.
+func (s *Speaker) SetSystemState(state string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.systemState = state
 }
 
 func (s *Speaker) getNowPlaying(w http.ResponseWriter, _ *http.Request) {

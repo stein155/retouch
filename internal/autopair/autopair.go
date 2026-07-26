@@ -49,17 +49,13 @@ type Pairer struct {
 
 	// Set by WithSetupSession; without it the pairer keeps the old bare-POST behaviour.
 	wsHost      string
-	runSession  func(context.Context, setupsession.Plan, *slog.Logger) error
-	cooldown    time.Duration // minimum gap between two sessions
-	lastSession time.Time     // when the last session was attempted
+	setLanguage func(context.Context, setupsession.Plan, *slog.Logger) error
+	langTries   int // bounded: a flag that refuses to flip must not be poked forever
 }
 
-// SessionCooldown is the minimum gap between two SETUP sessions. The state machine
-// includes SETUP_IDENTIFY_DEVICE_ENTER, which makes the speaker chirp and flash, so a
-// speaker that reports SETUP even after a completed session must not be poked every
-// fast-retry tick. Between sessions the pairer falls back to the bare setMargeAccount
-// POST, which is silent.
-const SessionCooldown = 2 * time.Minute
+// maxLanguageTries bounds the repair. The frame is silent and cheap, but if the firmware
+// refuses to flip its flag there is no point sending it on every heartbeat forever.
+const maxLanguageTries = 3
 
 // OnFactoryReset registers a callback fired when the speaker reports no marge
 // account — which, once ReTouch has paired it, means the user factory-reset the
@@ -81,8 +77,7 @@ func (p *Pairer) OnFactoryReset(f func()) { p.onReset = f }
 // merely lacks a field.
 func (p *Pairer) WithSetupSession(host string) *Pairer {
 	p.wsHost = host
-	p.runSession = setupsession.Run
-	p.cooldown = SessionCooldown
+	p.setLanguage = setupsession.SetLanguage
 	return p
 }
 
@@ -123,12 +118,10 @@ func (p *Pairer) Run(ctx context.Context) {
 	}
 }
 
-// check returns true once the speaker is reachable, paired AND out of setup mode. When
-// either is wrong it drives the SETUP state machine (falling back to a bare
-// setMargeAccount POST) and returns false, so Run retries on the fast interval and
-// confirms on the next pass.
+// check returns true once the speaker is reachable, paired and past the firmware's setup
+// prompt. Anything else is repaired here and returns false, so Run confirms on the next pass.
 func (p *Pairer) check(ctx context.Context) bool {
-	c, cancel := context.WithTimeout(ctx, 45*time.Second)
+	c, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	info, err := p.speaker.Info(c)
 	if err != nil {
@@ -136,47 +129,39 @@ func (p *Pairer) check(ctx context.Context) bool {
 		return false
 	}
 
-	inSetup := p.inSetup(c)
-	if info.Account != "" && !inSetup {
-		p.log.Debug("autopair: already paired", "account", info.Account)
-		p.fired = false // paired again; a future unpaired episode may fire anew
-		return true
-	}
-	if info.Account == "" && p.onReset != nil && !p.fired {
-		p.fired = true
-		p.onReset()
-	}
-	if inSetup {
-		p.log.Info("autopair: speaker is in firmware SETUP mode", "account", info.Account)
-	}
-
-	if p.runSession != nil && time.Since(p.lastSession) >= p.cooldown {
-		p.lastSession = time.Now()
-		err := p.runSession(c, setupsession.Plan{
-			Host:      p.wsHost,
-			DeviceID:  info.DeviceID,
-			AccountID: p.account,
-			AuthToken: p.token,
-			Name:      info.Name,
-		}, p.log)
-		if err == nil {
-			p.log.Info("autopair: setup state machine completed", "account", p.account)
-			return false // confirm on the next (fast) pass
+	if info.Account == "" {
+		if p.onReset != nil && !p.fired {
+			p.fired = true
+			p.onReset()
 		}
-		p.log.Warn("autopair: setup state machine failed, falling back to setMargeAccount", "err", err)
+		if err := p.speaker.SetMargeAccount(c, p.account, p.token); err != nil {
+			p.log.Warn("autopair: setMargeAccount failed (will retry)", "account", p.account, "err", err)
+			return false
+		}
+		p.log.Info("autopair: re-asserted association", "account", p.account)
+		return false // confirm on the next pass
+	}
+	p.fired = false // paired; a future unpaired episode may fire anew
+
+	// The speaker keeps asking to be set up while its persistent language flag is unset. One
+	// frame flips it, and it stays flipped across reboots.
+	if p.setLanguage != nil && p.langTries < maxLanguageTries {
+		st, err := p.speaker.SetupState(c)
+		if err != nil {
+			p.log.Debug("autopair: read /setup (will retry)", "err", err)
+			return true // paired and reachable; the flag check can wait for the next pass
+		}
+		if st.System == speaker.LanguageNotSet {
+			p.langTries++
+			p.log.Info("autopair: firmware reports setup never finished; setting the language",
+				"systemstate", st.System, "attempt", p.langTries)
+			if err := p.setLanguage(c, setupsession.Plan{Host: p.wsHost, DeviceID: info.DeviceID}, p.log); err != nil {
+				p.log.Warn("autopair: could not set the language (speaker keeps prompting for setup)", "err", err)
+			}
+			return false // re-read the flag on the next pass
+		}
 	}
 
-	if err := p.speaker.SetMargeAccount(c, p.account, p.token); err != nil {
-		p.log.Warn("autopair: setMargeAccount failed (will retry)", "account", p.account, "err", err)
-		return false
-	}
-	p.log.Info("autopair: re-asserted association", "account", p.account)
-	return false
-}
-
-// inSetup reports whether the firmware is parked in setup mode. A failed read is not
-// setup: it usually means :8090 is not up yet, and the account check alone decides.
-func (p *Pairer) inSetup(ctx context.Context) bool {
-	np, err := p.speaker.NowPlaying(ctx)
-	return err == nil && np.Source == SetupSource
+	p.log.Debug("autopair: paired and set up", "account", info.Account)
+	return true
 }

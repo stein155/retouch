@@ -190,84 +190,96 @@ func TestCheckUnreachableReturnsFalse(t *testing.T) {
 	}
 }
 
-// A speaker that is paired but parked in SETUP still needs the state machine: the bare
-// account is already correct, so only the SETUP bracket can complete setup.
-func TestCheckRunsSessionWhenInSetup(t *testing.T) {
+// A paired speaker whose firmware still reports SETUP_LANG_NOT_SET keeps asking to be set up.
+// One language frame is the whole repair; the pairer must send it and then re-check.
+func TestCheckSetsLanguageWhenFirmwareSaysSetupUnfinished(t *testing.T) {
 	sp := sim.New()
 	sp.Account = "1234567"
-	sp.SetSource(SetupSource)
+	sp.SetSystemState(speaker.LanguageNotSet)
 	c := newClient(t, sp)
 
 	var plans []setupsession.Plan
 	p := New(c, "1234567", "tok", time.Minute, quietLog())
-	p.cooldown = 0
-	p.runSession = func(_ context.Context, plan setupsession.Plan, _ *slog.Logger) error {
+	p.setLanguage = func(_ context.Context, plan setupsession.Plan, _ *slog.Logger) error {
 		plans = append(plans, plan)
+		sp.SetSystemState("SETUP_LANG_SET") // what the real firmware does
 		return nil
 	}
 
 	if p.check(context.Background()) {
-		t.Fatal("check on a speaker in SETUP should return false (not settled yet)")
+		t.Fatal("check should return false right after setting the language (confirm next pass)")
 	}
 	if len(plans) != 1 {
-		t.Fatalf("session runs = %d, want 1", len(plans))
+		t.Fatalf("language frames sent = %d, want 1", len(plans))
 	}
-	if plans[0].AccountID != "1234567" || plans[0].DeviceID == "" {
-		t.Errorf("session plan = %+v, want the speaker's device id and our account", plans[0])
+	if plans[0].DeviceID != sp.DeviceID {
+		t.Errorf("plan device = %q, want %q", plans[0].DeviceID, sp.DeviceID)
 	}
 
-	// Out of SETUP and paired: no further session, and check settles to true.
-	sp.SetSource("TUNEIN")
+	// Flag now set: settled, and no second frame.
 	if !p.check(context.Background()) {
-		t.Error("check should report paired once the speaker leaves SETUP")
+		t.Error("check should settle once the firmware reports the language is set")
 	}
 	if len(plans) != 1 {
-		t.Errorf("session runs = %d after leaving SETUP, want it to stay 1", len(plans))
+		t.Errorf("language frames sent = %d after the flag flipped, want it to stay 1", len(plans))
 	}
 }
 
-// The state machine chirps and flashes the speaker (SETUP_IDENTIFY_DEVICE), so a speaker
-// that stays in SETUP must not be poked on every fast-retry tick. Between sessions the
-// pairer falls back to the silent setMargeAccount POST.
-func TestCheckSessionCooldown(t *testing.T) {
+// A speaker that already reports the language set must be left completely alone: no frame, and
+// the pairer settles to its slow heartbeat.
+func TestCheckSendsNothingWhenSetupFinished(t *testing.T) {
+	sp := sim.New()
+	sp.Account = "1234567" // sim defaults systemstate to SETUP_LANG_SET
+	c := newClient(t, sp)
+
+	sent := 0
+	p := New(c, "1234567", "tok", time.Minute, quietLog())
+	p.setLanguage = func(context.Context, setupsession.Plan, *slog.Logger) error { sent++; return nil }
+
+	if !p.check(context.Background()) {
+		t.Fatal("a paired, set-up speaker should report settled")
+	}
+	if sent != 0 {
+		t.Errorf("language frames sent = %d on a healthy speaker, want 0", sent)
+	}
+}
+
+// If the firmware refuses to flip the flag, stop after a few tries rather than sending the
+// frame on every heartbeat for the life of the process.
+func TestCheckBoundsLanguageAttempts(t *testing.T) {
 	sp := sim.New()
 	sp.Account = "1234567"
-	sp.SetSource(SetupSource)
+	sp.SetSystemState(speaker.LanguageNotSet) // never flips
 	c := newClient(t, sp)
 
-	runs := 0
+	sent := 0
 	p := New(c, "1234567", "tok", time.Minute, quietLog())
-	p.cooldown = time.Hour
-	p.runSession = func(_ context.Context, _ setupsession.Plan, _ *slog.Logger) error {
-		runs++
-		return nil
-	}
+	p.setLanguage = func(context.Context, setupsession.Plan, *slog.Logger) error { sent++; return nil }
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < maxLanguageTries+3; i++ {
 		p.check(context.Background())
 	}
-	if runs != 1 {
-		t.Errorf("session runs = %d across three checks inside the cooldown, want 1", runs)
+	if sent != maxLanguageTries {
+		t.Errorf("language frames sent = %d, want it capped at %d", sent, maxLanguageTries)
 	}
 }
 
-// When the WebSocket is unreachable the pairer still asserts the account over HTTP, so an
-// unpaired speaker off-box (where ReTouch owns :8080) is not left stranded.
-func TestCheckFallsBackToBarePost(t *testing.T) {
+// A failing frame must not stop the pairer: it logs and moves on, and the speaker stays paired.
+func TestCheckSurvivesLanguageFailure(t *testing.T) {
 	sp := sim.New()
-	sp.Account = ""
+	sp.Account = "1234567"
+	sp.SetSystemState(speaker.LanguageNotSet)
 	c := newClient(t, sp)
 
-	p := New(c, "our-account", "tok", time.Minute, quietLog())
-	p.cooldown = 0
-	p.runSession = func(_ context.Context, _ setupsession.Plan, _ *slog.Logger) error {
-		return errors.New("dial websocket: connection refused")
+	p := New(c, "1234567", "tok", time.Minute, quietLog())
+	p.setLanguage = func(context.Context, setupsession.Plan, *slog.Logger) error {
+		return errors.New("dial firmware websocket: connection refused")
 	}
 
 	if p.check(context.Background()) {
-		t.Fatal("check should return false while re-pairing")
+		t.Error("check should report unsettled when the language could not be set")
 	}
-	if sp.Account != "our-account" {
-		t.Errorf("fallback setMargeAccount not applied: account = %q", sp.Account)
+	if sp.Account != "1234567" {
+		t.Errorf("account must be untouched by the language repair, got %q", sp.Account)
 	}
 }

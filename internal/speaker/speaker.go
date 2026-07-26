@@ -105,6 +105,36 @@ func (c *Client) SetMargeAccount(ctx context.Context, accountID, authToken strin
 	return c.post(ctx, "/setMargeAccount", body)
 }
 
+// SetupState is the firmware's own view of setup, from GET /setup. State is the transient
+// setup-session state (SETUP_INACTIVE when no session is running); System is the persistent
+// one, and "SETUP_LANG_NOT_SET" there is what makes a speaker keep asking to be set up.
+type SetupState struct {
+	State  string
+	System string
+}
+
+// SetupState reads GET /setup. A speaker that has never completed setup reports
+// systemstate="SETUP_LANG_NOT_SET"; once the language is set it stays SETUP_LANG_SET across
+// reboots, which is why this flag — not now_playing — is the thing worth acting on.
+func (c *Client) SetupState(ctx context.Context) (*SetupState, error) {
+	body, err := c.get(ctx, "/setup")
+	if err != nil {
+		return nil, err
+	}
+	var x struct {
+		State  string `xml:"state,attr"`
+		System string `xml:"systemstate,attr"`
+	}
+	if err := xml.Unmarshal(body, &x); err != nil {
+		return nil, err
+	}
+	return &SetupState{State: x.State, System: x.System}, nil
+}
+
+// LanguageNotSet is the systemstate a speaker reports until its language has been set. The
+// firmware treats that as "setup never finished" and keeps prompting for the Bose app.
+const LanguageNotSet = "SETUP_LANG_NOT_SET"
+
 // NowPlaying is a trimmed view of /now_playing.
 type NowPlaying struct {
 	Source     string `json:"source"`
