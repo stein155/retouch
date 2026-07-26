@@ -202,7 +202,7 @@ func Run() {
 		wsHost = h
 	}
 	pairer := autopair.New(bc, info.Account, autopair.DefaultAuthToken, *pairEvery, logger.With("comp", "autopair")).
-		WithSetupSession(wsHost, base)
+		WithSetupSession(wsHost)
 	// A speaker that lost its pairing was factory-reset (physical access): that is
 	// the recovery path for a forgotten settings password — clear it and reopen
 	// telnet before re-pairing.

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -87,5 +88,46 @@ func TestStartBusy(t *testing.T) {
 	defer m.mu.Unlock()
 	if _, _, err := m.Start(context.Background(), "v9.9.9"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("Start while locked: %v, want ErrBusy", err)
+	}
+}
+
+// checkSpace refuses an install when the partition cannot hold another copy of the binary.
+// The speaker this was found on has a ~31 MB NAND partition that already holds the running
+// binary plus retouch.old; a download that runs it dry leaves the partition full, and a full
+// partition stops ReTouch from starting at all.
+func TestCheckSpace(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "retouch")
+
+	// A tiny binary on a normal filesystem: plenty of room, no error.
+	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkSpace(dir, bin); err != nil {
+		t.Errorf("checkSpace with a 1-byte binary and a normal temp dir: %v", err)
+	}
+
+	// An unreadable path must not block updates: we would rather try the download than
+	// refuse because we could not measure.
+	if err := checkSpace(filepath.Join(dir, "does-not-exist"), bin); err != nil {
+		t.Errorf("checkSpace on an unmeasurable path should not fail: %v", err)
+	}
+
+	// A binary larger than any plausible free space must be refused, and the message has to
+	// tell the user what to do about it.
+	huge := filepath.Join(dir, "huge")
+	if err := os.Truncate(huge, 1<<62); err != nil {
+		if f, cerr := os.Create(huge); cerr == nil {
+			_ = f.Truncate(1 << 62) // sparse; no bytes actually written
+			_ = f.Close()
+		}
+	}
+	if fi, err := os.Stat(huge); err == nil && fi.Size() > 1<<40 {
+		err := checkSpace(dir, huge)
+		if err == nil {
+			t.Error("checkSpace should refuse when the binary cannot possibly fit")
+		} else if !strings.Contains(err.Error(), "not enough space") {
+			t.Errorf("err = %v, want it to mention the space problem", err)
+		}
 	}
 }

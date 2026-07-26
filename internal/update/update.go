@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/stein155/retouch/internal/release"
@@ -260,6 +261,14 @@ func (m *Manager) install(to string, explicit bool) {
 func (m *Manager) installRelease(ctx context.Context, tag string, explicit bool) error {
 	bin := filepath.Join(m.homeDir, "retouch")
 	newBin := bin + ".new"
+	// The speaker's NAND partition is ~31 MB and already holds the running binary plus
+	// retouch.old, so a download can genuinely run it out of space. Without this check the
+	// download half-writes, the checksum fails, and the partition is left full — which on a
+	// real speaker also stopped ReTouch from starting (it could no longer open its store).
+	// Refuse early with something the UI can show instead.
+	if err := checkSpace(m.homeDir, bin); err != nil {
+		return err
+	}
 	sums := filepath.Join(m.homeDir, "SHA256SUMS")
 	base := "https://github.com/" + repo + "/releases/download/" + tag
 	if err := m.downloadFile(ctx, base+"/retouch-armv7l", newBin, 0o755); err != nil {
@@ -311,6 +320,29 @@ func (m *Manager) installRelease(ctx context.Context, tag string, explicit bool)
 		return err
 	}
 	return os.WriteFile(filepath.Join(m.homeDir, ".version"), []byte(tag+"\n"), 0o644)
+}
+
+// checkSpace refuses an install when the home partition cannot hold another copy of the
+// binary. The running binary is the best size estimate we have; a first install (no binary
+// yet) falls back to a fixed 12 MB, comfortably above current release sizes.
+func checkSpace(homeDir, bin string) error {
+	const fallback = 12 << 20
+	need := int64(fallback)
+	if fi, err := os.Stat(bin); err == nil && fi.Size() > 0 {
+		need = fi.Size()
+	}
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(homeDir, &st); err != nil {
+		return nil // cannot tell; let the download try rather than block an update
+	}
+	free := int64(st.Bavail) * int64(st.Bsize)
+	// A margin on top of the binary: the checksums file, and the rename that briefly has
+	// both copies present.
+	if want := need + (1 << 20); free < want {
+		return fmt.Errorf("not enough space in %s: %d KB free, need %d KB (delete an old retouch.* binary)",
+			homeDir, free/1024, want/1024)
+	}
+	return nil
 }
 
 func (m *Manager) getJSON(ctx context.Context, target string, out any) error {

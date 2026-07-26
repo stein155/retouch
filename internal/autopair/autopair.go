@@ -49,7 +49,6 @@ type Pairer struct {
 
 	// Set by WithSetupSession; without it the pairer keeps the old bare-POST behaviour.
 	wsHost      string
-	boseServer  string
 	runSession  func(context.Context, setupsession.Plan, *slog.Logger) error
 	cooldown    time.Duration // minimum gap between two sessions
 	lastSession time.Time     // when the last session was attempted
@@ -72,11 +71,16 @@ func (p *Pairer) OnFactoryReset(f func()) { p.onReset = f }
 // WithSetupSession enables the full SETUP state machine. host is the speaker host to open
 // the firmware WebSocket on — "127.0.0.1" on-box, which is also the only host that works
 // once the installer's :8080 → web-UI redirect is in place (nat PREROUTING does not touch
-// loopback traffic). boseServer is the marge base URL handed to the speaker during
-// pairing. Call before Run.
-func (p *Pairer) WithSetupSession(host, boseServer string) *Pairer {
+// loopback traffic). Call before Run.
+//
+// The session deliberately sends the MINIMAL pairing payload (account id + token), the same
+// shape the installer and the bare POST have always used. The official app also sends
+// <boseServer>, <updateServer> and <accountEmail>; setupsession can do that too, but we do
+// not, because the effect of those fields on the speaker's persisted cloud state could not be
+// verified — and a speaker whose service state is subtly rewritten is far worse than one that
+// merely lacks a field.
+func (p *Pairer) WithSetupSession(host string) *Pairer {
 	p.wsHost = host
-	p.boseServer = boseServer
 	p.runSession = setupsession.Run
 	p.cooldown = SessionCooldown
 	return p
@@ -149,12 +153,11 @@ func (p *Pairer) check(ctx context.Context) bool {
 	if p.runSession != nil && time.Since(p.lastSession) >= p.cooldown {
 		p.lastSession = time.Now()
 		err := p.runSession(c, setupsession.Plan{
-			Host:       p.wsHost,
-			DeviceID:   info.DeviceID,
-			AccountID:  p.account,
-			AuthToken:  p.token,
-			Name:       info.Name,
-			BoseServer: p.boseServer,
+			Host:      p.wsHost,
+			DeviceID:  info.DeviceID,
+			AccountID: p.account,
+			AuthToken: p.token,
+			Name:      info.Name,
 		}, p.log)
 		if err == nil {
 			p.log.Info("autopair: setup state machine completed", "account", p.account)
