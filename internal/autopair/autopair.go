@@ -27,6 +27,7 @@ type Pairer struct {
 	log      *slog.Logger
 	onReset  func() // fired once per unpaired episode; see OnFactoryReset
 	fired    bool   // onReset already fired for the current unpaired episode
+	booted   bool   // whether we have re-asserted at least once since start
 }
 
 // OnFactoryReset registers a callback fired when the speaker reports no marge
@@ -76,6 +77,10 @@ func (p *Pairer) Run(ctx context.Context) {
 // check returns true once the speaker is reachable AND paired. When the speaker reports no
 // account it asserts the association and returns false, so Run retries on the fast
 // interval and confirms on the next pass.
+// On the very first check after startup, setMargeAccount is always called even when the
+// account is already set: the firmware initialises its streaming services on that call, and
+// without it the speaker stays in SETUP mode after a cold boot (the firmware tries to reach
+// marge before ReTouch is ready, then never retries on its own).
 func (p *Pairer) check(ctx context.Context) bool {
 	c, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
@@ -84,12 +89,12 @@ func (p *Pairer) check(ctx context.Context) bool {
 		p.log.Warn("autopair: read /info (will retry)", "err", err)
 		return false
 	}
-	if info.Account != "" {
+	if info.Account != "" && p.booted {
 		p.log.Debug("autopair: already paired", "account", info.Account)
 		p.fired = false // paired again; a future unpaired episode may fire anew
 		return true
 	}
-	if p.onReset != nil && !p.fired {
+	if p.onReset != nil && !p.fired && info.Account == "" {
 		p.fired = true
 		p.onReset()
 	}
@@ -97,6 +102,11 @@ func (p *Pairer) check(ctx context.Context) bool {
 		p.log.Warn("autopair: setMargeAccount failed (will retry)", "account", p.account, "err", err)
 		return false
 	}
-	p.log.Info("autopair: re-asserted association", "account", p.account)
+	if !p.booted {
+		p.log.Info("autopair: boot re-assert done", "account", p.account)
+		p.booted = true
+	} else {
+		p.log.Info("autopair: re-asserted association", "account", p.account)
+	}
 	return false
 }

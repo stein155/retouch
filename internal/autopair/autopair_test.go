@@ -105,12 +105,17 @@ func TestCheckAlreadyPaired(t *testing.T) {
 	c := newClient(t, sp)
 
 	p := New(c, "1234567", "tok", time.Minute, quietLog())
-	if !p.check(context.Background()) {
-		t.Fatal("check on already-paired speaker should report paired (true)")
+	// First check: boot re-assert always fires setMargeAccount once, returns false.
+	if p.check(context.Background()) {
+		t.Fatal("first check should return false (boot re-assert pending confirm)")
 	}
-	// It must not have changed the account.
+	// Account must still be set (setMargeAccount was called but account was already correct).
 	if sp.Account != "1234567" {
 		t.Errorf("account mutated on already-paired speaker: %q", sp.Account)
+	}
+	// Second check: booted=true, account set → returns true.
+	if !p.check(context.Background()) {
+		t.Fatal("second check on already-paired speaker should report paired (true)")
 	}
 }
 
