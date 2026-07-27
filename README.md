@@ -83,6 +83,9 @@ takes the other route and lives on the speaker itself:
   appears in Home Assistant automatically, with volume, station switching, transport,
   power on/off, and now-playing — plus a native update entity that notifies you when a
   new ReTouch release is out and installs it over the air
+- 🖥️ **Front-panel display (SoundTouch 20)** — plugins can draw on the OLED:
+  short notifications while you're around, and standby screens next to the clock
+  while the speaker sleeps
 - ⚙️ **Settings** — speaker name, bass, the app's language, and light/dark appearance
 - 🌙 **Light & dark mode** — follows your device, or set it yourself; the whole app
   re-themes instantly with a warm gradient backdrop
@@ -134,6 +137,30 @@ up in Home Assistant as one device — no YAML. Home Assistant has no MQTT
 media_player, so the speaker is exposed as a set of standard entities (a volume
 number, a preset selector, transport buttons, a power switch, and now-playing
 sensors) grouped under the one device.
+
+## The front-panel display (SoundTouch 20)
+
+The SoundTouch 20 has a small OLED behind the speaker grille that the firmware
+only uses for volume, presets and the standby clock. ReTouch turns it into a
+little canvas: it owns the framebuffer through one display manager
+(`internal/display`) and offers a tiny local API that plugins and internal
+features hand content to — an icon (built-in or a custom sprite) plus a line
+of text.
+
+Two kinds of content, and the manager arbitrates between them:
+
+- **Notifications** — shown for a few seconds on top of whatever is on the
+  panel, then the firmware's own screen is restored. The Ring plugin uses this
+  to flash a doorbell or motion alert the moment it chimes.
+- **Standby screens** — only ever shown while the speaker is actually in
+  standby, taking turns with the clock; the moment you start playing, the
+  panel is the firmware's again. The Afvalwijzer plugin uses this to show
+  which waste container to put out, the evening before pickup.
+
+The API is four endpoints (`GET /api/display`, `POST /api/display/notify`,
+`PUT`/`DELETE /api/display/standby`); a plugin probes `GET /api/display` and
+simply skips all of this on models without the panel. If you're building a
+plugin, `internal/display` documents the details.
 
 ## Set it up once
 
